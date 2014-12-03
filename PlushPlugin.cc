@@ -56,18 +56,28 @@ void PlushPlugin::pluginsInitialized() {
 //    // Connect the created context menu entry to local function contextMenuItemSelected(QAction*)
 //    connect(contextMenuEntry_, SIGNAL(triggered(QAction*)), this, SLOT(contextMenuItemSelected(QAction*)));
 }
-
-void PlushPlugin::calcGeodesic() {
-    TriMesh *mesh = NULL;
-    int meshId = -1;
+void PlushPlugin::showGeodesic() {
+    if (PluginFunctions::objectCount() == 0)
+    {
+        emit log(LOGERR, "Load a model first.");
+        return;
+    }
+    
     for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
          ++o_it) {
+        // pick two vertices
+        TriMesh *mesh = NULL;
+
+        QString filename;
+        int meshId = -1;
+        int sourceIdx = -1;
+        int destIdx = -1;
+
         if (o_it->dataType(DATA_TRIANGLE_MESH)) {
-            // Get the mesh to work on
             meshId = o_it->id();
             mesh = PluginFunctions::triMesh(*o_it);
             filename = o_it->path() + OpenFlipper::Options::dirSeparator() + o_it->filename();
-
+            
             IdList selectedVertices = RPC::callFunctionValue<IdList> ("meshobjectselection", "getVertexSelection", o_it->id());
             if (selectedVertices.size() == 2) {
                 sourceIdx = selectedVertices[0];
@@ -82,20 +92,40 @@ void PlushPlugin::calcGeodesic() {
             }
             break;
         }
+
+        if (sourceIdx == -1 || destIdx == -1) {
+            emit log(LOGERR, "Select exact two points first.");
+            return;
+        }
     }
-    
-    if (!mesh)
+}
+void PlushPlugin::calcGeodesic() {
+    if (PluginFunctions::objectCount() == 0)
     {
         emit log(LOGERR, "Load a model first.");
         return;
     }
-    if (sourceIdx == -1 || destIdx == -1) {
-        emit log(LOGERR, "Select exact two points first.");
-        return;
-    }
     
-    std::vector<double> points;
-    std::vector<unsigned> faces;
+    TriMesh *mesh = NULL;
+    int meshId = -1;
+
+    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
+         ++o_it) {
+        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
+            meshId = o_it->id();
+            mesh = PluginFunctions::triMesh(*o_it);
+
+            // write each connected component to .obj
+            std::ifstream off("tmp.obj", std::ios::out);
+            for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++)
+            {
+                TriMesh::Point p = mesh->point(*v_it);
+                off << "v " << p[0] << " " << p[1] << " " << p[2];
+            }
+            
+            std::vector<double> points;
+            std::vector<unsigned> faces;
+            
     bool success = geodesic::read_mesh_from_file(filename,points,faces);
     if(!success)
     {

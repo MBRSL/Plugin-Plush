@@ -69,7 +69,7 @@ inline bool read_mesh_from_file(QString filename,
     char line[1024], v0[1024], v1[1024], v2[1024];
     while( file.getline(line, 1024) )
     {
-        if( line[0] == 'v' && line[1] != 'n' ){
+        if( line[0] == 'v' && line[1] == ' '){
             double x, y, z;
             sscanf( line, "%*s%lf%lf%lf", &x, &y, &z );
             points.push_back(x);

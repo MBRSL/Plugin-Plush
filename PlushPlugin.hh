@@ -51,11 +51,6 @@ public:
 private:
     std::vector<char*> requiredPlugins;
     
-    // for geodesic
-    QString filename;
-    int sourceIdx;
-    int destIdx;
-    
     std::map<std::pair<TriMesh::VertexHandle, TriMesh::VertexHandle>, double> geodesicDistance;
     
     bool pickEdge(TriMesh *mesh, OpenMesh::EdgeHandle &_eh, OpenMesh::Vec3d p1, OpenMesh::Vec3d p2);
@@ -63,8 +58,9 @@ private slots:
     // BaseInterface
     void initializePlugin();
     void pluginsInitialized();
-    
+
     void calcGeodesic();
+    void showGeodesic();
     
     void slotKeyEvent( QKeyEvent* _event );
 
