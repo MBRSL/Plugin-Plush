@@ -7,6 +7,8 @@
 #include <OpenFlipper/BasePlugin/KeyInterface.hh>
 #include <OpenFlipper/common/Types.hh>
 #include <ObjectTypes/TriangleMesh/TriangleMesh.hh>
+#include "GeodesicDistance/geodesic_mesh.hh"
+
 class PlushPlugin : public QObject,
         BaseInterface,
         ToolboxInterface,
@@ -50,16 +52,16 @@ public:
 
 private:
     std::vector<char*> requiredPlugins;
-    
-    std::map<std::pair<TriMesh::VertexHandle, TriMesh::VertexHandle>, double> geodesicDistance;
+    std::map<int, geodesic::Mesh*> meshes_geodesic;
     
     bool pickEdge(TriMesh *mesh, OpenMesh::EdgeHandle &_eh, OpenMesh::Vec3d p1, OpenMesh::Vec3d p2);
+    bool translate_openMesh_to_geodesic_mesh(TriMesh *mesh, std::vector<double> &points, std::vector<unsigned> &faces);
 private slots:
     // BaseInterface
     void initializePlugin();
     void pluginsInitialized();
 
-    void calcGeodesic();
+    void calcGeodesic(PluginFunctions::ObjectIterator o_it);
     void showGeodesic();
     
     void slotKeyEvent( QKeyEvent* _event );
