@@ -44,7 +44,7 @@ inline double angle_from_edges(double const a,			//compute the cosine of the ang
 	return acos(cos_from_edges(a,b,c));
 }
 
-int get_first_integer( const char *v ){
+inline int get_first_integer( const char *v ){
     int ival;
     std::string s( v );
     std::replace( s.begin(), s.end(), '/', ' ' );
