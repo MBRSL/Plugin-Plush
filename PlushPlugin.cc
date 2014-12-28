@@ -1,9 +1,24 @@
 #include "PlushPlugin.hh"
 #include "GeodesicDistance/geodesic_algorithm_dijkstra.hh"
+#include <ObjectTypes/Coordsys/Coordsys.hh>
 #include <ObjectTypes/TriangleMesh/TriangleMesh.hh>
 #include <ObjectTypes/PolyMesh/PolyMesh.hh>
+#include <ObjectTypes/PolyLine/PolyLine.hh>
 #include <OpenFlipper/BasePlugin/PluginFunctions.hh>
 #include <OpenFlipper/BasePlugin/RPCWrappers.hh>
+
+// Curvature
+#include <CGAL/Simple_cartesian.h>
+#include <CGAL/Monge_via_jet_fitting.h>
+#include <CGAL/Eigen_svd.h>
+typedef double                   DFT;
+typedef CGAL::Simple_cartesian<DFT>     Data_Kernel;
+typedef CGAL::Simple_cartesian<DFT>     Local_Kernel;
+typedef CGAL::Eigen_svd SvdTraits;
+typedef Data_Kernel::Point_3     DPoint;
+typedef CGAL::Monge_via_jet_fitting<Data_Kernel,Local_Kernel,SvdTraits> My_Monge_via_jet_fitting;
+typedef My_Monge_via_jet_fitting::Monge_form     My_Monge_form;
+
 
 PlushPlugin::PlushPlugin()
 {
@@ -28,11 +43,18 @@ void PlushPlugin::pluginsInitialized() {
     
     // Create button that can be toggled
     // to (de)activate plugin's picking mode
-    QLabel *label = new QLabel("Geodesic distance");
-    QPushButton *geodesicShowButton = new QPushButton(tr("Show path"));
-    layout->addWidget(label, 0, 0);
-    layout->addWidget(geodesicShowButton, 0, 1);
-    connect(geodesicShowButton, SIGNAL(clicked()), this, SLOT(showGeodesic()));
+    QPushButton *geodesicButton = new QPushButton(tr("Show path"));
+    QPushButton *ridgeButton = new QPushButton(tr("Show ridge"));
+    QPushButton *curvatureButton = new QPushButton(tr("Show curvature"));
+    QPushButton *allCurvatureButton = new QPushButton(tr("Show all curvature"));
+    layout->addWidget(geodesicButton, 0, 0);
+    layout->addWidget(ridgeButton, 0, 1);
+    layout->addWidget(curvatureButton, 1, 0);
+    layout->addWidget(allCurvatureButton, 1, 1);
+    connect(geodesicButton, SIGNAL(clicked()), this, SLOT(showGeodesic()));
+    connect(ridgeButton, SIGNAL(clicked()), this, SLOT(showRidge()));
+    connect(curvatureButton, SIGNAL(clicked()), this, SLOT(showSelectedCurvature()));
+    connect(allCurvatureButton, SIGNAL(clicked()), this, SLOT(showAllCurvature()));
     
     emit addToolbox(tr("Plush"), toolBox);
 
@@ -54,8 +76,178 @@ void PlushPlugin::pluginsInitialized() {
 //    connect(contextMenuEntry_, SIGNAL(triggered(QAction*)), this, SLOT(contextMenuItemSelected(QAction*)));
 }
 
-bool PlushPlugin::translate_openMesh_to_geodesic_mesh(TriMesh *mesh, std::vector<double> &points, std::vector<unsigned> &faces)
-{
+void PlushPlugin::showRidge() {
+    // parse file
+    QFile input("/Users/MBRSL/Dropbox/Curricular/Plush project/OpenFlipper/Plugin-Plush/ridge.txt");
+    if (input.open(QIODevice::ReadOnly)) {
+        QTextStream in(&input);
+        // each line is one polyline
+        while (!in.atEnd()) {
+            QString line = in.readLine();
+            
+            QTextStream textStream(&line);
+            int lineType;
+            double strength, sharpness;
+            textStream >> lineType >> strength >> sharpness;
+            
+            if (strength >= 5) {
+                int objId;
+                emit addEmptyObject(DATA_POLY_LINE, objId);
+                PolyLineObject *object = 0;
+                PluginFunctions::getObject(objId, object);
+                PolyLine *polyLine = object->line();
+
+                double x,y,z;
+                while (!(textStream >> x >> y >> z).atEnd()) {
+                    polyLine->add_point(PolyLine::Point(x,y,z));
+                }
+            }
+        }
+        input.close();
+    }
+}
+
+void PlushPlugin::showSelectedCurvature() {
+    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
+         ++o_it) {
+        int meshId = o_it->id();
+        
+        // clear previous coordinate gizmos
+        if (o_it->dataType(DATA_COORDSYS)) {
+            emit deleteObject(meshId);
+        }
+        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
+            TriMesh *mesh = PluginFunctions::triMesh(*o_it);
+            
+            QString meshName = o_it->name();
+            
+            ACG::Vec3d boundingBoxMin, boundingBoxMax;
+            o_it->getBoundingBox(boundingBoxMin, boundingBoxMax);
+            double meshSize = (boundingBoxMax-boundingBoxMin).length();
+            
+            IdList selectedVertices = RPC::callFunctionValue<IdList> ("meshobjectselection", "getVertexSelection", meshId);
+            
+            showCurvature(mesh, meshName, meshId,
+                          selectedVertices, meshSize);
+        }
+    }
+}
+void PlushPlugin::showAllCurvature() {
+    // 0.5 = 50% of total points
+    double sampleAmount = 0.01;
+    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
+         ++o_it) {
+        int meshId = o_it->id();
+        
+        // clear previous coordinate gizmos
+        if (o_it->dataType(DATA_COORDSYS)) {
+            emit deleteObject(meshId);
+        }
+        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
+            TriMesh *mesh = PluginFunctions::triMesh(*o_it);
+            
+            QString meshName = o_it->name();
+            
+            ACG::Vec3d boundingBoxMin, boundingBoxMax;
+            o_it->getBoundingBox(boundingBoxMin, boundingBoxMax);
+            double meshSize = (boundingBoxMax-boundingBoxMin).length();
+            
+            IdList selectedVertices;
+            int count = 0;
+            for (TriMesh::VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++, count++) {
+                if (count % (int)(1/sampleAmount) == 0) {
+                    selectedVertices.push_back(v_it->idx());
+                }
+            }
+
+            showCurvature(mesh, meshName, meshId,
+                          selectedVertices, meshSize);
+        }
+    }
+}
+
+void PlushPlugin::showCurvature(TriMesh *mesh, QString meshName, int meshId,
+                                IdList selectedVertices, double meshSize) {
+    size_t d_fitting = 3;
+    size_t d_monge = 3;
+    double indicatorSize = meshSize/30;
+    
+    // store original selction
+    IdList originalVerticesSelection = RPC::callFunctionValue<IdList> ("meshobjectselection", "getVertexSelection", meshId);
+    
+    // pick vertices
+    for (size_t i = 0; i < selectedVertices.size(); i++) {
+        IdList currentVertex = IdList();
+        currentVertex.push_back(selectedVertices[i]);
+
+        // select only one vertex as target vertex
+        RPC::callFunctionValue<IdList> ("meshobjectselection", "clearVertexSelection", meshId);
+        RPC::callFunctionValue<IdList> ("meshobjectselection", "selectVertices", meshId, currentVertex);
+        
+        // get 3-ring vertices around target vertex
+        RPC::callFunctionValue<IdList> ("meshobjectselection", "growVertexSelection", meshId);
+        RPC::callFunctionValue<IdList> ("meshobjectselection", "growVertexSelection", meshId);
+        RPC::callFunctionValue<IdList> ("meshobjectselection", "growVertexSelection", meshId);
+        IdList twoRingVertices = RPC::callFunctionValue<IdList> ("meshobjectselection", "getVertexSelection", meshId);
+
+        
+        if (twoRingVertices.size() < (d_fitting+1)*(d_fitting+2)/2) {
+            QString str = QString("Not enough points for fitting for object %1: %2").arg(QString::number(meshId), meshName);
+            emit log(LOGERR, str);
+            continue;
+        }
+
+        std::vector<DPoint> in_points;
+        for (size_t i = 0; i < twoRingVertices.size(); i++)
+        {
+            TriMesh::VertexHandle vh = mesh->vertex_handle(twoRingVertices[i]);
+            for (TriMesh::VertexVertexIter vv_it = mesh->vv_iter(vh) ; vv_it; ++vv_it)
+            {
+                TriMesh::Point p = mesh->point(*vv_it);
+                in_points.push_back(DPoint(p[0],p[1],p[2]));
+            }
+        }
+        
+        My_Monge_form monge_form;
+        My_Monge_via_jet_fitting monge_fit;
+        monge_form = monge_fit(in_points.begin(), in_points.end(), d_fitting, d_monge);
+        
+        int objId;
+        emit addEmptyObject(DATA_COORDSYS, objId);
+        CoordsysObject *object = 0;
+        PluginFunctions::getObject(objId, object);
+        CoordsysNode *coordSys = object->coordsysNode();
+        ACG::Vec3d min_curvature(monge_form.minimal_principal_direction()[0], monge_form.minimal_principal_direction()[1], monge_form.minimal_principal_direction()[2]);
+        ACG::Vec3d max_curvature(monge_form.maximal_principal_direction()[0], monge_form.maximal_principal_direction()[1], monge_form.maximal_principal_direction()[2]);
+        ACG::Vec3d normal_curvature(monge_form.normal_direction()[0], monge_form.normal_direction()[1], monge_form.normal_direction()[2]);
+        
+        TriMesh::Point center = mesh->point(mesh->vertex_handle(currentVertex[0]));
+        coordSys->position(center);
+        
+        ACG::Vec3d normal_mesh = mesh->normal(mesh->vertex_handle(currentVertex[0]));
+        if (OpenMesh::dot(normal_mesh, normal_curvature) < 0) {
+            ACG::Vec3d tmp = min_curvature;
+            min_curvature = -max_curvature;
+            max_curvature = -tmp;
+            normal_curvature = -normal_curvature;
+        }
+        
+        QMatrix4x4 QrotationM;
+        QrotationM.lookAt(QVector3D(0,0,0),
+                          QVector3D(max_curvature[0], max_curvature[1], max_curvature[2]),
+                          QVector3D(min_curvature[0], min_curvature[1], min_curvature[2]));
+        Matrix4x4 rotationM((TriMesh::Scalar*)QrotationM.data());
+        rotationM.transpose();
+        coordSys->rotation(rotationM);
+        coordSys->size(indicatorSize);
+    }
+    
+    // restore selection
+    RPC::callFunctionValue<IdList> ("meshobjectselection", "clearVertexSelection", meshId);
+    RPC::callFunctionValue<IdList> ("meshobjectselection", "selectVertices", meshId, originalVerticesSelection);
+}
+
+bool PlushPlugin::translate_openMesh_to_geodesic_mesh(TriMesh *mesh, std::vector<double> &points, std::vector<unsigned> &faces) {
     for (TriMesh::VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++)
     {
         TriMesh::Point p = mesh->point(*v_it);

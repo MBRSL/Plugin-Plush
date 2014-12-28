@@ -54,6 +54,8 @@ private:
     std::vector<char*> requiredPlugins;
     std::map<int, geodesic::Mesh*> meshes_geodesic;
     
+    void showCurvature(TriMesh *mesh, QString meshName, int meshId,
+                       IdList selectedVertices, double meshSize);
     bool pickEdge(TriMesh *mesh, OpenMesh::EdgeHandle &_eh, OpenMesh::Vec3d p1, OpenMesh::Vec3d p2);
     bool translate_openMesh_to_geodesic_mesh(TriMesh *mesh, std::vector<double> &points, std::vector<unsigned> &faces);
 private slots:
@@ -63,6 +65,9 @@ private slots:
 
     void calcGeodesic(PluginFunctions::ObjectIterator o_it);
     void showGeodesic();
+    void showRidge();
+    void showSelectedCurvature();
+    void showAllCurvature();
     
     void slotKeyEvent( QKeyEvent* _event );
 
