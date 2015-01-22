@@ -1,20 +1,39 @@
 #ifndef PLUSHPLUGIN_HH
 #define PLUSHPLUGIN_HH
+
 #include <OpenFlipper/BasePlugin/BaseInterface.hh>
 #include <OpenFlipper/BasePlugin/ToolboxInterface.hh>
 #include <OpenFlipper/BasePlugin/LoggingInterface.hh>
 #include <OpenFlipper/BasePlugin/LoadSaveInterface.hh>
 #include <OpenFlipper/BasePlugin/KeyInterface.hh>
+#include <OpenFlipper/BasePlugin/PluginFunctions.hh>
+#include <OpenFlipper/BasePlugin/RPCInterface.hh>
+#include <OpenFlipper/BasePlugin/ProcessInterface.hh>
+
 #include <OpenFlipper/common/Types.hh>
+
 #include <ObjectTypes/TriangleMesh/TriangleMesh.hh>
+
 #include "GeodesicDistance/geodesic_mesh.hh"
+
+
+typedef TriMesh::VertexHandle VertexHandle;
+typedef TriMesh::EdgeHandle EdgeHandle;
+typedef TriMesh::HalfedgeHandle HalfedgeHandle;
+typedef TriMesh::FaceHandle FaceHandle;
+typedef TriMesh::VertexIter VertexIter;
+typedef TriMesh::EdgeIter EdgeIter;
+typedef TriMesh::HalfedgeIter HalfedgeIter;
+typedef TriMesh::FaceIter FaceIter;
 
 class PlushPlugin : public QObject,
         BaseInterface,
         ToolboxInterface,
         LoggingInterface,
         LoadSaveInterface,
-        KeyInterface
+        KeyInterface,
+        RPCInterface,
+        ProcessInterface
 {
     Q_OBJECT
     Q_INTERFACES(BaseInterface)
@@ -22,6 +41,8 @@ class PlushPlugin : public QObject,
     Q_INTERFACES(LoggingInterface)
     Q_INTERFACES(LoadSaveInterface)
     Q_INTERFACES(KeyInterface)
+    Q_INTERFACES(RPCInterface)
+    Q_INTERFACES(ProcessInterface)
     
 signals:
     //BaseInterface
@@ -43,33 +64,63 @@ signals:
     // RPCInterface
     void pluginExists( QString _pluginName, bool &_exists );
     void functionExists ( QString _pluginName, QString _functionName, bool &_exists );
-
+    // ProcessInterface
+    void startJob (QString _jobId, QString _description, int _min, int _max, bool _blocking=false);
+    void finishJob (QString _jobId);
+    void setJobState (QString _jobId, int _value);
+    void setJobDescription (QString _jobId, QString _text);
+    
 public:
     PlushPlugin();
+    ~PlushPlugin();
     // BaseInterface
     QString name() { return (QString("Simple Plush")); };
     QString description( ) { return (QString("Smooths the active Mesh")); };
 
 private:
-    std::vector<char*> requiredPlugins;
-    std::map<int, geodesic::Mesh*> meshes_geodesic;
+    bool isJobCanceled;
+    OpenFlipperThread *thread;
     
-    void showCurvature(TriMesh *mesh, QString meshName, int meshId,
-                       IdList selectedVertices, double meshSize);
-    bool pickEdge(TriMesh *mesh, OpenMesh::EdgeHandle &_eh, OpenMesh::Vec3d p1, OpenMesh::Vec3d p2);
-    bool translate_openMesh_to_geodesic_mesh(TriMesh *mesh, std::vector<double> &points, std::vector<unsigned> &faces);
+    std::vector<char*> *requiredPlugins;
+
+    std::map<std::pair<VertexHandle, VertexHandle>, double> *geodesicDistance;
+    std::map<std::pair<VertexHandle, VertexHandle>, IdList> *geodesicPath;
+    
+    //std::map<VertexHandle, double> *curvatureK2;
+    OpenMesh::VPropHandleT<double> minCurvatureHandle;
+    OpenMesh::VPropHandleT<double> maxCurvatureHandle;
+    OpenMesh::VPropHandleT<OpenMesh::Vec3d> minCurvatureDirectionHandle;
+    OpenMesh::VPropHandleT<OpenMesh::Vec3d> maxCurvatureDirectionHandle;
+    
+    bool getEdge(TriMesh *mesh, EdgeHandle &_eh, int v1No, int v2No);
+    bool getEdge(TriMesh *mesh, EdgeHandle &_eh, VertexHandle v1, VertexHandle v2);
+    double getEdgeWeight(TriMesh *mesh, int v1No, int v2No);
+    double getEdgeWeight(TriMesh *mesh, VertexHandle v1, VertexHandle v2);
+    double getEdgeWeight(TriMesh *mesh, EdgeHandle eh);
+    
+    void calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle);
+//    void findPath(TriMesh *mesh, std::set<EdgeHandle> &spanningTree, std::vector<VertexHandle> &path, VertexHandle sourceHandle, VertexHandle destHandle);
+    void calcSpanningTree(TriMesh *mesh, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices);
+    void getOrderedSelectedVertices(TriMesh *mesh, int meshId, IdList *selectedVertices);
+    
 private slots:
     // BaseInterface
     void initializePlugin();
     void pluginsInitialized();
 
-    void calcGeodesic(PluginFunctions::ObjectIterator o_it);
     void showGeodesic();
     void showRidge();
-    void showSelectedCurvature();
-    void showAllCurvature();
     
+    void loadCurvatureButtonClicked();
+    void calcCurvatureButtonClicked();
+    void showCurvatureButtonClicked();
+    void calcCurvature(QString _jobId);
+
     void slotKeyEvent( QKeyEvent* _event );
+    
+    // ProcessInterface
+    void canceledJob(QString _job);
+    void finishedJob(QString _job);
 
 public slots:
     QString version() { return QString("1.0"); };
