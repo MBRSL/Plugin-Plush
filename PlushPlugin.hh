@@ -78,6 +78,13 @@ public:
     QString description( ) { return (QString("Smooths the active Mesh")); };
 
 private:
+    QSpinBox *geodesicEdges;
+    QPushButton *geodesicButton;
+    QPushButton *ridgeButton;
+    QPushButton *loadCurvatureButton;
+    QPushButton *showCurvatureButton;
+    QPushButton *calcCurvatureButton;
+
     bool isJobCanceled;
     OpenFlipperThread *thread;
     

@@ -33,6 +33,15 @@ PlushPlugin::~PlushPlugin() {
     
     delete geodesicDistance;
     delete geodesicPath;
+    
+    delete geodesicEdges;
+    delete geodesicButton;
+    delete geodesicEdges;
+    delete ridgeButton;
+    delete loadCurvatureButton;
+    delete showCurvatureButton;
+    delete calcCurvatureButton;
+
 }
 void PlushPlugin::pluginsInitialized() {
     bool isPluginsExist;
@@ -52,16 +61,19 @@ void PlushPlugin::pluginsInitialized() {
     
     // Create button that can be toggled
     // to (de)activate plugin's picking mode
-    QPushButton *geodesicButton = new QPushButton(tr("Show path"));
-    QPushButton *ridgeButton = new QPushButton(tr("Show ridge"));
-    QPushButton *loadCurvatureButton = new QPushButton(tr("Load curvature from file"));
-    QPushButton *showCurvatureButton = new QPushButton(tr("Show curvature"));
-    QPushButton *calcCurvatureButton = new QPushButton(tr("Calculate curvature"));
+    geodesicEdges = new QSpinBox();
+    geodesicButton = new QPushButton(tr("Show path"));
+    ridgeButton = new QPushButton(tr("Show ridge"));
+    loadCurvatureButton = new QPushButton(tr("Load curvature from file"));
+    showCurvatureButton = new QPushButton(tr("Show curvature"));
+    calcCurvatureButton = new QPushButton(tr("Calculate curvature"));
     layout->addWidget(geodesicButton, 0, 0);
-    layout->addWidget(ridgeButton, 0, 1);
-    layout->addWidget(loadCurvatureButton, 1, 0);
-    layout->addWidget(showCurvatureButton, 1, 1);
-    layout->addWidget(calcCurvatureButton, 1, 2);
+    layout->addWidget(geodesicEdges, 0, 1);
+    layout->addWidget(geodesicButton, 0, 0);
+    layout->addWidget(ridgeButton, 1, 0);
+    layout->addWidget(loadCurvatureButton, 2, 0);
+    layout->addWidget(showCurvatureButton, 3, 0);
+    layout->addWidget(calcCurvatureButton, 4, 0);
     connect(geodesicButton, SIGNAL(clicked()), this, SLOT(showGeodesic()));
     connect(ridgeButton, SIGNAL(clicked()), this, SLOT(showRidge()));
     connect(loadCurvatureButton, SIGNAL(clicked()), this, SLOT(loadCurvatureButtonClicked()));
