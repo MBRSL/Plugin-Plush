@@ -105,6 +105,8 @@ private:
     double getEdgeWeight(TriMesh *mesh, VertexHandle v1, VertexHandle v2);
     double getEdgeWeight(TriMesh *mesh, EdgeHandle eh);
     
+    void loadCurvature(TriMesh *mesh, QString meshName);
+    
     void calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle);
 //    void findPath(TriMesh *mesh, std::set<EdgeHandle> &spanningTree, std::vector<VertexHandle> &path, VertexHandle sourceHandle, VertexHandle destHandle);
     void calcSpanningTree(TriMesh *mesh, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices);
