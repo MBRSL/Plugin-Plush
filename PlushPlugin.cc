@@ -212,7 +212,7 @@ void PlushPlugin::showGeodesic() {
 //            }
 
             std::set<EdgeHandle> spanningTree;
-            calcSpanningTree(mesh, meshId, spanningTree, selectedVertices);
+            calcSpanningTree(mesh, meshId, spanningTree, selectedVertices, geodesicEdges->value());
             
             IdList edgeList;
             for (std::set<EdgeHandle>::iterator e_it = spanningTree.begin(); e_it != spanningTree.end(); e_it++) {

@@ -175,16 +175,20 @@ struct DFS_Visitor : public boost::dfs_visitor<>
 //        result.push_back(vh);
 //    }
 //}
-
 void PlushPlugin::calcSpanningTree(TriMesh *mesh, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices) {
+    calcSpanningTree(mesh, meshId, result, selectedVertices, (selectedVertices.size()-1+selectedVertices.size()-2)*(selectedVertices.size()-1)/2);
+}
+
+void PlushPlugin::calcSpanningTree(TriMesh *mesh, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices, int edges) {
     typedef boost::adjacency_list < boost::vecS, boost::vecS, boost::undirectedS,
         boost::no_property, boost::property < boost::edge_weight_t, int > > Graph;
     typedef boost::graph_traits < Graph >::edge_descriptor Edge;
     typedef boost::graph_traits < Graph >::vertex_descriptor Vertex;
-    typedef std::pair<int, int> E;
+//    typedef std::pair<int, int> E;
     
-    std::vector<E> edges;
-    std::vector<double> weights;
+//    std::vector<E> edges;
+//    std::vector<double> weights;
+    std::vector<std::pair<IdList, double> > distance;
     
     // create a new graph with selectedVerices, calculate all paths between them
     for (size_t i = 0; i < selectedVertices.size(); i++) {
@@ -196,38 +200,38 @@ void PlushPlugin::calcSpanningTree(TriMesh *mesh, int meshId, std::set<EdgeHandl
             
             // if result is not found, caculate now
             std::map<std::pair<VertexHandle, VertexHandle>, double>::iterator found =
-                geodesicDistance->find(std::make_pair(sourceHandle, destHandle));
+            geodesicDistance->find(std::make_pair(sourceHandle, destHandle));
             if (found == geodesicDistance->end()) {
                 calcGeodesic(mesh, sourceHandle);
                 found = geodesicDistance->find(std::make_pair(sourceHandle, destHandle));
             }
+            double cost = found->second;
+            
+            std::map<std::pair<VertexHandle, VertexHandle>, IdList>::iterator found2 =
+            geodesicPath->find(std::make_pair(sourceHandle, destHandle));
+            if (found2 == geodesicPath->end()) {
+                calcGeodesic(mesh, sourceHandle);
+                found2 = geodesicPath->find(std::make_pair(sourceHandle, destHandle));
+            }
+            IdList path = found2->second;
             
             // assign edge & weight
-            double distance = found->second;
-            edges.push_back(std::make_pair(i, j));
-            weights.push_back(distance);
+            distance.push_back(std::make_pair(path, cost));
         }
     }
     
-    Graph g(edges.begin(), edges.end(), weights.begin(), selectedVertices.size());
+    struct Comparator {
+        bool operator() (std::pair<IdList, double> a,
+                         std::pair<IdList, double> b) {
+            return a.second < b.second;
+        }
+    } comparator;
     
-    std::list<Edge> mst;
-    boost::kruskal_minimum_spanning_tree(g,
-                                         std::back_inserter(mst));
-    auto index = get(boost::vertex_index, g);
-    for (std::list<Edge>::iterator it = mst.begin(); it != mst.end(); it++) {
-        int i = get(index, boost::source(*it, g));
-        int j = get(index, boost::target(*it, g));
-        VertexHandle sourceHandle = mesh->vertex_handle(selectedVertices[i]);
-        VertexHandle destHandle = mesh->vertex_handle(selectedVertices[j]);
-        
-        std::map<std::pair<VertexHandle, VertexHandle>, IdList>::iterator found =
-            geodesicPath->find(std::make_pair(sourceHandle, destHandle));
-        
-        // geodesicPath should exist before calculating spanning tree.
-        assert(found != geodesicPath->end());
-        
-        IdList path = found->second;
+    std::sort(distance.begin(), distance.end(), comparator);
+    
+    int count = 0;
+    for (std::vector<std::pair<IdList, double> >::iterator it = distance.begin(); count < edges && it != distance.end(); it++, count++) {
+        IdList path = it->first;
         IdList::iterator vIdx_it = path.begin();
         int prevIdx = *vIdx_it;
         vIdx_it++;
@@ -238,6 +242,60 @@ void PlushPlugin::calcSpanningTree(TriMesh *mesh, int meshId, std::set<EdgeHandl
             prevIdx = *vIdx_it;
         }
     }
+
+    
+//    // create a new graph with selectedVerices, calculate all paths between them
+//    for (size_t i = 0; i < selectedVertices.size(); i++) {
+//        for (size_t j = i+1; j < selectedVertices.size(); j++) {
+//            int sourceIdx = selectedVertices[i];
+//            int destIdx = selectedVertices[j];
+//            VertexHandle sourceHandle = mesh->vertex_handle(sourceIdx);
+//            VertexHandle destHandle = mesh->vertex_handle(destIdx);
+//            
+//            // if result is not found, caculate now
+//            std::map<std::pair<VertexHandle, VertexHandle>, double>::iterator found =
+//                geodesicDistance->find(std::make_pair(sourceHandle, destHandle));
+//            if (found == geodesicDistance->end()) {
+//                calcGeodesic(mesh, sourceHandle);
+//                found = geodesicDistance->find(std::make_pair(sourceHandle, destHandle));
+//            }
+//            
+//            // assign edge & weight
+//            double distance = found->second;
+//            edges.push_back(std::make_pair(i, j));
+//            weights.push_back(distance);
+//        }
+//    }
+//    
+//    Graph g(edges.begin(), edges.end(), weights.begin(), selectedVertices.size());
+//    
+//    std::list<Edge> mst;
+//    boost::kruskal_minimum_spanning_tree(g,
+//                                         std::back_inserter(mst));
+//    auto index = get(boost::vertex_index, g);
+//    for (std::list<Edge>::iterator it = mst.begin(); it != mst.end(); it++) {
+//        int i = get(index, boost::source(*it, g));
+//        int j = get(index, boost::target(*it, g));
+//        VertexHandle sourceHandle = mesh->vertex_handle(selectedVertices[i]);
+//        VertexHandle destHandle = mesh->vertex_handle(selectedVertices[j]);
+//        
+//        std::map<std::pair<VertexHandle, VertexHandle>, IdList>::iterator found =
+//            geodesicPath->find(std::make_pair(sourceHandle, destHandle));
+//        
+//        // geodesicPath should exist before calculating spanning tree.
+//        assert(found != geodesicPath->end());
+//        
+//        IdList path = found->second;
+//        IdList::iterator vIdx_it = path.begin();
+//        int prevIdx = *vIdx_it;
+//        vIdx_it++;
+//        for (; vIdx_it != path.end(); vIdx_it++) {
+//            EdgeHandle eh;
+//            assert(getEdge(mesh, eh, prevIdx, *vIdx_it));
+//            result.insert(eh);
+//            prevIdx = *vIdx_it;
+//        }
+//    }
 }
 double PlushPlugin::getEdgeWeight(TriMesh *mesh, int v1No, int v2No) {
     VertexHandle v1 = mesh->vertex_handle(v1No);
@@ -257,10 +315,10 @@ double PlushPlugin::getEdgeWeight(TriMesh *mesh, EdgeHandle eh) {
     
     // if the two faces along this edge are different color, set weight of this edge to almost 0
     // we encourage path go through the boundary of different colors
-    if (!mesh->is_boundary(he1) && !mesh->is_boundary(he2)
-        &&  mesh->color(mesh->face_handle(he1)) != mesh->color(mesh->face_handle(he2))) {
-        return 0;
-    } else {
+//    if (!mesh->is_boundary(he1) && !mesh->is_boundary(he2)
+//        &&  mesh->color(mesh->face_handle(he1)) != mesh->color(mesh->face_handle(he2))) {
+//        return 0;
+//    } else {
         const TriMesh::Point p1 = mesh->point(mesh->from_vertex_handle(he1));
         const TriMesh::Point p2 = mesh->point(mesh->to_vertex_handle(he1));
         return std::sqrt((p1-p2).norm());
@@ -273,5 +331,5 @@ double PlushPlugin::getEdgeWeight(TriMesh *mesh, EdgeHandle eh) {
         //            // weight using curvature
         //            // encourage path with +1/-1 curvature, not 0
         //            return 1 - abs(curvature1 + curvature2)/2;
-    }
+//    }
 }

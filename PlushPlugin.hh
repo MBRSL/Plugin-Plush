@@ -113,6 +113,7 @@ private:
     
     void calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle);
 //    void findPath(TriMesh *mesh, std::set<EdgeHandle> &spanningTree, std::vector<VertexHandle> &path, VertexHandle sourceHandle, VertexHandle destHandle);
+    void calcSpanningTree(TriMesh *mesh, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices, int edges);
     void calcSpanningTree(TriMesh *mesh, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices);
     void getOrderedSelectedVertices(TriMesh *mesh, int meshId, IdList *selectedVertices);
     
