@@ -62,21 +62,39 @@ void PlushPlugin::pluginsInitialized() {
     
     // Create button that can be toggled
     // to (de)activate plugin's picking mode
+    QGroupBox *geodesicGroup = new QGroupBox(tr("Geodesic"));
+    QLabel *geodesicNumberLabel = new QLabel(tr("# of paths"));
     geodesicEdges = new QSpinBox();
-    geodesicButton = new QPushButton(tr("Show path"));
+    geodesicEdges->setMinimum(0);
+    geodesicButton = new QPushButton(tr("Show"));
+    QHBoxLayout *geodesicLayout = new QHBoxLayout;
+    geodesicLayout->addWidget(geodesicNumberLabel);
+    geodesicLayout->addWidget(geodesicEdges);
+    geodesicLayout->addWidget(geodesicButton);
+    geodesicGroup->setLayout(geodesicLayout);
+    
+    QGroupBox *selectionGroup = new QGroupBox(tr("Selection"));
+    loadSelectionButton = new QPushButton(tr("Load"));
+    saveSelectionButton = new QPushButton(tr("Save"));
+    clearSelectionButton = new QPushButton(tr("Clear"));
+    QHBoxLayout *selectionLayout = new QHBoxLayout;
+    selectionLayout->addWidget(loadSelectionButton);
+    selectionLayout->addWidget(saveSelectionButton);
+    selectionLayout->addWidget(clearSelectionButton);
+    selectionGroup->setLayout(selectionLayout);
+    
+    QGroupBox *curvatureGroup = new QGroupBox(tr("Curvature"));
     ridgeButton = new QPushButton(tr("Show ridge"));
-    loadSelectionButton = new QPushButton(tr("Load selection from file"));
-    saveSelectionButton = new QPushButton(tr("Save selection"));
-    clearSelectionButton = new QPushButton(tr("Clear selection"));
-    calcCurvatureButton = new QPushButton(tr("Calculate curvature"));
-    layout->addWidget(geodesicButton, 0, 0);
-    layout->addWidget(geodesicEdges, 0, 1);
-    layout->addWidget(geodesicButton, 0, 0);
-    layout->addWidget(ridgeButton, 1, 0);
-    layout->addWidget(loadSelectionButton, 2, 0);
-    layout->addWidget(saveSelectionButton, 3, 0);
-    layout->addWidget(clearSelectionButton, 4, 0);
-    layout->addWidget(calcCurvatureButton, 5, 0);
+    calcCurvatureButton = new QPushButton(tr("Calculate"));
+    QHBoxLayout *curvatureLayout = new QHBoxLayout;
+    curvatureLayout->addWidget(ridgeButton);
+    curvatureLayout->addWidget(calcCurvatureButton);
+    curvatureGroup->setLayout(curvatureLayout);
+    
+    layout->addWidget(geodesicGroup);
+    layout->addWidget(selectionGroup);
+    layout->addWidget(curvatureGroup);
+    
     connect(geodesicButton, SIGNAL(clicked()), this, SLOT(showGeodesic()));
     connect(ridgeButton, SIGNAL(clicked()), this, SLOT(showRidge()));
     connect(loadSelectionButton, SIGNAL(clicked()), this, SLOT(loadSelectionButtonClicked()));
