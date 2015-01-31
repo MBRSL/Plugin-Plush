@@ -152,3 +152,30 @@ void PlushPlugin::calcCurvature(QString _jobId) {
     }
     emit log(LOGINFO, "Curvature calculation done.");
 }
+
+
+void PlushPlugin::loadCurvature(TriMesh *mesh, QString meshName) {
+    QFile file(meshName+"_curvature.txt");
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        emit log(LOGERR, QString("Unable to read file %1").arg(meshName+"_curvature.txt"));
+        return;
+    }
+    
+    QTextStream in(&file);
+    
+    // Add property so that we can store it into TriMesh
+    mesh->add_property(maxCurvatureHandle, "Max Curvature");
+    mesh->add_property(minCurvatureHandle, "Min Curvature");
+    mesh->add_property(maxCurvatureDirectionHandle, "Max curvature direction");
+    mesh->add_property(minCurvatureDirectionHandle, "Min curvature direction");
+    
+    double minK1 = 1e9, minK2 = 1e9;
+    double d1x, d1y, d1z, d2x, d2y, d2z, k1, k2;
+    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
+        in >> d1x >> d1y >> d1z >> d2x >> d2y >> d2z >> k1 >> k2;
+        mesh->property(maxCurvatureDirectionHandle, *v_it) = OpenMesh::Vec3d(d1x, d1y, d1z);
+        mesh->property(minCurvatureDirectionHandle, *v_it) = OpenMesh::Vec3d(d2x, d2y, d2z);
+        mesh->property(maxCurvatureHandle, *v_it) = k1;
+        mesh->property(minCurvatureHandle, *v_it) = k2;
+    }
+}

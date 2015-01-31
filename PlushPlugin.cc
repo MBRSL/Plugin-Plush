@@ -38,8 +38,9 @@ PlushPlugin::~PlushPlugin() {
     delete geodesicButton;
     delete geodesicEdges;
     delete ridgeButton;
-    delete loadCurvatureButton;
-    delete showCurvatureButton;
+    delete loadSelectionButton;
+    delete saveSelectionButton;
+    delete clearSelectionButton;
     delete calcCurvatureButton;
 
 }
@@ -64,23 +65,41 @@ void PlushPlugin::pluginsInitialized() {
     geodesicEdges = new QSpinBox();
     geodesicButton = new QPushButton(tr("Show path"));
     ridgeButton = new QPushButton(tr("Show ridge"));
-    loadCurvatureButton = new QPushButton(tr("Load curvature from file"));
-    showCurvatureButton = new QPushButton(tr("Show curvature"));
+    loadSelectionButton = new QPushButton(tr("Load selection from file"));
+    saveSelectionButton = new QPushButton(tr("Save selection"));
+    clearSelectionButton = new QPushButton(tr("Clear selection"));
     calcCurvatureButton = new QPushButton(tr("Calculate curvature"));
     layout->addWidget(geodesicButton, 0, 0);
     layout->addWidget(geodesicEdges, 0, 1);
     layout->addWidget(geodesicButton, 0, 0);
     layout->addWidget(ridgeButton, 1, 0);
-    layout->addWidget(loadCurvatureButton, 2, 0);
-    layout->addWidget(showCurvatureButton, 3, 0);
-    layout->addWidget(calcCurvatureButton, 4, 0);
+    layout->addWidget(loadSelectionButton, 2, 0);
+    layout->addWidget(saveSelectionButton, 3, 0);
+    layout->addWidget(clearSelectionButton, 4, 0);
+    layout->addWidget(calcCurvatureButton, 5, 0);
     connect(geodesicButton, SIGNAL(clicked()), this, SLOT(showGeodesic()));
     connect(ridgeButton, SIGNAL(clicked()), this, SLOT(showRidge()));
-    connect(loadCurvatureButton, SIGNAL(clicked()), this, SLOT(loadCurvatureButtonClicked()));
-    connect(showCurvatureButton, SIGNAL(clicked()), this, SLOT(showCurvatureButtonClicked()));
+    connect(loadSelectionButton, SIGNAL(clicked()), this, SLOT(loadSelectionButtonClicked()));
+    connect(saveSelectionButton, SIGNAL(clicked()), this, SLOT(saveSelectionButtonClicked()));
+    connect(clearSelectionButton, SIGNAL(clicked()), this, SLOT(clearSelectionButtonClicked()));
     connect(calcCurvatureButton, SIGNAL(clicked()), this, SLOT(calcCurvatureButtonClicked()));
     
     emit addToolbox(tr("Plush"), toolBox);
+}
+
+void PlushPlugin::fileOpened(int _id) {
+    // There are some bug loading/saving property in OpenFlipper. we have to handle them by ourselves.
+    BaseObjectData *obj;
+    PluginFunctions::getObject(_id, obj);
+    QString meshName = obj->name();
+    
+    if (obj->dataType(DATA_TRIANGLE_MESH)) {
+        TriMesh *mesh;
+        mesh = PluginFunctions::triMesh(obj);
+        // Load curvature
+        loadCurvature(mesh, meshName);
+        loadSelection(_id, meshName);
+    }
 }
 
 void PlushPlugin::showRidge() {
@@ -125,46 +144,7 @@ void PlushPlugin::calcCurvatureButtonClicked() {
     }
 }
 
-void PlushPlugin::loadCurvatureButtonClicked() {
-    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
-         ++o_it) {
-        int meshId = o_it->id();
-        
-        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
-            TriMesh *mesh = PluginFunctions::triMesh(*o_it);
-            loadCurvature(mesh, o_it->filename());
-        }
-    }
-    emit log(LOGINFO, "Load curvature complete.");
-}
-
-void PlushPlugin::loadCurvature(TriMesh *mesh, QString meshName) {
-    QFile file(meshName+"_curvature.txt");
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        emit log(LOGERR, QString("Unable to read file %1").arg(meshName+"_curvature.txt"));
-        return;
-    }
-    
-    QTextStream in(&file);
-    
-    // Add property so that we can store it into TriMesh
-    mesh->add_property(maxCurvatureHandle, "Max Curvature");
-    mesh->add_property(minCurvatureHandle, "Min Curvature");
-    mesh->add_property(maxCurvatureDirectionHandle, "Max curvature direction");
-    mesh->add_property(minCurvatureDirectionHandle, "Min curvature direction");
-    
-    double minK1 = 1e9, minK2 = 1e9;
-    double d1x, d1y, d1z, d2x, d2y, d2z, k1, k2;
-    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
-        in >> d1x >> d1y >> d1z >> d2x >> d2y >> d2z >> k1 >> k2;
-        mesh->property(maxCurvatureDirectionHandle, *v_it) = OpenMesh::Vec3d(d1x, d1y, d1z);
-        mesh->property(minCurvatureDirectionHandle, *v_it) = OpenMesh::Vec3d(d2x, d2y, d2z);
-        mesh->property(maxCurvatureHandle, *v_it) = k1;
-        mesh->property(minCurvatureHandle, *v_it) = k2;
-    }
-}
-
-void PlushPlugin::showCurvatureButtonClicked() {
+void PlushPlugin::saveSelectionButtonClicked() {
     for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
          ++o_it) {
         int meshId = o_it->id();
@@ -173,14 +153,35 @@ void PlushPlugin::showCurvatureButtonClicked() {
             TriMesh *mesh = PluginFunctions::triMesh(*o_it);
             
             QString meshName = o_it->name();
-            
-            ACG::Vec3d boundingBoxMin, boundingBoxMax;
-            o_it->getBoundingBox(boundingBoxMin, boundingBoxMax);
-            double meshSize = (boundingBoxMax-boundingBoxMin).length();
+            saveSelection(meshId, meshName);
+        }
+    }
+}
 
-            for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
-                // show curvature direction
-            }
+void PlushPlugin::loadSelectionButtonClicked() {
+    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
+         ++o_it) {
+        int meshId = o_it->id();
+        
+        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
+            TriMesh *mesh = PluginFunctions::triMesh(*o_it);
+            
+            QString meshName = o_it->name();
+            loadSelection(meshId, meshName);
+        }
+    }
+}
+
+void PlushPlugin::clearSelectionButtonClicked() {
+    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
+         ++o_it) {
+        int meshId = o_it->id();
+        
+        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
+            TriMesh *mesh = PluginFunctions::triMesh(*o_it);
+            
+            QString meshName = o_it->name();
+            clearSelection(meshId);
         }
     }
 }
@@ -201,6 +202,7 @@ void PlushPlugin::showGeodesic() {
             
             IdList selectedVertices;
             selectedVertices = RPC::callFunctionValue<IdList> ("meshobjectselection", "getVertexSelection", meshId);
+            geodesicEdges->setMaximum((2*selectedVertices.size()-3)*(selectedVertices.size()-1)/2);
             // if the selection is not empty, save it as default selection for next time.
 //            if (selectedVertices.size() > 0) {
 //                RPC::callFunction<int, QString>("meshobjectselection", "saveFlipperModelingSelection", meshId, meshName + "_selection.txt");

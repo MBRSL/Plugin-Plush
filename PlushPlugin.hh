@@ -81,8 +81,9 @@ private:
     QSpinBox *geodesicEdges;
     QPushButton *geodesicButton;
     QPushButton *ridgeButton;
-    QPushButton *loadCurvatureButton;
-    QPushButton *showCurvatureButton;
+    QPushButton *loadSelectionButton;
+    QPushButton *saveSelectionButton;
+    QPushButton *clearSelectionButton;
     QPushButton *calcCurvatureButton;
 
     bool isJobCanceled;
@@ -106,6 +107,9 @@ private:
     double getEdgeWeight(TriMesh *mesh, EdgeHandle eh);
     
     void loadCurvature(TriMesh *mesh, QString meshName);
+    void loadSelection(int meshId, QString meshName);
+    void saveSelection(int meshId, QString meshName);
+    void clearSelection(int meshId);
     
     void calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle);
 //    void findPath(TriMesh *mesh, std::set<EdgeHandle> &spanningTree, std::vector<VertexHandle> &path, VertexHandle sourceHandle, VertexHandle destHandle);
@@ -120,12 +124,17 @@ private slots:
     void showGeodesic();
     void showRidge();
     
-    void loadCurvatureButtonClicked();
+    void loadSelectionButtonClicked();
+    void saveSelectionButtonClicked();
+    void clearSelectionButtonClicked();
     void calcCurvatureButtonClicked();
-    void showCurvatureButtonClicked();
+
     void calcCurvature(QString _jobId);
 
     void slotKeyEvent( QKeyEvent* _event );
+    
+    // LoadSaveInterface
+    void fileOpened(int _id);
     
     // ProcessInterface
     void canceledJob(QString _job);
