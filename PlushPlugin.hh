@@ -107,14 +107,15 @@ private:
     double getEdgeWeight(TriMesh *mesh, EdgeHandle eh);
     
     void loadCurvature(TriMesh *mesh, QString meshName);
-    void loadSelection(int meshId, QString meshName);
+    int loadSelection(int meshId, QString meshName);
     void saveSelection(int meshId, QString meshName);
     void clearSelection(int meshId);
-    
+
+    bool calcCurvature(QString _jobId, int meshId);
     void calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle);
 //    void findPath(TriMesh *mesh, std::set<EdgeHandle> &spanningTree, std::vector<VertexHandle> &path, VertexHandle sourceHandle, VertexHandle destHandle);
-    void calcSpanningTree(TriMesh *mesh, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices, int edges);
-    void calcSpanningTree(TriMesh *mesh, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices);
+    bool calcSpanningTree(QString _jobId, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices, int edges);
+    bool calcSpanningTree(QString _jobId, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices);
     void getOrderedSelectedVertices(TriMesh *mesh, int meshId, IdList *selectedVertices);
     
 private slots:
@@ -122,15 +123,17 @@ private slots:
     void initializePlugin();
     void pluginsInitialized();
 
-    void showGeodesic();
     void showRidge();
     
+    void showGeodesicButtonClicked();
     void loadSelectionButtonClicked();
     void saveSelectionButtonClicked();
     void clearSelectionButtonClicked();
     void calcCurvatureButtonClicked();
 
-    void calcCurvature(QString _jobId);
+    // Starter function for thread
+    void showGeodesicThread(QString _jobId);
+    void calcCurvatureThread(QString _jobId);
 
     void slotKeyEvent( QKeyEvent* _event );
     

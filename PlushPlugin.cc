@@ -95,7 +95,7 @@ void PlushPlugin::pluginsInitialized() {
     layout->addWidget(selectionGroup);
     layout->addWidget(curvatureGroup);
     
-    connect(geodesicButton, SIGNAL(clicked()), this, SLOT(showGeodesic()));
+    connect(geodesicButton, SIGNAL(clicked()), this, SLOT(showGeodesicButtonClicked()));
     connect(ridgeButton, SIGNAL(clicked()), this, SLOT(showRidge()));
     connect(loadSelectionButton, SIGNAL(clicked()), this, SLOT(loadSelectionButtonClicked()));
     connect(saveSelectionButton, SIGNAL(clicked()), this, SLOT(saveSelectionButtonClicked()));
@@ -116,7 +116,9 @@ void PlushPlugin::fileOpened(int _id) {
         mesh = PluginFunctions::triMesh(obj);
         // Load curvature
         loadCurvature(mesh, meshName);
-        loadSelection(_id, meshName);
+        int selectedCount = loadSelection(_id, meshName);
+        
+        geodesicEdges->setMaximum(selectedCount*(selectedCount-1)/2);
     }
 }
 
@@ -155,8 +157,19 @@ void PlushPlugin::calcCurvatureButtonClicked() {
     if (thread == NULL) {
         thread = new OpenFlipperThread("calcCurvature");
         connect(thread, SIGNAL(finished(QString)), this, SLOT(finishedJob(QString)));
-        connect(thread, SIGNAL(function(QString)), this, SLOT(calcCurvature(QString)), Qt::DirectConnection);
+        connect(thread, SIGNAL(function(QString)), this, SLOT(calcCurvatureThread(QString)), Qt::DirectConnection);
         emit startJob("calcCurvature", "calculate curvature of whole mesh", 0, 100, true);
+        thread->start();
+        thread->startProcessing();
+    }
+}
+
+void PlushPlugin::showGeodesicButtonClicked() {
+    if (thread == NULL) {
+        thread = new OpenFlipperThread("calcGeodesic");
+        connect(thread, SIGNAL(finished(QString)), this, SLOT(finishedJob(QString)));
+        connect(thread, SIGNAL(function(QString)), this, SLOT(showGeodesicThread(QString)), Qt::DirectConnection);
+        emit startJob("calcGeodesic", "calculate geodesic of whole mesh", 0, 100, true);
         thread->start();
         thread->startProcessing();
     }
@@ -185,7 +198,9 @@ void PlushPlugin::loadSelectionButtonClicked() {
             TriMesh *mesh = PluginFunctions::triMesh(*o_it);
             
             QString meshName = o_it->name();
-            loadSelection(meshId, meshName);
+            int selectedCount = loadSelection(meshId, meshName);
+            
+            geodesicEdges->setMaximum(selectedCount*(selectedCount-1)/2);
         }
     }
 }
@@ -204,7 +219,24 @@ void PlushPlugin::clearSelectionButtonClicked() {
     }
 }
 
-void PlushPlugin::showGeodesic() {
+void PlushPlugin::calcCurvatureThread(QString _jobId) {
+    if (PluginFunctions::objectCount() == 0)
+    {
+        emit log(LOGERR, "Load a model first.");
+        return;
+    }
+    
+    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
+         ++o_it) {
+        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
+            int meshId = o_it->id();
+            calcCurvature(_jobId, meshId);
+        }
+    }
+    emit log(LOGINFO, "Curvature calculation done.");
+}
+
+void PlushPlugin::showGeodesicThread(QString _jobId) {
     if (PluginFunctions::objectCount() == 0)
     {
         emit log(LOGERR, "Load a model first.");
@@ -220,7 +252,7 @@ void PlushPlugin::showGeodesic() {
             
             IdList selectedVertices;
             selectedVertices = RPC::callFunctionValue<IdList> ("meshobjectselection", "getVertexSelection", meshId);
-            geodesicEdges->setMaximum((2*selectedVertices.size()-3)*(selectedVertices.size()-1)/2);
+            geodesicEdges->setMaximum(selectedVertices.size()*(selectedVertices.size()-1)/2);
             // if the selection is not empty, save it as default selection for next time.
 //            if (selectedVertices.size() > 0) {
 //                RPC::callFunction<int, QString>("meshobjectselection", "saveFlipperModelingSelection", meshId, meshName + "_selection.txt");
@@ -230,15 +262,16 @@ void PlushPlugin::showGeodesic() {
 //            }
 
             std::set<EdgeHandle> spanningTree;
-            calcSpanningTree(mesh, meshId, spanningTree, selectedVertices, geodesicEdges->value());
-            
-            IdList edgeList;
-            for (std::set<EdgeHandle>::iterator e_it = spanningTree.begin(); e_it != spanningTree.end(); e_it++) {
-                edgeList.push_back(e_it->idx());
+            if (calcSpanningTree(_jobId, meshId, spanningTree, selectedVertices, geodesicEdges->value())) {
+                IdList edgeList;
+                for (std::set<EdgeHandle>::iterator e_it = spanningTree.begin(); e_it != spanningTree.end(); e_it++) {
+                    edgeList.push_back(e_it->idx());
+                }
+                RPC::callFunction<int, IdList>("meshobjectselection", "selectEdges", meshId, edgeList);
             }
-            RPC::callFunction<int, IdList>("meshobjectselection", "selectEdges", meshId, edgeList);
         }
     }
+    emit log(LOGINFO, "Geodesic calculation done.");
 }
 
 void PlushPlugin::getOrderedSelectedVertices(TriMesh *mesh, int meshId, IdList *selectedVertices) {

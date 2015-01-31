@@ -40,7 +40,7 @@ bool operator< (const Vertex_distance &A, const Vertex_distance &B) {
     return A.distance < B.distance;
 }
 
-void PlushPlugin::calcCurvature(QString _jobId) {
+bool PlushPlugin::calcCurvature(QString _jobId, int meshId) {
     typedef double                   DFT;
     typedef CGAL::Simple_cartesian<DFT>     Data_Kernel;
     typedef CGAL::Simple_cartesian<DFT>     Local_Kernel;
@@ -54,103 +54,105 @@ void PlushPlugin::calcCurvature(QString _jobId) {
     
     isJobCanceled = false;
     
-    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
-         ++o_it) {
-        int meshId = o_it->id();
+    BaseObjectData *obj;
+    PluginFunctions::getObject(meshId, obj);
+    if (!obj->dataType(DATA_TRIANGLE_MESH)) {
+        emit log(LOGERR, QString("Not a valid TriMesh of object %1").arg(QString::number(meshId)));
+        return false;
+    }
+    
+    TriMesh *mesh = PluginFunctions::triMesh(obj);
+    QString meshName = obj->name();
+    emit setJobDescription(_jobId, QString("Calculating curvature: %1").arg(meshName));
         
-        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
-            TriMesh *mesh = PluginFunctions::triMesh(*o_it);
-            QString meshName = o_it->name();
-            
-            mesh->add_property(minCurvatureHandle, "Min Curvature");
-            mesh->add_property(maxCurvatureHandle, "Max Curvature");
-            mesh->add_property(minCurvatureDirectionHandle, "Min curvature direction");
-            mesh->add_property(maxCurvatureDirectionHandle, "Max curvature direction");
-            
-            IdList selectedVertices;
-            // If no one is selected, show all of them
-            if (selectedVertices.size() == 0) {
-                for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
-                    selectedVertices.push_back(v_it->idx());
-                }
-            }
-            
-            // for each selected vertex, calculate curvature
-            for (size_t i = 0; i < selectedVertices.size(); i++) {
-                if (isJobCanceled) {
-                    emit log(LOGINFO, "Curvature calculation canceled.");
-                    return;
-                }
-                
-                VertexHandle centerV = mesh->vertex_handle(selectedVertices[i]);
-
-                std::set<VertexHandle> neighboringVertices;
-                neighboringVertices.insert(centerV);
-
-                // Expand selection until we got enough samples
-                // Or terminate if selection doesn't grow anymore
-                size_t requiredSamples = (d_fitting+1)*(d_fitting+2)/2;
-                size_t nNeighbors;
-                do {
-                    nNeighbors = neighboringVertices.size();
-                    expandVerticeSelection(mesh, neighboringVertices, 1);
-                } while (nNeighbors != neighboringVertices.size() && neighboringVertices.size() < requiredSamples*3);
-                
-                if (nNeighbors == neighboringVertices.size() && nNeighbors < requiredSamples) {
-                    QString str = QString("Not enough points for fitting for object %1: %2").arg(QString::number(meshId), meshName);
-                    emit log(LOGERR, str);
-                    continue;
-                }
-                
-                std::vector<DPoint> in_points;
-                for (std::set<VertexHandle>::iterator it = neighboringVertices.begin(); it != neighboringVertices.end(); it++)
-                {
-                    TriMesh::Point p = mesh->point(*it);
-                    in_points.push_back(DPoint(p[0],p[1],p[2]));
-                }
-                
-                My_Monge_form monge_form;
-                My_Monge_via_jet_fitting monge_fit;
-                monge_form = monge_fit(in_points.begin(), in_points.end(), d_fitting, d_monge);
-                // fix with normal
-                TriMesh::Normal normal = mesh->normal(centerV);
-                CGAL::Vector_3<Data_Kernel> normalACGL(normal[0], normal[1], normal[2]);
-                monge_form.comply_wrt_given_normal(normalACGL);
-                
-                // Save result
-                OpenMesh::Vec3d d1(monge_form.maximal_principal_direction()[0],
-                                   monge_form.maximal_principal_direction()[1],
-                                   monge_form.maximal_principal_direction()[2]);
-                OpenMesh::Vec3d d2(monge_form.minimal_principal_direction()[0],
-                                   monge_form.minimal_principal_direction()[1],
-                                   monge_form.minimal_principal_direction()[2]);
-                mesh->property(maxCurvatureDirectionHandle, centerV) = d1;
-                mesh->property(minCurvatureDirectionHandle, centerV) = d2;
-                mesh->property(maxCurvatureHandle, centerV) = monge_form.principal_curvatures(0);
-                mesh->property(minCurvatureHandle, centerV) = monge_form.principal_curvatures(1);
-                
-                int status = (int)((double)i / selectedVertices.size() * 100);
-                emit setJobState(_jobId, status);
-            }
-            
-            // Prepare file for saving data
-            QFile file(meshName+"_curvature.txt");
-            file.open(QIODevice::WriteOnly | QIODevice::Text);
-            QTextStream out(&file);
-
-            for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++)
-            {
-                OpenMesh::Vec3d d1 = mesh->property(maxCurvatureDirectionHandle, *v_it);
-                OpenMesh::Vec3d d2 = mesh->property(minCurvatureDirectionHandle, *v_it);
-                out << d1[0] << " " << d1[1] << " " << d1[2] << " ";
-                out << d2[0] << " " << d2[1] << " " << d2[2] << " ";
-                out << mesh->property(maxCurvatureHandle, *v_it) << " ";
-                out << mesh->property(minCurvatureHandle, *v_it) << "\n";
-            }
-            file.close();
+    mesh->add_property(minCurvatureHandle, "Min Curvature");
+    mesh->add_property(maxCurvatureHandle, "Max Curvature");
+    mesh->add_property(minCurvatureDirectionHandle, "Min curvature direction");
+    mesh->add_property(maxCurvatureDirectionHandle, "Max curvature direction");
+    
+    IdList selectedVertices;
+    // If no one is selected, show all of them
+    if (selectedVertices.size() == 0) {
+        for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
+            selectedVertices.push_back(v_it->idx());
         }
     }
-    emit log(LOGINFO, "Curvature calculation done.");
+    
+    // for each selected vertex, calculate curvature
+    for (size_t i = 0; i < selectedVertices.size(); i++) {
+        if (isJobCanceled) {
+            emit log(LOGINFO, "Curvature calculation canceled.");
+            return false;
+        }
+        
+        VertexHandle centerV = mesh->vertex_handle(selectedVertices[i]);
+
+        std::set<VertexHandle> neighboringVertices;
+        neighboringVertices.insert(centerV);
+
+        // Expand selection until we got enough samples
+        // Or terminate if selection doesn't grow anymore
+        size_t requiredSamples = (d_fitting+1)*(d_fitting+2)/2;
+        size_t nNeighbors;
+        do {
+            nNeighbors = neighboringVertices.size();
+            expandVerticeSelection(mesh, neighboringVertices, 1);
+        } while (nNeighbors != neighboringVertices.size() && neighboringVertices.size() < requiredSamples*3);
+        
+        if (nNeighbors == neighboringVertices.size() && nNeighbors < requiredSamples) {
+            QString str = QString("Not enough points for fitting for object %1: %2").arg(QString::number(meshId), meshName);
+            emit log(LOGERR, str);
+            continue;
+        }
+        
+        std::vector<DPoint> in_points;
+        for (std::set<VertexHandle>::iterator it = neighboringVertices.begin(); it != neighboringVertices.end(); it++)
+        {
+            TriMesh::Point p = mesh->point(*it);
+            in_points.push_back(DPoint(p[0],p[1],p[2]));
+        }
+        
+        My_Monge_form monge_form;
+        My_Monge_via_jet_fitting monge_fit;
+        monge_form = monge_fit(in_points.begin(), in_points.end(), d_fitting, d_monge);
+        // fix with normal
+        TriMesh::Normal normal = mesh->normal(centerV);
+        CGAL::Vector_3<Data_Kernel> normalACGL(normal[0], normal[1], normal[2]);
+        monge_form.comply_wrt_given_normal(normalACGL);
+        
+        // Save result
+        OpenMesh::Vec3d d1(monge_form.maximal_principal_direction()[0],
+                           monge_form.maximal_principal_direction()[1],
+                           monge_form.maximal_principal_direction()[2]);
+        OpenMesh::Vec3d d2(monge_form.minimal_principal_direction()[0],
+                           monge_form.minimal_principal_direction()[1],
+                           monge_form.minimal_principal_direction()[2]);
+        mesh->property(maxCurvatureDirectionHandle, centerV) = d1;
+        mesh->property(minCurvatureDirectionHandle, centerV) = d2;
+        mesh->property(maxCurvatureHandle, centerV) = monge_form.principal_curvatures(0);
+        mesh->property(minCurvatureHandle, centerV) = monge_form.principal_curvatures(1);
+        
+        int status = (int)((double)i / selectedVertices.size() * 100);
+        emit setJobState(_jobId, status);
+    }
+    
+    // Prepare file for saving data
+    QFile file(meshName+"_curvature.txt");
+    file.open(QIODevice::WriteOnly | QIODevice::Text);
+    QTextStream out(&file);
+
+    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++)
+    {
+        OpenMesh::Vec3d d1 = mesh->property(maxCurvatureDirectionHandle, *v_it);
+        OpenMesh::Vec3d d2 = mesh->property(minCurvatureDirectionHandle, *v_it);
+        out << d1[0] << " " << d1[1] << " " << d1[2] << " ";
+        out << d2[0] << " " << d2[1] << " " << d2[2] << " ";
+        out << mesh->property(maxCurvatureHandle, *v_it) << " ";
+        out << mesh->property(minCurvatureHandle, *v_it) << "\n";
+    }
+    file.close();
+    
+    return true;
 }
 
 

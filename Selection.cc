@@ -8,7 +8,7 @@
 
 #include "PlushPlugin.hh"
 
-void PlushPlugin::loadSelection(int meshId, QString meshName) {
+int PlushPlugin::loadSelection(int meshId, QString meshName) {
     QFile file(meshName+"_selection.txt");
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         emit log(LOGERR, QString("Unable to read file %1").arg(meshName+"_selection.txt"));
@@ -28,6 +28,7 @@ void PlushPlugin::loadSelection(int meshId, QString meshName) {
         }
     }
     RPC::callFunction<int, IdList> ("meshobjectselection", "selectVertices", meshId, selectedVertices);
+    return selectedVertices.size();
 }
 
 void PlushPlugin::saveSelection(int meshId, QString meshName) {

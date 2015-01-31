@@ -175,11 +175,11 @@ struct DFS_Visitor : public boost::dfs_visitor<>
 //        result.push_back(vh);
 //    }
 //}
-void PlushPlugin::calcSpanningTree(TriMesh *mesh, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices) {
-    calcSpanningTree(mesh, meshId, result, selectedVertices, (selectedVertices.size()-1+selectedVertices.size()-2)*(selectedVertices.size()-1)/2);
+bool PlushPlugin::calcSpanningTree(QString _jobId, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices) {
+    return calcSpanningTree(_jobId, meshId, result, selectedVertices, (selectedVertices.size()-1+selectedVertices.size()-2)*(selectedVertices.size()-1)/2);
 }
 
-void PlushPlugin::calcSpanningTree(TriMesh *mesh, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices, int edges) {
+bool PlushPlugin::calcSpanningTree(QString _jobId, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices, int edges) {
     typedef boost::adjacency_list < boost::vecS, boost::vecS, boost::undirectedS,
         boost::no_property, boost::property < boost::edge_weight_t, int > > Graph;
     typedef boost::graph_traits < Graph >::edge_descriptor Edge;
@@ -188,11 +188,32 @@ void PlushPlugin::calcSpanningTree(TriMesh *mesh, int meshId, std::set<EdgeHandl
     
 //    std::vector<E> edges;
 //    std::vector<double> weights;
+    
+    BaseObjectData *obj;
+    PluginFunctions::getObject(meshId, obj);
+    if (!obj->dataType(DATA_TRIANGLE_MESH)) {
+        emit log(LOGERR, QString("Not a valid TriMesh of object %1").arg(QString::number(meshId)));
+        return false;
+    }
+    
+    isJobCanceled = false;
+    
+    TriMesh *mesh = PluginFunctions::triMesh(obj);
+    QString meshName = obj->name();
+    emit setJobDescription(_jobId, QString("Calculating curvature: %1").arg(meshName));
+    
     std::vector<std::pair<IdList, double> > distance;
     
     // create a new graph with selectedVerices, calculate all paths between them
+    int iterations = 0;
+    int totalIterations = (selectedVertices.size()*(selectedVertices.size()-1)/2);
     for (size_t i = 0; i < selectedVertices.size(); i++) {
         for (size_t j = i+1; j < selectedVertices.size(); j++) {
+            if (isJobCanceled) {
+                emit log(LOGINFO, "Geodesic calculation canceled.");
+                return false;
+            }
+            
             int sourceIdx = selectedVertices[i];
             int destIdx = selectedVertices[j];
             VertexHandle sourceHandle = mesh->vertex_handle(sourceIdx);
@@ -217,6 +238,11 @@ void PlushPlugin::calcSpanningTree(TriMesh *mesh, int meshId, std::set<EdgeHandl
             
             // assign edge & weight
             distance.push_back(std::make_pair(path, cost));
+            
+            // most of the time is spent on geodesic calculation
+            iterations++;
+            int status = (double)iterations/totalIterations * 100;
+            emit setJobState(_jobId, status);
         }
     }
     
@@ -243,6 +269,7 @@ void PlushPlugin::calcSpanningTree(TriMesh *mesh, int meshId, std::set<EdgeHandl
         }
     }
 
+    return true;
     
 //    // create a new graph with selectedVerices, calculate all paths between them
 //    for (size_t i = 0; i < selectedVertices.size(); i++) {
