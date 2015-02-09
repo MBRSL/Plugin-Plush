@@ -211,9 +211,6 @@ void PlushPlugin::clearSelectionButtonClicked() {
         int meshId = o_it->id();
         
         if (o_it->dataType(DATA_TRIANGLE_MESH)) {
-            TriMesh *mesh = PluginFunctions::triMesh(*o_it);
-            
-            QString meshName = o_it->name();
             clearSelection(meshId);
         }
     }
