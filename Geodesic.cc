@@ -199,7 +199,7 @@ bool PlushPlugin::calcSpanningTree(QString _jobId, int meshId, std::set<EdgeHand
     isJobCanceled = false;
     
     TriMesh *mesh = PluginFunctions::triMesh(obj);
-    QString meshName = obj->name();
+    QString meshName = QFileInfo(obj->name()).baseName();
     emit setJobDescription(_jobId, QString("Calculating curvature: %1").arg(meshName));
     
     std::vector<std::pair<IdList, double> > distance;

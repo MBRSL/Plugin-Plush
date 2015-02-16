@@ -62,7 +62,7 @@ bool PlushPlugin::calcCurvature(QString _jobId, int meshId) {
     }
     
     TriMesh *mesh = PluginFunctions::triMesh(obj);
-    QString meshName = obj->name();
+    QString meshName = QFileInfo(obj->name()).baseName();
     emit setJobDescription(_jobId, QString("Calculating curvature: %1").arg(meshName));
         
     mesh->add_property(minCurvatureHandle, "Min Curvature");

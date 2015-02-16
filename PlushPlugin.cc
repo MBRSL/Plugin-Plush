@@ -109,7 +109,7 @@ void PlushPlugin::fileOpened(int _id) {
     // There are some bug loading/saving property in OpenFlipper. we have to handle them by ourselves.
     BaseObjectData *obj;
     PluginFunctions::getObject(_id, obj);
-    QString meshName = obj->name();
+    QString meshName = QFileInfo(obj->name()).baseName();
     
     if (obj->dataType(DATA_TRIANGLE_MESH)) {
         TriMesh *mesh;
@@ -183,7 +183,7 @@ void PlushPlugin::saveSelectionButtonClicked() {
         if (o_it->dataType(DATA_TRIANGLE_MESH)) {
             TriMesh *mesh = PluginFunctions::triMesh(*o_it);
             
-            QString meshName = o_it->name();
+            QString meshName = QFileInfo(o_it->name()).baseName();
             saveSelection(meshId, meshName);
         }
     }
@@ -197,7 +197,7 @@ void PlushPlugin::loadSelectionButtonClicked() {
         if (o_it->dataType(DATA_TRIANGLE_MESH)) {
             TriMesh *mesh = PluginFunctions::triMesh(*o_it);
             
-            QString meshName = o_it->name();
+            QString meshName = QFileInfo(o_it->name()).baseName();
             int selectedCount = loadSelection(meshId, meshName);
             
             geodesicEdges->setMaximum(selectedCount*(selectedCount-1)/2);
@@ -244,7 +244,7 @@ void PlushPlugin::showGeodesicThread(QString _jobId) {
          ++o_it) {
         if (o_it->dataType(DATA_TRIANGLE_MESH)) {
             int meshId = o_it->id();
-            QString meshName = o_it->name();
+            QString meshName = QFileInfo(o_it->name()).baseName();
             TriMesh *mesh = PluginFunctions::triMesh(*o_it);
             
             IdList selectedVertices;
