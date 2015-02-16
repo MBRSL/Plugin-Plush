@@ -16,6 +16,7 @@
 
 #include "GeodesicDistance/geodesic_mesh.hh"
 
+#include "Skeleton.hh"
 
 typedef TriMesh::VertexHandle VertexHandle;
 typedef TriMesh::EdgeHandle EdgeHandle;
@@ -77,6 +78,17 @@ public:
     QString name() { return (QString("Simple Plush")); };
     QString description( ) { return (QString("Smooths the active Mesh")); };
 
+    static OpenMesh::VPropHandleT<double> minCurvatureHandle;
+    static OpenMesh::VPropHandleT<double> maxCurvatureHandle;
+    static OpenMesh::VPropHandleT<OpenMesh::Vec3d> minCurvatureDirectionHandle;
+    static OpenMesh::VPropHandleT<OpenMesh::Vec3d> maxCurvatureDirectionHandle;
+    
+    static OpenMesh::EPropHandleT<double> edgeWeightHandle;
+    static OpenMesh::MPropHandleT< std::vector<OpenMesh::Vec3d> > skeletonJointsHandle;
+    static OpenMesh::MPropHandleT< std::vector<Bone> > skeletonBonesHandle;
+    // The weight of corresponding bones for each vertex
+    static OpenMesh::VPropHandleT< std::vector<double> > skeletonBonesWeightHandle;
+
 private:
     QSpinBox *geodesicEdges;
     QPushButton *geodesicButton;
@@ -95,10 +107,6 @@ private:
     std::map<std::pair<VertexHandle, VertexHandle>, IdList> *geodesicPath;
     
     //std::map<VertexHandle, double> *curvatureK2;
-    OpenMesh::VPropHandleT<double> minCurvatureHandle;
-    OpenMesh::VPropHandleT<double> maxCurvatureHandle;
-    OpenMesh::VPropHandleT<OpenMesh::Vec3d> minCurvatureDirectionHandle;
-    OpenMesh::VPropHandleT<OpenMesh::Vec3d> maxCurvatureDirectionHandle;
     
     bool getEdge(TriMesh *mesh, EdgeHandle &_eh, int v1No, int v2No);
     bool getEdge(TriMesh *mesh, EdgeHandle &_eh, VertexHandle v1, VertexHandle v2);
@@ -107,9 +115,12 @@ private:
     double getEdgeWeight(TriMesh *mesh, EdgeHandle eh);
     
     void loadCurvature(TriMesh *mesh, QString meshName);
+    
     int loadSelection(int meshId, QString meshName);
     void saveSelection(int meshId, QString meshName);
     void clearSelection(int meshId);
+    
+    void loadSkeleton(int meshId);
 
     bool calcCurvature(QString _jobId, int meshId);
     void calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle);

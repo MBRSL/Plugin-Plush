@@ -9,6 +9,16 @@
 #include "PlushPlugin.hh"
 #include "GeodesicDistance/geodesic_algorithm_dijkstra.hh"
 
+OpenMesh::VPropHandleT<double> PlushPlugin::minCurvatureHandle;
+OpenMesh::VPropHandleT<double> PlushPlugin::maxCurvatureHandle;
+OpenMesh::VPropHandleT<OpenMesh::Vec3d> PlushPlugin::minCurvatureDirectionHandle;
+OpenMesh::VPropHandleT<OpenMesh::Vec3d> PlushPlugin::maxCurvatureDirectionHandle;
+
+OpenMesh::EPropHandleT<double> PlushPlugin::edgeWeightHandle;
+OpenMesh::MPropHandleT< std::vector<OpenMesh::Vec3d> > PlushPlugin::skeletonJointsHandle;
+OpenMesh::MPropHandleT< std::vector<Bone> > PlushPlugin::skeletonBonesHandle;
+OpenMesh::VPropHandleT< std::vector<double> > PlushPlugin::skeletonBonesWeightHandle;
+
 PlushPlugin::PlushPlugin()
 {
     requiredPlugins = new std::vector<char*>();
@@ -116,9 +126,19 @@ void PlushPlugin::fileOpened(int _id) {
         mesh = PluginFunctions::triMesh(obj);
         // Load curvature
         loadCurvature(mesh, meshName);
-        int selectedCount = loadSelection(_id, meshName);
         
+        // Load selection
+        int selectedCount = loadSelection(_id, meshName);
         geodesicEdges->setMaximum(selectedCount*(selectedCount-1)/2);
+        
+        // Load skeleton
+        loadSkeleton(_id);
+        
+        // Init edge weight
+        mesh->add_property(edgeWeightHandle, "Edge weight");
+        for (EdgeIter e_it = mesh->edges_begin(); e_it != mesh->edges_end(); e_it++) {
+            mesh->property(edgeWeightHandle, *e_it) = -1;
+        }
     }
 }
 
