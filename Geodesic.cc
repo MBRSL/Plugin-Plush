@@ -8,10 +8,12 @@
 
 #include "PlushPlugin.hh"
 #include "CGAL_Polyhedron_builder.hh"
+#include "SuperDeform/Skeleton.hh"
 
 #include <CGAL/boost/graph/dijkstra_shortest_paths.h>
 #include <boost/graph/kruskal_min_spanning_tree.hpp>
 
+#include <boost/property_map/function_property_map.hpp>
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/undirected_dfs.hpp>
 #include <boost/cstdlib.hpp>
@@ -23,6 +25,191 @@ typedef GraphTraits::edge_descriptor boost_edge_descriptor;
 typedef GraphTraits::edge_iterator boost_edge_iterator;
 typedef GraphTraits::halfedge_descriptor boost_halfedge_descriptor;
 typedef GraphTraits::halfedge_iterator boost_halfedge_iterator;
+
+typedef boost::property_map<Polyhedron, boost::vertex_external_index_t>::type VertexIdPropertyMap;
+typedef boost::property_map<Polyhedron, boost::edge_external_index_t>::type EdgeIdPropertyMap;
+
+class WeightFunctor {
+private:
+    TriMesh *mesh;
+    const Polyhedron P;
+    const boost::iterator_property_map<std::vector<boost_vertex_descriptor>::iterator, VertexIdPropertyMap>
+        predecessor_pmap;
+    const EdgeIdPropertyMap edgeIndexMap;
+
+    double distanceWeight(TriMesh::Point p1, TriMesh::Point p2) const {
+        return (p1-p2).norm();
+    }
+    
+    double textureWeight(HalfedgeHandle he1, HalfedgeHandle he2) const {
+        // if the two faces along this edge are different color, set weight of this edge to almost 0
+        // we encourage path go through the boundary of different colors
+        if (!mesh->is_boundary(he1) && !mesh->is_boundary(he2)
+            &&  mesh->color(mesh->face_handle(he1)) != mesh->color(mesh->face_handle(he2))) {
+            return 1e-9;
+        } else {
+            return 1;
+        }
+    }
+    
+    double curvatureWeight(VertexHandle v1, VertexHandle v2) const {
+        double curvature1 = mesh->property(PlushPlugin::maxCurvatureHandle, v1);
+        double curvature2 = mesh->property(PlushPlugin::maxCurvatureHandle, v2);
+        // clamp curvature to [-1, 1]
+        curvature1 = fmax(fmin(curvature1, 1), -1);
+        curvature2 = fmax(fmin(curvature2, 1), -1);
+
+        // weight using curvature
+        // encourage path with +1/-1 curvature, not 0
+        return 1 - abs(curvature1 + curvature2)/2;
+    }
+    
+    double skeletonWeight(EdgeHandle eh,
+                          VertexHandle v1,
+                          VertexHandle v2,
+                          TriMesh::Point p1,
+                          TriMesh::Point p2) const {
+        std::vector<OpenMesh::Vec3d> joints = mesh->property(PlushPlugin::skeletonJointsHandle);
+        std::vector<Bone> bones = mesh->property(PlushPlugin::skeletonBonesHandle);
+
+        // Calculate corresponding averaged bone direction for each vertex
+        OpenMesh::Vec3d avgBoneDirection(0,0,0);
+        int i = 0;
+        for (std::vector<Bone>::iterator bone_it = bones.begin(); bone_it != bones.end(); bone_it++, i++) {
+            OpenMesh::Vec3d dir = (bone_it->getA() - bone_it->getB()).normalize();
+            double weight1 = mesh->property(PlushPlugin::skeletonBonesWeightHandle, v1)[i];
+            double weight2 = mesh->property(PlushPlugin::skeletonBonesWeightHandle, v2)[i];
+            
+            avgBoneDirection += dir * (weight1);
+        }
+        
+        double weight = 1-fabs(((p1-p2)|avgBoneDirection)/((p1-p2).norm()*avgBoneDirection.norm()));
+        return weight;
+    }
+    
+    double smoothnessWeight(boost_vertex_descriptor boost_v1,
+                            boost_vertex_descriptor boost_v2,
+                            TriMesh::Point p1,
+                            TriMesh::Point p2) const {
+        boost_vertex_descriptor predecessor = predecessor_pmap[boost_v1];
+        if (predecessor == boost_v1) {
+            // we reach the begining, no smoothness penalty
+            return 0;
+        } else {
+            auto boost_p0 = predecessor->point();
+            TriMesh::Point p0(boost_p0[0],boost_p0[1],boost_p0[2]);
+            double cosAngle = ((p1-p0) | (p1-p2) / ((p1-p0).norm() * (p1-p2).norm()));
+            // cosAngle = [-1, 1], we need [0, 1]
+            return (cosAngle + 1) / 2;
+        }
+    }
+public:
+    WeightFunctor(TriMesh *mesh,
+                  const Polyhedron &P,
+                  const boost::iterator_property_map<std::vector<boost_vertex_descriptor>::iterator, VertexIdPropertyMap>
+                    &predecessor_pmap,
+                  const EdgeIdPropertyMap &edgeIndexMap) :
+    mesh(mesh), P(P), predecessor_pmap(predecessor_pmap), edgeIndexMap(edgeIndexMap) {}
+    
+    double operator()(boost_edge_descriptor e) const {
+        boost_vertex_descriptor boost_v1 = boost::source(e, P);
+        boost_vertex_descriptor boost_v2 = boost::target(e, P);
+        
+        int index = get(edgeIndexMap, e);
+        EdgeHandle eh = mesh->edge_handle(index);
+        HalfedgeHandle he1 = mesh->halfedge_handle(eh, 0);
+        HalfedgeHandle he2 = mesh->halfedge_handle(eh, 1);
+        
+        VertexHandle v1 = mesh->from_vertex_handle(he1);
+        VertexHandle v2 = mesh->to_vertex_handle(he1);
+        
+        TriMesh::Point p1 = mesh->point(v1);
+        TriMesh::Point p2 = mesh->point(v2);
+
+        double edgeWeight = 0;
+        if (mesh->property(PlushPlugin::edgeWeightHandle, eh) >= 0) {
+            edgeWeight += mesh->property(PlushPlugin::edgeWeightHandle, eh);
+        } else {
+//            totalWeight += distanceWeight(p1, p2);
+//            totalWeight += textureWeight(he1, he2);
+//            totalWeight += curvatureWeight(v1, v2);
+            edgeWeight += skeletonWeight(eh, v1, v2, p1, p2);
+            mesh->property(PlushPlugin::edgeWeightHandle, eh) = edgeWeight;
+        }
+
+        // re-calculate smoothness weight every time because it depends on path.
+        // it can not be saved and reuse
+        double pathWeight = smoothnessWeight(boost_v1, boost_v2, p1, p2);
+        
+        return edgeWeight + pathWeight;
+    }
+};
+
+//double PlushPlugin::getEdgeWeight(TriMesh *mesh, int v1No, int v2No) {
+//    VertexHandle v1 = mesh->vertex_handle(v1No);
+//    VertexHandle v2 = mesh->vertex_handle(v2No);
+//    return getEdgeWeight(mesh, v1, v2);
+//}
+//
+//double PlushPlugin::getEdgeWeight(TriMesh *mesh, VertexHandle v1, VertexHandle v2) {
+//    EdgeHandle eh;
+//    getEdge(mesh, eh, v1, v2);
+//    return getEdgeWeight(mesh, eh);
+//}
+
+//double PlushPlugin::getEdgeWeight(TriMesh *mesh, EdgeHandle eh) {
+//    if (mesh->property(edgeWeightHandle, eh) >= 0) {
+//        return mesh->property(edgeWeightHandle, eh);
+//    } else {
+//        HalfedgeHandle he1 = mesh->halfedge_handle(eh, 0);
+//        HalfedgeHandle he2 = mesh->halfedge_handle(eh, 1);
+//        
+//        // if the two faces along this edge are different color, set weight of this edge to almost 0
+//        // we encourage path go through the boundary of different colors
+//        //    if (!mesh->is_boundary(he1) && !mesh->is_boundary(he2)
+//        //        &&  mesh->color(mesh->face_handle(he1)) != mesh->color(mesh->face_handle(he2))) {
+//        //        return 0;
+//        //    } else {
+//        VertexHandle v1 = mesh->from_vertex_handle(he1);
+//        VertexHandle v2 = mesh->to_vertex_handle(he1);
+//        TriMesh::Point p1 = mesh->point(v1);
+//        TriMesh::Point p2 = mesh->point(v2);
+//        OpenMesh::Vec3d vector_v = (p1-p2);
+//        
+//        std::vector<OpenMesh::Vec3d> joints = mesh->property(skeletonJointsHandle);
+//        std::vector<Bone> bones = mesh->property(skeletonBonesHandle);
+//        //    int closestIdx1 = mesh->property(closestSkeletonPointHandle, v1);
+//        //    int closestIdx2 = mesh->property(closestSkeletonPointHandle, v2);
+//        
+//        // Calculate corresponding averaged bone direction for each vertex
+//        
+//        
+//        // Search for adjacency points on skeleton
+//        OpenMesh::Vec3d avgBoneDirection(0,0,0);
+//        int i = 0;
+//        for (std::vector<Bone>::iterator bone_it = bones.begin(); bone_it != bones.end(); bone_it++, i++) {
+//            OpenMesh::Vec3d dir = (bone_it->getA() - bone_it->getB()).normalize();
+//            double weight1 = mesh->property(skeletonBonesWeightHandle, v1)[i];
+//            double weight2 = mesh->property(skeletonBonesWeightHandle, v2)[i];
+//            
+//            avgBoneDirection += dir * (weight1);
+//        }
+//        double weight = 1-fabs((vector_v|avgBoneDirection)/(vector_v.norm()*avgBoneDirection.norm()));
+//        mesh->property(edgeWeightHandle, eh) = weight;
+//        return weight;
+//        //        return std::sqrt((p1-p2).norm());
+//        //            double curvature1 = mesh->property(maxCurvatureHandle, v1);
+//        //            double curvature2 = mesh->property(maxCurvatureHandle, v2);
+//        //            // clamp curvature to [-1, 1]
+//        //            curvature1 = fmax(fmin(curvature1, 1), -1);
+//        //            curvature2 = fmax(fmin(curvature2, 1), -1);
+//        //
+//        //            // weight using curvature
+//        //            // encourage path with +1/-1 curvature, not 0
+//        //            return 1 - abs(curvature1 + curvature2)/2;
+//        //    }
+//    }
+//}
 
 void PlushPlugin::calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle)
 {
@@ -53,33 +240,25 @@ void PlushPlugin::calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle)
         index++;
     }
     
-    // assign edge weight
-    std::vector<double> weight(boost::num_edges(P));
-    
-    index = 0;
-    boost_edge_iterator eit, eit_end;
-    for (boost::tie(eit, eit_end) = boost::edges(P); eit != eit_end; ++eit) {
-        boost_halfedge_descriptor hed = halfedge(*eit, P);
-        hed->id() = index;
-        
-        weight[index++] = getEdgeWeight(mesh, hed->vertex()->id(), hed->opposite()->vertex()->id());
-    }
-    
     // prepare property maps for dijkstra algorithm
-    typedef boost::property_map<Polyhedron, boost::vertex_external_index_t>::type VertexIdPropertyMap;
     VertexIdPropertyMap vertex_index_pmap = get(CGAL::vertex_external_index, P);
-    
-    typedef boost::property_map<Polyhedron, boost::edge_external_index_t>::type EdgeIdPropertyMap;
     EdgeIdPropertyMap edge_index_pmap = get(boost::edge_external_index, P);
     
     std::vector<boost_vertex_descriptor> predecessor(boost::num_vertices(P));
     boost::iterator_property_map<std::vector<boost_vertex_descriptor>::iterator, VertexIdPropertyMap> predecessor_pmap(predecessor.begin(), vertex_index_pmap);
     boost::iterator_property_map<std::vector<double>::iterator, VertexIdPropertyMap> distance_pmap(distance.begin(), vertex_index_pmap);
-    boost::iterator_property_map<std::vector<double>::iterator, EdgeIdPropertyMap> weight_pmap(weight.begin(), edge_index_pmap);
+    WeightFunctor weightFunctor(mesh,
+                                P,
+                                predecessor_pmap,
+                                edge_index_pmap);
+    auto weightmap = boost::make_function_property_map< boost_edge_descriptor,
+                                                        double,
+                                                        WeightFunctor > (weightFunctor);
     
     boost::dijkstra_shortest_paths(P, source,
                                    vertex_index_map(vertex_index_pmap)
-                                   .weight_map(weight_pmap)
+//                                   .weight_map(weight_pmap)
+                                   .weight_map(weightmap)
                                    .distance_map(distance_pmap)
                                    .predecessor_map(predecessor_pmap));
     
@@ -237,7 +416,7 @@ bool PlushPlugin::calcSpanningTree(QString _jobId, int meshId, std::set<EdgeHand
             IdList path = found2->second;
             
             // assign edge & weight
-            distance.push_back(std::make_pair(path, cost));
+            distance.push_back(std::make_pair(path, cost/path.size()));
             
             // most of the time is spent on geodesic calculation
             iterations++;
@@ -322,41 +501,5 @@ bool PlushPlugin::calcSpanningTree(QString _jobId, int meshId, std::set<EdgeHand
 //            result.insert(eh);
 //            prevIdx = *vIdx_it;
 //        }
-//    }
-}
-double PlushPlugin::getEdgeWeight(TriMesh *mesh, int v1No, int v2No) {
-    VertexHandle v1 = mesh->vertex_handle(v1No);
-    VertexHandle v2 = mesh->vertex_handle(v2No);
-    return getEdgeWeight(mesh, v1, v2);
-}
-
-double PlushPlugin::getEdgeWeight(TriMesh *mesh, VertexHandle v1, VertexHandle v2) {
-    EdgeHandle eh;
-    getEdge(mesh, eh, v1, v2);
-    return getEdgeWeight(mesh, eh);
-}
-
-double PlushPlugin::getEdgeWeight(TriMesh *mesh, EdgeHandle eh) {
-    HalfedgeHandle he1 = mesh->halfedge_handle(eh, 0);
-    HalfedgeHandle he2 = mesh->halfedge_handle(eh, 1);
-    
-    // if the two faces along this edge are different color, set weight of this edge to almost 0
-    // we encourage path go through the boundary of different colors
-//    if (!mesh->is_boundary(he1) && !mesh->is_boundary(he2)
-//        &&  mesh->color(mesh->face_handle(he1)) != mesh->color(mesh->face_handle(he2))) {
-//        return 0;
-//    } else {
-        const TriMesh::Point p1 = mesh->point(mesh->from_vertex_handle(he1));
-        const TriMesh::Point p2 = mesh->point(mesh->to_vertex_handle(he1));
-        return std::sqrt((p1-p2).norm());
-        //            double curvature1 = mesh->property(maxCurvatureHandle, v1);
-        //            double curvature2 = mesh->property(maxCurvatureHandle, v2);
-        //            // clamp curvature to [-1, 1]
-        //            curvature1 = fmax(fmin(curvature1, 1), -1);
-        //            curvature2 = fmax(fmin(curvature2, 1), -1);
-        //
-        //            // weight using curvature
-        //            // encourage path with +1/-1 curvature, not 0
-        //            return 1 - abs(curvature1 + curvature2)/2;
 //    }
 }

@@ -16,7 +16,7 @@
 
 #include "GeodesicDistance/geodesic_mesh.hh"
 
-#include "Skeleton.hh"
+#include "SuperDeform/Skeleton.hh"
 
 typedef TriMesh::VertexHandle VertexHandle;
 typedef TriMesh::EdgeHandle EdgeHandle;
@@ -110,9 +110,6 @@ private:
     
     bool getEdge(TriMesh *mesh, EdgeHandle &_eh, int v1No, int v2No);
     bool getEdge(TriMesh *mesh, EdgeHandle &_eh, VertexHandle v1, VertexHandle v2);
-    double getEdgeWeight(TriMesh *mesh, int v1No, int v2No);
-    double getEdgeWeight(TriMesh *mesh, VertexHandle v1, VertexHandle v2);
-    double getEdgeWeight(TriMesh *mesh, EdgeHandle eh);
     
     void loadCurvature(TriMesh *mesh, QString meshName);
     

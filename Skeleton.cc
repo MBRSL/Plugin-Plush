@@ -7,7 +7,7 @@
 //
 
 #include "PlushPlugin.hh"
-#include "Skeleton.hh"
+#include "SuperDeform/Skeleton.hh"
 #include <ObjectTypes/PolyLine/PolyLine.hh>
 //#include <assimp/Importer.hpp> // C++ importer interface
 //#include <assimp/scene.h> // Output data structure
