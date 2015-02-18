@@ -98,7 +98,6 @@ private:
     QSpinBox *geodesicEdges;
     QPushButton *geodesicButton;
     QPushButton *geodesicAllButton;
-    QPushButton *ridgeButton;
     QPushButton *loadSelectionButton;
     QPushButton *saveSelectionButton;
     QPushButton *clearSelectionButton;
@@ -111,8 +110,6 @@ private:
     
     std::vector<char*> *requiredPlugins;
 
-    //std::map<VertexHandle, double> *curvatureK2;
-    
     bool getEdge(TriMesh *mesh, EdgeHandle &_eh, int v1No, int v2No);
     bool getEdge(TriMesh *mesh, EdgeHandle &_eh, VertexHandle v1, VertexHandle v2);
     
@@ -128,9 +125,7 @@ private:
     
     bool calcCurvature(QString _jobId, int meshId);
     void calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle);
-//    void findPath(TriMesh *mesh, std::set<EdgeHandle> &spanningTree, std::vector<VertexHandle> &path, VertexHandle sourceHandle, VertexHandle destHandle);
     bool calcSpanningTree(QString _jobId, int meshId, std::vector<std::pair<IdList, double> > &result, IdList selectedVertices);
-    void getOrderedSelectedVertices(TriMesh *mesh, int meshId, IdList *selectedVertices);
     
     void initProperties(TriMesh *mesh);
     void uninitProperties(TriMesh *mesh);
@@ -139,8 +134,6 @@ private slots:
     // BaseInterface
     void initializePlugin();
     void pluginsInitialized();
-
-    void showRidge();
     
     void calcSkeletonWeightButtonClicked();
     void saveSkeletonWeightButtonClicked();

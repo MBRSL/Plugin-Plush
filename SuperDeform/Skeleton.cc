@@ -2,8 +2,8 @@
 #include <iostream>
 #include <fstream>
 
-Bone::Bone(OpenMesh::Vec3d _a, OpenMesh::Vec3d _b, int _idxa, int _idxb, BoneDirection _direction = BD_NONE, SemanticMeaning _id = SM_NONE) :
-	  a(_a), b(_b), idxa(_idxa), idxb(_idxb), direction(_direction), id(_id) 
+Bone::Bone(OpenMesh::Vec3d _a, OpenMesh::Vec3d _b, int _idxa, int _idxb) :
+	  a(_a), b(_b), idxa(_idxa), idxb(_idxb)
 {
 }
 
@@ -37,26 +37,6 @@ OpenMesh::Vec3d Bone::getB() const
 void Bone::setB(OpenMesh::Vec3d _b)
 {
 	b = _b;
-}
-
-BoneDirection Bone::getDirection()
-{
-	return direction;
-}
-
-void Bone::setDirection(BoneDirection _direction)
-{
-	direction = _direction;
-}
-
-SemanticMeaning Bone::getID()
-{
-	return id;
-}
-
-void Bone::setID(SemanticMeaning _id)
-{
-	id = _id;
 }
 
 int Bone::getIdxA()

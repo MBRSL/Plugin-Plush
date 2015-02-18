@@ -24,23 +24,7 @@ double cot(OpenMesh::Vec3d v1, OpenMesh::Vec3d v2)
 
 void Weight::computeBoneWeight(TriMesh *mesh, Skeleton *skeleton)
 {
-//	if (!boneweight.empty())
-//	{
-//		for(size_t i = 0; i < boneweight.size(); i++)
-//		{
-//			delete [] boneweight[i];
-//			boneweight[i] = NULL;
-//		}
-//		boneweight.clear();
-//	}
     boneweight = Eigen::MatrixXd(skeleton->bones.size(), mesh->n_vertices());
-//	for(size_t i = 0; i < skeleton->bones.size(); i++)
-//	{
-//        Eigen::VectorXd w = Eigen::VectorXd(mesh->n_vertices());
-//		boneweight.push_back(w);
-//	}
-	
-//    Eigen::MatrixXd idDA = Eigen::MatrixXd(mesh->n_vertices(), mesh->n_vertices());
     Eigen::SparseMatrix<double> idDA(mesh->n_vertices(), mesh->n_vertices());
     Eigen::VectorXd H = Eigen::VectorXd(mesh->n_vertices()); // diagonal matrix
     std::vector<std::vector<int> > nearestBoneIdx;
@@ -48,9 +32,7 @@ void Weight::computeBoneWeight(TriMesh *mesh, Skeleton *skeleton)
 	solveWeight(mesh->n_vertices(), skeleton->bones.size(), idDA, H, nearestBoneIdx);
     normalizeWeight(mesh->n_vertices());
 
-//	ReleaseMatrix(idDA);
-//	delete [] H;
-	for(size_t i = 0; i < nearestBoneIdx.size(); i++)
+    for(size_t i = 0; i < nearestBoneIdx.size(); i++)
 	{
 		nearestBoneIdx[i].clear();
 	}
@@ -59,13 +41,6 @@ void Weight::computeBoneWeight(TriMesh *mesh, Skeleton *skeleton)
 
 Weight::~Weight()
 {
-//	for(size_t i = 0; i < boneweight.size(); i++)
-//	{
-//		delete [] boneweight[i];
-//		boneweight[i] = NULL;
-//	}
-//	boneweight.clear();
-//	DeinitTaucsInterface();
 }
 
 Eigen::MatrixXd Weight::getWeight()
@@ -86,7 +61,6 @@ void Weight::setMatrix(TriMesh *mesh, const vector<Bone> &bones,
 	//                 = 0    otherwise
 
 	size_t i = 0;
-//    Eigen::SparseMatrix<double> idA(mesh->n_vertices(), mesh->n_vertices());
     Eigen::VectorXd D(mesh->n_vertices());
 	
 	for (i = 0; i < mesh->n_vertices(); i++)
@@ -96,11 +70,6 @@ void Weight::setMatrix(TriMesh *mesh, const vector<Bone> &bones,
 	}
 
 	// start set D = diagonal matrix, d(i) = 1/area
-//	for (i = 0; i < mesh->OpenMesh::BaseKernel::n_faces(); i++)
-//	{
-//		triArea[i] = sqrt(facetNormal[i] | facetNormal[i]);
-//	}
-
 	i = 0;
 	for (FaceIter f_it = mesh->faces_begin(); f_it != mesh->faces_end(); f_it++, i++)
 	{
@@ -171,67 +140,40 @@ void Weight::setMatrix(TriMesh *mesh, const vector<Bone> &bones,
 		// start set matrix A and diagonal matrix D
 		double sumOmega = 0.0;
 		do{
-//            if(he->next() != NULL)
-			if(true)
-				he = mesh->next_halfedge_handle(he);
-			else
-				break;
+            he = mesh->next_halfedge_handle(he);
 
 			// start calculate omega_ij = cot(alpha) + cot(beta)
 			VertexHandle vj = mesh->to_vertex_handle(he); // incident vertex, vi's neighbor
             TriMesh::Point pj = mesh->point(vj);
 			double cot_alpha = 0;
 			double cot_beta = 0;
-//			if(he->next() != NULL)
-            if (true)
-			{
-				VertexHandle vij_1 = mesh->to_vertex_handle(mesh->next_halfedge_handle(he));
-                TriMesh::Point pij_1 = mesh->point(vij_1);
-                cot_alpha = cot(pi - pij_1, pj - pij_1);
-			}
-//			if(he->opposite() != NULL)
-            if (true)
-			{
-//				if(he->opposite()->next() != NULL)
-                if (true)
-				{
-                    VertexHandle vij_2 = mesh->to_vertex_handle(mesh->next_halfedge_handle(mesh->opposite_halfedge_handle(he)));
-                    TriMesh::Point pij_2 = mesh->point(vij_2);
-                    cot_beta = cot(pi - pij_2, pj - pij_2);
-				}
-			}
-			double omega_ij = cot_alpha + cot_beta;
+
+            VertexHandle vij_1 = mesh->to_vertex_handle(mesh->next_halfedge_handle(he));
+            TriMesh::Point pij_1 = mesh->point(vij_1);
+            cot_alpha = cot(pi - pij_1, pj - pij_1);
+
+            VertexHandle vij_2 = mesh->to_vertex_handle(mesh->next_halfedge_handle(mesh->opposite_halfedge_handle(he)));
+            TriMesh::Point pij_2 = mesh->point(vij_2);
+            cot_beta = cot(pi - pij_2, pj - pij_2);
+            
+            double omega_ij = cot_alpha + cot_beta;
 			// end calculate omega_ij = cot(alpha) + cot(beta)
 
-//			SetMatrixEntry(idA, i, vj->id(), -omega_ij);
             tripletList.push_back(Eigen::Triplet<double>(i, vj.idx(), -omega_ij));
 			sumOmega += omega_ij;
 
-//			if(he->opposite() != NULL)
-            if (true) {
-				he = mesh->opposite_halfedge_handle(he);
-            } else {
-				break;
-            }
+            he = mesh->opposite_halfedge_handle(he);
 		} while(mesh->halfedge_handle(*v_it) != he);
 
 		if(D(i) < 1e-7)
 			D(i) = 1e-7;
 		D(i) = 1.0 / D(i); // d(i) = 1/area
 
-//		idA(i, i) += (sumOmega + H(i) / D(i));
         tripletList.push_back(Eigen::Triplet<double>(i, i, sumOmega + H(i) / D(i)));
 		// end set matrix A and diagonal matrix D
 	}
 
-//	if(!MultiplyDiagMatrixMatrix(idA, D, idDA))
     idDA.setFromTriplets(tripletList.begin(), tripletList.end());
-//    idDA = Eigen::MatrixXd(idA * D.asDiagonal());
-    if (false)
-	{
-		std::cout << "failed to multiply diagonal matrix matrix.\n";
-		return;
-	}
 }
 
 // collision detection
@@ -297,7 +239,6 @@ void Weight::solveWeight(int vsize, int bsize, Eigen::SparseMatrix<double> &idDA
 {
     Eigen::SimplicialLDLT< Eigen::SparseMatrix<double> > solver;
     solver.compute(idDA);
-    //        ldlt.compute(idDA.transpose() * idDA);
     if (solver.info() != Eigen::Success)
     {
         std::cout << "Failed to decompose matrix " << std::endl;
@@ -322,9 +263,6 @@ void Weight::solveWeight(int vsize, int bsize, Eigen::SparseMatrix<double> &idDA
 			}	
 		}
 		// end set vector Hpi
-
-//		if(!SolveATA(idDA, Hp, boneweight[i], 1))
-//        boneweight[i] = Eigen::VectorXd((idDA->transpose() * (*idDA)).ldlt().solve(idDA->transpose() * Hp));
         boneweight.block(i,0,1,vsize) = Eigen::VectorXd(solver.solve(Hp)).transpose();
 	}
 }

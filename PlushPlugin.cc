@@ -1,6 +1,4 @@
-#include <ObjectTypes/Coordsys/Coordsys.hh>
 #include <ObjectTypes/PolyMesh/PolyMesh.hh>
-#include <ObjectTypes/PolyLine/PolyLine.hh>
 #include <ObjectTypes/TriangleMesh/TriangleMesh.hh>
 
 #include <OpenFlipper/BasePlugin/RPCWrappers.hh>
@@ -8,7 +6,6 @@
 
 #include "PlushPlugin.hh"
 #include "SuperDeform/Weight.hh"
-#include "GeodesicDistance/geodesic_algorithm_dijkstra.hh"
 
 OpenMesh::VPropHandleT<double> PlushPlugin::minCurvatureHandle;
 OpenMesh::VPropHandleT<double> PlushPlugin::maxCurvatureHandle;
@@ -91,10 +88,8 @@ void PlushPlugin::pluginsInitialized() {
     selectionGroup->setLayout(selectionLayout);
     
     QGroupBox *curvatureGroup = new QGroupBox(tr("Curvature"));
-    ridgeButton = new QPushButton(tr("Show ridge"));
     calcCurvatureButton = new QPushButton(tr("Calculate"));
     QHBoxLayout *curvatureLayout = new QHBoxLayout;
-    curvatureLayout->addWidget(ridgeButton);
     curvatureLayout->addWidget(calcCurvatureButton);
     curvatureGroup->setLayout(curvatureLayout);
     
@@ -107,7 +102,6 @@ void PlushPlugin::pluginsInitialized() {
     connect(saveSkeletonWeightButton, SIGNAL(clicked()), this, SLOT(saveSkeletonWeightButtonClicked()));
     connect(geodesicButton, SIGNAL(clicked()), this, SLOT(showGeodesicButtonClicked()));
     connect(geodesicAllButton, SIGNAL(clicked()), this, SLOT(showGeodesicButtonClicked()));
-    connect(ridgeButton, SIGNAL(clicked()), this, SLOT(showRidge()));
     connect(loadSelectionButton, SIGNAL(clicked()), this, SLOT(loadSelectionButtonClicked()));
     connect(saveSelectionButton, SIGNAL(clicked()), this, SLOT(saveSelectionButtonClicked()));
     connect(clearSelectionButton, SIGNAL(clicked()), this, SLOT(clearSelectionButtonClicked()));
@@ -184,37 +178,6 @@ void PlushPlugin::uninitProperties(TriMesh *mesh) {
         if (mesh->property(bonesWeightHandle, *v_it) != NULL) {
             delete[] mesh->property(bonesWeightHandle, *v_it);
         }
-    }
-}
-
-void PlushPlugin::showRidge() {
-    // parse file
-    QFile input("/Users/MBRSL/Dropbox/Curricular/Plush project/OpenFlipper/Plugin-Plush/ridge.txt");
-    if (input.open(QIODevice::ReadOnly)) {
-        QTextStream in(&input);
-        // each line is one polyline
-        while (!in.atEnd()) {
-            QString line = in.readLine();
-            
-            QTextStream textStream(&line);
-            int lineType;
-            double strength, sharpness;
-            textStream >> lineType >> strength >> sharpness;
-            
-            if (strength >= 5) {
-                int objId;
-                emit addEmptyObject(DATA_POLY_LINE, objId);
-                PolyLineObject *object = 0;
-                PluginFunctions::getObject(objId, object);
-                PolyLine *polyLine = object->line();
-
-                double x,y,z;
-                while (!(textStream >> x >> y >> z).atEnd()) {
-                    polyLine->add_point(PolyLine::Point(x,y,z));
-                }
-            }
-        }
-        input.close();
     }
 }
 
@@ -367,13 +330,6 @@ void PlushPlugin::showGeodesicThread(QString _jobId) {
             IdList selectedVertices;
             selectedVertices = RPC::callFunctionValue<IdList> ("meshobjectselection", "getVertexSelection", meshId);
             geodesicEdges->setMaximum(selectedVertices.size()*(selectedVertices.size()-1)/2);
-            // if the selection is not empty, save it as default selection for next time.
-//            if (selectedVertices.size() > 0) {
-//                RPC::callFunction<int, QString>("meshobjectselection", "saveFlipperModelingSelection", meshId, meshName + "_selection.txt");
-//            } else {
-//                RPC::callFunction<int, QString>("meshobjectselection", "loadFlipperModelingSelection", meshId, meshName + "_selection.txt");
-//                selectedVertices = RPC::callFunctionValue<IdList> ("meshobjectselection", "getVertexSelection", meshId);
-//            }
 
             std::vector<std::pair<IdList, double> > spanningTree;
             if (calcSpanningTree(_jobId, meshId, spanningTree, selectedVertices)) {
@@ -412,50 +368,6 @@ void PlushPlugin::showGeodesicThread(QString _jobId) {
         }
     }
     emit log(LOGINFO, "Geodesic calculation done.");
-}
-
-void PlushPlugin::getOrderedSelectedVertices(TriMesh *mesh, int meshId, IdList *selectedVertices) {
-    *selectedVertices = RPC::callFunctionValue<IdList> ("meshobjectselection", "getVertexSelection", meshId);
-    
-    if (selectedVertices->size() < 2) {
-        QString str = QString("Object %1 contains less than 2 vertices. no path showed.").arg(meshId);
-        emit log(LOGINFO, str);
-        return;
-    }
-    
-    // select vertex with min Z coordinate
-    double minZ = 1e9;
-    size_t minZ_idx = 0;
-    for (size_t sortI = 0; sortI < selectedVertices->size(); sortI++)
-    {
-        TriMesh::Point p1 = mesh->point(mesh->vertex_handle((*selectedVertices)[sortI]));
-        if (p1[2] < minZ)
-        {
-            minZ = p1[2];
-            minZ_idx = sortI;
-        }
-    }
-    // select shortest path greedly
-    for (size_t sortI = 0; sortI < selectedVertices->size()-1; sortI++)
-    {
-        TriMesh::Point p1 = mesh->point(mesh->vertex_handle((*selectedVertices)[sortI]));
-        double minDist = 1e9;
-        size_t min_idx = sortI+1;
-        for (size_t sortJ = sortI+1; sortJ < selectedVertices->size(); sortJ++)
-        {
-            TriMesh::Point p2 = mesh->point(mesh->vertex_handle((*selectedVertices)[sortJ]));
-            if ((p1-p2).length() < minDist)
-            {
-                minDist = (p1-p2).length();
-                min_idx = sortJ;
-            }
-        }
-        
-        // exchange position
-        size_t tmpId = (*selectedVertices)[sortI+1];
-        (*selectedVertices)[sortI+1] = (*selectedVertices)[min_idx];
-        (*selectedVertices)[min_idx] = tmpId;
-    }
 }
 
 bool PlushPlugin::getEdge(TriMesh *mesh, EdgeHandle &_eh, VertexHandle v1, VertexHandle v2) {
