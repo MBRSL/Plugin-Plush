@@ -15,16 +15,15 @@ OpenMesh::VPropHandleT<OpenMesh::Vec3d> PlushPlugin::minCurvatureDirectionHandle
 OpenMesh::VPropHandleT<OpenMesh::Vec3d> PlushPlugin::maxCurvatureDirectionHandle;
 
 OpenMesh::EPropHandleT<double> PlushPlugin::edgeWeightHandle;
-OpenMesh::MPropHandleT< std::vector<OpenMesh::Vec3d> > PlushPlugin::skeletonJointsHandle;
-OpenMesh::MPropHandleT< std::vector<Bone> > PlushPlugin::skeletonBonesHandle;
-OpenMesh::VPropHandleT< std::vector<double> > PlushPlugin::skeletonBonesWeightHandle;
+OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, double> > PlushPlugin::geodesicDistanceHandle;
+OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, IdList> > PlushPlugin::geodesicPathHandle;
+
+OpenMesh::MPropHandleT<Skeleton*> PlushPlugin::skeletonHandle;
+OpenMesh::VPropHandleT<double*> PlushPlugin::bonesWeightHandle;
 
 PlushPlugin::PlushPlugin()
 {
     requiredPlugins = new std::vector<char*>();
-    
-    geodesicDistance = new std::map<std::pair<VertexHandle, VertexHandle>, double>();
-    geodesicPath = new std::map<std::pair<VertexHandle, VertexHandle>, IdList>();
     
     thread = NULL;
 }
@@ -40,19 +39,6 @@ void PlushPlugin::initializePlugin()
 
 PlushPlugin::~PlushPlugin() {
     delete requiredPlugins;
-    
-    delete geodesicDistance;
-    delete geodesicPath;
-    
-    delete geodesicEdges;
-    delete geodesicButton;
-    delete geodesicEdges;
-    delete ridgeButton;
-    delete loadSelectionButton;
-    delete saveSelectionButton;
-    delete clearSelectionButton;
-    delete calcCurvatureButton;
-
 }
 void PlushPlugin::pluginsInitialized() {
     bool isPluginsExist;
@@ -124,6 +110,10 @@ void PlushPlugin::fileOpened(int _id) {
     if (obj->dataType(DATA_TRIANGLE_MESH)) {
         TriMesh *mesh;
         mesh = PluginFunctions::triMesh(obj);
+        
+        // setup properties
+        initProperties(mesh);
+        
         // Load curvature
         loadCurvature(mesh, meshName);
         
@@ -133,11 +123,51 @@ void PlushPlugin::fileOpened(int _id) {
         
         // Load skeleton
         loadSkeleton(_id);
-        
-        // Init edge weight
-        mesh->add_property(edgeWeightHandle, "Edge weight");
-        for (EdgeIter e_it = mesh->edges_begin(); e_it != mesh->edges_end(); e_it++) {
-            mesh->property(edgeWeightHandle, *e_it) = -1;
+
+        // Load bone weight with skeleton
+        loadBoneWeight(_id);
+    }
+}
+
+void PlushPlugin::objectDeleted(int _id) {
+    BaseObjectData *obj;
+    PluginFunctions::getObject(_id, obj);
+    QString meshName = QFileInfo(obj->name()).baseName();
+    
+    if (obj->dataType(DATA_TRIANGLE_MESH)) {
+        TriMesh *mesh;
+        mesh = PluginFunctions::triMesh(obj);
+        uninitProperties(mesh);
+    }
+}
+
+void PlushPlugin::initProperties(TriMesh *mesh) {
+    mesh->add_property(minCurvatureHandle, "Min Curvature");
+    mesh->add_property(maxCurvatureHandle, "Max Curvature");
+    mesh->add_property(minCurvatureDirectionHandle, "Min curvature direction");
+    mesh->add_property(maxCurvatureDirectionHandle, "Max curvature direction");
+    
+    mesh->add_property(edgeWeightHandle, "Edge weight");
+    mesh->add_property(geodesicDistanceHandle, "Geodesic distance between vertices pair");
+    mesh->add_property(geodesicPathHandle, "Geodesic path between vertices pair");
+    
+    mesh->add_property(skeletonHandle, "Skeleton");
+    mesh->add_property(bonesWeightHandle, "Bone weights for each vertex");
+    
+//    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
+//    }
+    for (EdgeIter e_it = mesh->edges_begin(); e_it != mesh->edges_end(); e_it++) {
+        mesh->property(edgeWeightHandle, *e_it) = -1;
+    }
+}
+
+void PlushPlugin::uninitProperties(TriMesh *mesh) {
+    if (mesh->property(skeletonHandle) != NULL) {
+        delete mesh->property(skeletonHandle);
+    }
+    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
+        if (mesh->property(bonesWeightHandle, *v_it) != NULL) {
+            delete[] mesh->property(bonesWeightHandle, *v_it);
         }
     }
 }
@@ -278,12 +308,38 @@ void PlushPlugin::showGeodesicThread(QString _jobId) {
 //                selectedVertices = RPC::callFunctionValue<IdList> ("meshobjectselection", "getVertexSelection", meshId);
 //            }
 
-            std::set<EdgeHandle> spanningTree;
-            if (calcSpanningTree(_jobId, meshId, spanningTree, selectedVertices, geodesicEdges->value())) {
+            std::vector<std::pair<IdList, double> > spanningTree;
+            if (calcSpanningTree(_jobId, meshId, spanningTree, selectedVertices)) {
+                struct Comparator {
+                    bool operator() (std::pair<IdList, double> a,
+                                     std::pair<IdList, double> b) {
+                        return a.second < b.second;
+                    }
+                } comparator;
+                
+                std::sort(spanningTree.begin(), spanningTree.end(), comparator);
+                
                 IdList edgeList;
-                for (std::set<EdgeHandle>::iterator e_it = spanningTree.begin(); e_it != spanningTree.end(); e_it++) {
-                    edgeList.push_back(e_it->idx());
+                int beginNo = 0;
+                int endNo = geodesicEdges->value();
+                if (!showAllPath && endNo != 0) {
+                    beginNo = endNo - 1;
                 }
+                for (int i = beginNo; i < endNo; i++) {
+                    IdList path = spanningTree[i].first;
+                    double weight = spanningTree[i].second;
+                    int prevIdx = *path.begin();
+                    IdList::iterator vIdx_it = (path.begin()+1);
+                    for (; vIdx_it != path.end(); vIdx_it++) {
+                        EdgeHandle eh;
+                        assert(getEdge(mesh, eh, prevIdx, *vIdx_it));
+                        edgeList.push_back(eh.idx());
+                        prevIdx = *vIdx_it;
+                    }
+                    emit log(LOGINFO, QString("Total weight of path #%1: %2").arg(QString::number(i+1), QString::number(weight)));
+                }
+
+                RPC::callFunction<int>("meshobjectselection", "clearEdgeSelection", meshId);
                 RPC::callFunction<int, IdList>("meshobjectselection", "selectEdges", meshId, edgeList);
             }
         }

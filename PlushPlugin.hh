@@ -78,16 +78,21 @@ public:
     QString name() { return (QString("Simple Plush")); };
     QString description( ) { return (QString("Smooths the active Mesh")); };
 
+    // Curvature
     static OpenMesh::VPropHandleT<double> minCurvatureHandle;
     static OpenMesh::VPropHandleT<double> maxCurvatureHandle;
     static OpenMesh::VPropHandleT<OpenMesh::Vec3d> minCurvatureDirectionHandle;
     static OpenMesh::VPropHandleT<OpenMesh::Vec3d> maxCurvatureDirectionHandle;
     
+    // Geodesic
     static OpenMesh::EPropHandleT<double> edgeWeightHandle;
-    static OpenMesh::MPropHandleT< std::vector<OpenMesh::Vec3d> > skeletonJointsHandle;
-    static OpenMesh::MPropHandleT< std::vector<Bone> > skeletonBonesHandle;
+    static OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, double> > geodesicDistanceHandle;
+    static OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, IdList> > geodesicPathHandle;
+    
+    // Skeleton
+    static OpenMesh::MPropHandleT<Skeleton*> skeletonHandle;
     // The weight of corresponding bones for each vertex
-    static OpenMesh::VPropHandleT< std::vector<double> > skeletonBonesWeightHandle;
+    static OpenMesh::VPropHandleT<double*> bonesWeightHandle;
 
 private:
     QSpinBox *geodesicEdges;
@@ -103,9 +108,6 @@ private:
     
     std::vector<char*> *requiredPlugins;
 
-    std::map<std::pair<VertexHandle, VertexHandle>, double> *geodesicDistance;
-    std::map<std::pair<VertexHandle, VertexHandle>, IdList> *geodesicPath;
-    
     //std::map<VertexHandle, double> *curvatureK2;
     
     bool getEdge(TriMesh *mesh, EdgeHandle &_eh, int v1No, int v2No);
@@ -122,9 +124,11 @@ private:
     bool calcCurvature(QString _jobId, int meshId);
     void calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle);
 //    void findPath(TriMesh *mesh, std::set<EdgeHandle> &spanningTree, std::vector<VertexHandle> &path, VertexHandle sourceHandle, VertexHandle destHandle);
-    bool calcSpanningTree(QString _jobId, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices, int edges);
-    bool calcSpanningTree(QString _jobId, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices);
+    bool calcSpanningTree(QString _jobId, int meshId, std::vector<std::pair<IdList, double> > &result, IdList selectedVertices);
     void getOrderedSelectedVertices(TriMesh *mesh, int meshId, IdList *selectedVertices);
+    
+    void initProperties(TriMesh *mesh);
+    void uninitProperties(TriMesh *mesh);
     
 private slots:
     // BaseInterface
@@ -147,6 +151,7 @@ private slots:
     
     // LoadSaveInterface
     void fileOpened(int _id);
+    void objectDeleted(int _id);
     
     // ProcessInterface
     void canceledJob(QString _job);

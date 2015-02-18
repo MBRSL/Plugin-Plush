@@ -65,11 +65,6 @@ bool PlushPlugin::calcCurvature(QString _jobId, int meshId) {
     QString meshName = QFileInfo(obj->name()).baseName();
     emit setJobDescription(_jobId, QString("Calculating curvature: %1").arg(meshName));
         
-    mesh->add_property(minCurvatureHandle, "Min Curvature");
-    mesh->add_property(maxCurvatureHandle, "Max Curvature");
-    mesh->add_property(minCurvatureDirectionHandle, "Min curvature direction");
-    mesh->add_property(maxCurvatureDirectionHandle, "Max curvature direction");
-    
     IdList selectedVertices;
     // If no one is selected, show all of them
     if (selectedVertices.size() == 0) {
@@ -164,12 +159,6 @@ void PlushPlugin::loadCurvature(TriMesh *mesh, QString meshName) {
     }
     
     QTextStream in(&file);
-    
-    // Add property so that we can store it into TriMesh
-    mesh->add_property(maxCurvatureHandle, "Max Curvature");
-    mesh->add_property(minCurvatureHandle, "Min Curvature");
-    mesh->add_property(maxCurvatureDirectionHandle, "Max curvature direction");
-    mesh->add_property(minCurvatureDirectionHandle, "Min curvature direction");
     
     double minK1 = 1e9, minK2 = 1e9;
     double d1x, d1y, d1z, d2x, d2y, d2z, k1, k2;

@@ -69,16 +69,15 @@ private:
                           VertexHandle v2,
                           TriMesh::Point p1,
                           TriMesh::Point p2) const {
-        std::vector<OpenMesh::Vec3d> joints = mesh->property(PlushPlugin::skeletonJointsHandle);
-        std::vector<Bone> bones = mesh->property(PlushPlugin::skeletonBonesHandle);
+        Skeleton *skeleton = mesh->property(PlushPlugin::skeletonHandle);
 
         // Calculate corresponding averaged bone direction for each vertex
         OpenMesh::Vec3d avgBoneDirection(0,0,0);
         int i = 0;
-        for (std::vector<Bone>::iterator bone_it = bones.begin(); bone_it != bones.end(); bone_it++, i++) {
+        for (std::vector<Bone>::iterator bone_it = skeleton->bones.begin(); bone_it != skeleton->bones.end(); bone_it++, i++) {
             OpenMesh::Vec3d dir = (bone_it->getA() - bone_it->getB()).normalize();
-            double weight1 = mesh->property(PlushPlugin::skeletonBonesWeightHandle, v1)[i];
-            double weight2 = mesh->property(PlushPlugin::skeletonBonesWeightHandle, v2)[i];
+            double weight1 = mesh->property(PlushPlugin::bonesWeightHandle, v1)[i];
+            double weight2 = mesh->property(PlushPlugin::bonesWeightHandle, v2)[i];
             
             avgBoneDirection += dir * (weight1);
         }
@@ -213,6 +212,8 @@ public:
 
 void PlushPlugin::calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle)
 {
+    std::map<std::pair<VertexHandle, VertexHandle>, double> &geodesicDistance = mesh->property(geodesicDistanceHandle);
+    std::map<std::pair<VertexHandle, VertexHandle>, IdList> &geodesicPath = mesh->property(geodesicPathHandle);
     // convert mesh from OpenFlipper to CGAL
     Polyhedron P;
     translate_mesh_from_OpenMesh_to_CGAL(mesh, &P);
@@ -233,8 +234,8 @@ void PlushPlugin::calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle)
         // initialize with existing distance if available
         VertexHandle targetHandle = mesh->vertex_handle(index);
         std::map<std::pair<VertexHandle, VertexHandle>, double>::iterator found =
-            geodesicDistance->find(std::make_pair(sourceHandle, targetHandle));
-        if (found != geodesicDistance->end()) {
+            geodesicDistance.find(std::make_pair(sourceHandle, targetHandle));
+        if (found != geodesicDistance.end()) {
             distance[index] = found->second;
         }
         index++;
@@ -269,13 +270,13 @@ void PlushPlugin::calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle)
         std::pair<VertexHandle, VertexHandle> edgeSD = std::make_pair(sourceHandle, destHandle);
         std::pair<VertexHandle, VertexHandle> edgeDS = std::make_pair(destHandle, sourceHandle);
         // clear previous result
-        geodesicDistance->erase(edgeSD);
-        geodesicDistance->erase(edgeDS);
-        geodesicPath->erase(edgeSD);
-        geodesicPath->erase(edgeDS);
+        geodesicDistance.erase(edgeSD);
+        geodesicDistance.erase(edgeDS);
+        geodesicPath.erase(edgeSD);
+        geodesicPath.erase(edgeDS);
 
-        geodesicDistance->insert(std::make_pair(edgeSD, distance_pmap[*vit]));
-        geodesicDistance->insert(std::make_pair(edgeDS, distance_pmap[*vit]));
+        geodesicDistance.insert(std::make_pair(edgeSD, distance_pmap[*vit]));
+        geodesicDistance.insert(std::make_pair(edgeDS, distance_pmap[*vit]));
         
         IdList path;
         for(boost_vertex_iterator predecessor_it = vit; predecessor_pmap[*predecessor_it] != *predecessor_it;) {
@@ -288,9 +289,9 @@ void PlushPlugin::calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle)
             // add source to path
             path.push_back(sourceHandle.idx());
         }
-        geodesicPath->insert(std::make_pair(edgeSD, path));
+        geodesicPath.insert(std::make_pair(edgeSD, path));
         std::reverse(path.begin(), path.end());
-        geodesicPath->insert(std::make_pair(edgeDS, path));
+        geodesicPath.insert(std::make_pair(edgeDS, path));
     }
 }
 
@@ -354,11 +355,10 @@ struct DFS_Visitor : public boost::dfs_visitor<>
 //        result.push_back(vh);
 //    }
 //}
-bool PlushPlugin::calcSpanningTree(QString _jobId, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices) {
-    return calcSpanningTree(_jobId, meshId, result, selectedVertices, (selectedVertices.size()-1+selectedVertices.size()-2)*(selectedVertices.size()-1)/2);
-}
-
-bool PlushPlugin::calcSpanningTree(QString _jobId, int meshId, std::set<EdgeHandle> &result, IdList selectedVertices, int edges) {
+bool PlushPlugin::calcSpanningTree(QString _jobId,
+                                   int meshId,
+                                   std::vector<std::pair<IdList, double> > &result,
+                                   IdList selectedVertices) {
     typedef boost::adjacency_list < boost::vecS, boost::vecS, boost::undirectedS,
         boost::no_property, boost::property < boost::edge_weight_t, int > > Graph;
     typedef boost::graph_traits < Graph >::edge_descriptor Edge;
@@ -381,8 +381,10 @@ bool PlushPlugin::calcSpanningTree(QString _jobId, int meshId, std::set<EdgeHand
     QString meshName = QFileInfo(obj->name()).baseName();
     emit setJobDescription(_jobId, QString("Calculating curvature: %1").arg(meshName));
     
-    std::vector<std::pair<IdList, double> > distance;
-    
+    std::map<std::pair<VertexHandle, VertexHandle>, double> &geodesicDistance = mesh->property(geodesicDistanceHandle);
+    std::map<std::pair<VertexHandle, VertexHandle>, IdList> &geodesicPath = mesh->property(geodesicPathHandle);
+
+//    std::vector<std::pair<IdList, double> > result;
     // create a new graph with selectedVerices, calculate all paths between them
     int iterations = 0;
     int totalIterations = (selectedVertices.size()*(selectedVertices.size()-1)/2);
@@ -400,23 +402,23 @@ bool PlushPlugin::calcSpanningTree(QString _jobId, int meshId, std::set<EdgeHand
             
             // if result is not found, caculate now
             std::map<std::pair<VertexHandle, VertexHandle>, double>::iterator found =
-            geodesicDistance->find(std::make_pair(sourceHandle, destHandle));
-            if (found == geodesicDistance->end()) {
+            geodesicDistance.find(std::make_pair(sourceHandle, destHandle));
+            if (found == geodesicDistance.end()) {
                 calcGeodesic(mesh, sourceHandle);
-                found = geodesicDistance->find(std::make_pair(sourceHandle, destHandle));
+                found = geodesicDistance.find(std::make_pair(sourceHandle, destHandle));
             }
             double cost = found->second;
             
             std::map<std::pair<VertexHandle, VertexHandle>, IdList>::iterator found2 =
-            geodesicPath->find(std::make_pair(sourceHandle, destHandle));
-            if (found2 == geodesicPath->end()) {
+            geodesicPath.find(std::make_pair(sourceHandle, destHandle));
+            if (found2 == geodesicPath.end()) {
                 calcGeodesic(mesh, sourceHandle);
-                found2 = geodesicPath->find(std::make_pair(sourceHandle, destHandle));
+                found2 = geodesicPath.find(std::make_pair(sourceHandle, destHandle));
             }
             IdList path = found2->second;
             
             // assign edge & weight
-            distance.push_back(std::make_pair(path, cost/path.size()));
+            result.push_back(std::make_pair(path, cost));
             
             // most of the time is spent on geodesic calculation
             iterations++;
@@ -424,30 +426,6 @@ bool PlushPlugin::calcSpanningTree(QString _jobId, int meshId, std::set<EdgeHand
             emit setJobState(_jobId, status);
         }
     }
-    
-    struct Comparator {
-        bool operator() (std::pair<IdList, double> a,
-                         std::pair<IdList, double> b) {
-            return a.second < b.second;
-        }
-    } comparator;
-    
-    std::sort(distance.begin(), distance.end(), comparator);
-    
-    int count = 0;
-    for (std::vector<std::pair<IdList, double> >::iterator it = distance.begin(); count < edges && it != distance.end(); it++, count++) {
-        IdList path = it->first;
-        IdList::iterator vIdx_it = path.begin();
-        int prevIdx = *vIdx_it;
-        vIdx_it++;
-        for (; vIdx_it != path.end(); vIdx_it++) {
-            EdgeHandle eh;
-            assert(getEdge(mesh, eh, prevIdx, *vIdx_it));
-            result.insert(eh);
-            prevIdx = *vIdx_it;
-        }
-    }
-
     return true;
     
 //    // create a new graph with selectedVerices, calculate all paths between them
