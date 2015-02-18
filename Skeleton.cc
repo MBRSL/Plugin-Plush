@@ -8,43 +8,62 @@
 
 #include "PlushPlugin.hh"
 #include "SuperDeform/Skeleton.hh"
+#include "SuperDeform/Weight.hh"
 #include <ObjectTypes/PolyLine/PolyLine.hh>
 //#include <assimp/Importer.hpp> // C++ importer interface
 //#include <assimp/scene.h> // Output data structure
 //#include <assimp/postprocess.h> // Post processing flags
 
-bool loadBoneWeight(QString filename, Skeleton *skeleton, TriMesh *mesh, std::map< VertexHandle, std::vector<double> > &boneWeight) {
-    if(skeleton == NULL)
-    {
-        cout << "Invalid skeleton";
+bool PlushPlugin::loadBoneWeight(int meshId) {
+    BaseObjectData *obj;
+    PluginFunctions::getObject(meshId, obj);
+    if (!obj->dataType(DATA_TRIANGLE_MESH)) {
+        emit log(LOGERR, QString("Not a valid TriMesh of object %1").arg(QString::number(meshId)));
         return false;
     }
     
-    ifstream boneWeightFile(filename.toAscii().data());
+    TriMesh *mesh = PluginFunctions::triMesh(obj);
+    QString meshName = QFileInfo(obj->name()).baseName();
+
+    QString weightFilename = meshName+".skeleton.weight";
+
+    if(mesh->property(skeletonHandle) == NULL)
+    {
+        // No skeleton yet, try to load skeleton
+        if (!loadSkeleton(meshId)) {
+            return false;
+        }
+    }
+    Skeleton *skeleton = mesh->property(skeletonHandle);
+    
+    ifstream boneWeightFile(weightFilename.toLocal8Bit().data());
     if(!boneWeightFile.is_open())
     {
-        cout << "Error opening file " << filename.toAscii().data() << endl;
+        emit log(LOGERR, QString("Error opening file: %1").arg(weightFilename));
         return false;
     }
-    
-    boneWeight.clear();
-    
+
+    // Assign bone weight to vertices
     for(VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++)
     {
-        std::vector<double> weights(skeleton->bones.size());
+        double *weights = new double[skeleton->bones.size()];
         for(size_t j = 0; j < skeleton->bones.size(); j++)
         {
             double w;
             boneWeightFile >> w;
             weights[j] = w;
         }
-        boneWeight.insert(std::make_pair(*v_it, weights));
+        if (mesh->property(bonesWeightHandle, *v_it) != NULL) {
+            delete[] mesh->property(bonesWeightHandle, *v_it);
+        }
+        mesh->property(bonesWeightHandle, *v_it) = weights;
     }
     boneWeightFile.close();
+
     return true;
 }
 
-void PlushPlugin::loadSkeleton(int meshId) {
+void PlushPlugin::saveBoneWeight(int meshId) {
     BaseObjectData *obj;
     PluginFunctions::getObject(meshId, obj);
     if (!obj->dataType(DATA_TRIANGLE_MESH)) {
@@ -55,35 +74,50 @@ void PlushPlugin::loadSkeleton(int meshId) {
     TriMesh *mesh = PluginFunctions::triMesh(obj);
     QString meshName = QFileInfo(obj->name()).baseName();
 
-    QString skeletonFilename = meshName+".skeleton";
-    QString weightFilename = meshName+".skeleton.weight";
+    // Prepare file for saving data
+    QFile file(meshName+".skeleton.weight");
+    file.open(QIODevice::WriteOnly | QIODevice::Text);
+    QTextStream out(&file);
     
-    // Load skeleton
-    Skeleton skeleton;
-    if(!skeleton.build(skeletonFilename.toLocal8Bit().data()))
+    int nBones = mesh->property(skeletonHandle)->bones.size();
+    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
+        double *w = mesh->property(bonesWeightHandle, *v_it);
+        for (int i = 0; i < nBones; i++) {
+            out << w[i] << " ";
+        }
+        out << endl;
+    }
+    file.close();
+}
+
+bool PlushPlugin::loadSkeleton(int meshId) {
+    BaseObjectData *obj;
+    PluginFunctions::getObject(meshId, obj);
+    if (!obj->dataType(DATA_TRIANGLE_MESH)) {
+        emit log(LOGERR, QString("Not a valid TriMesh of object %1").arg(QString::number(meshId)));
+        return false;
+    }
+    
+    TriMesh *mesh = PluginFunctions::triMesh(obj);
+    QString meshName = QFileInfo(obj->name()).baseName();
+
+    QString skeletonFilename = meshName+".skeleton";
+    
+    // Add skeleton to mesh property
+    Skeleton *skeleton = new Skeleton;
+    if(!skeleton->build(skeletonFilename.toLocal8Bit().data()))
     {
         emit log(LOGERR, QString("Error loading file: %1").arg(skeletonFilename));
-        return;
+        delete skeleton;
+        return false;
     }
     
-    // Load bone weight with skeleton
-    std::map< VertexHandle, std::vector<double> > boneWeight;
-    if(!loadBoneWeight(weightFilename, &skeleton, mesh, boneWeight))
-    {
-        emit log(LOGERR, QString("Error loading file: %1").arg(weightFilename));
-        return;
+    if (mesh->property(skeletonHandle) != NULL) {
+        delete mesh->property(skeletonHandle);
     }
+    mesh->property(skeletonHandle) = skeleton;
     
-    mesh->add_property(PlushPlugin::skeletonJointsHandle, "Skeleton joints");
-    mesh->property(PlushPlugin::skeletonJointsHandle) = skeleton.verts;
-    
-    mesh->add_property(PlushPlugin::skeletonBonesHandle, "Skeleton bones");
-    mesh->property(PlushPlugin::skeletonBonesHandle) = skeleton.bones;
-    
-    mesh->add_property(PlushPlugin::skeletonBonesWeightHandle, "Bone weights for each vertex");
-    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
-        mesh->property(PlushPlugin::skeletonBonesWeightHandle, *v_it) = boneWeight[*v_it];
-    }
+    return true;
     
 //    // -------------------------------------------------------------------
 //    /** Describes a bone weight on a vertex */

@@ -97,11 +97,14 @@ public:
 private:
     QSpinBox *geodesicEdges;
     QPushButton *geodesicButton;
+    QPushButton *geodesicAllButton;
     QPushButton *ridgeButton;
     QPushButton *loadSelectionButton;
     QPushButton *saveSelectionButton;
     QPushButton *clearSelectionButton;
     QPushButton *calcCurvatureButton;
+    
+    bool showAllPath;
 
     bool isJobCanceled;
     OpenFlipperThread *thread;
@@ -119,8 +122,10 @@ private:
     void saveSelection(int meshId, QString meshName);
     void clearSelection(int meshId);
     
-    void loadSkeleton(int meshId);
-
+    bool loadSkeleton(int meshId);
+    bool loadBoneWeight(int meshId);
+    void saveBoneWeight(int meshId);
+    
     bool calcCurvature(QString _jobId, int meshId);
     void calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle);
 //    void findPath(TriMesh *mesh, std::set<EdgeHandle> &spanningTree, std::vector<VertexHandle> &path, VertexHandle sourceHandle, VertexHandle destHandle);
@@ -137,6 +142,8 @@ private slots:
 
     void showRidge();
     
+    void calcSkeletonWeightButtonClicked();
+    void saveSkeletonWeightButtonClicked();
     void showGeodesicButtonClicked();
     void loadSelectionButtonClicked();
     void saveSelectionButtonClicked();

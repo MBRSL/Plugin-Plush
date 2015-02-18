@@ -29,9 +29,9 @@ class Bone
 public:
     Bone(OpenMesh::Vec3d _a, OpenMesh::Vec3d _b, int _idxa, int _idxb, BoneDirection _direction, SemanticMeaning _id);
 	~Bone();
-	OpenMesh::Vec3d getA();
+	OpenMesh::Vec3d getA() const;
 	void setA(OpenMesh::Vec3d _a);
-	OpenMesh::Vec3d getB();
+	OpenMesh::Vec3d getB() const;
 	void setB(OpenMesh::Vec3d _b);
 	BoneDirection getDirection();
 	void setDirection(BoneDirection _direction);

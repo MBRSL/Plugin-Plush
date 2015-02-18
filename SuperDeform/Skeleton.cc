@@ -19,7 +19,7 @@ void Bone::updateB(double x ,double y , double z) {
 	b = OpenMesh::Vec3d(x,y,z);
 }
 
-OpenMesh::Vec3d Bone::getA()
+OpenMesh::Vec3d Bone::getA() const
 {
 	return a;
 }
@@ -29,7 +29,7 @@ void Bone::setA(OpenMesh::Vec3d _a)
 	a = _a;
 }
 
-OpenMesh::Vec3d Bone::getB()
+OpenMesh::Vec3d Bone::getB() const
 {
 	return b;
 }

@@ -7,6 +7,7 @@
 #include <OpenFlipper/common/Types.hh>
 
 #include "PlushPlugin.hh"
+#include "SuperDeform/Weight.hh"
 #include "GeodesicDistance/geodesic_algorithm_dijkstra.hh"
 
 OpenMesh::VPropHandleT<double> PlushPlugin::minCurvatureHandle;
@@ -58,15 +59,25 @@ void PlushPlugin::pluginsInitialized() {
     
     // Create button that can be toggled
     // to (de)activate plugin's picking mode
-    QGroupBox *geodesicGroup = new QGroupBox(tr("Geodesic"));
-    QLabel *geodesicNumberLabel = new QLabel(tr("# of paths"));
+    QGroupBox *skeletonWeightGroup = new QGroupBox(tr("Skeleton weight"));
+    QPushButton *calcSkeletonWeightButton = new QPushButton(tr("Calculate"));
+    QPushButton *saveSkeletonWeightButton = new QPushButton(tr("Save"));
+    QHBoxLayout *skeletonWeightLayout = new QHBoxLayout;
+    skeletonWeightLayout->addWidget(calcSkeletonWeightButton);
+    skeletonWeightLayout->addWidget(saveSkeletonWeightButton);
+    skeletonWeightGroup->setLayout(skeletonWeightLayout);
+    
+    QGroupBox *geodesicGroup = new QGroupBox(tr("Geodesic paths"));
+    QLabel *geodesicNumberLabel = new QLabel(tr("#"));
     geodesicEdges = new QSpinBox();
     geodesicEdges->setMinimum(0);
     geodesicButton = new QPushButton(tr("Show"));
+    geodesicAllButton = new QPushButton(tr("Show all"));
     QHBoxLayout *geodesicLayout = new QHBoxLayout;
     geodesicLayout->addWidget(geodesicNumberLabel);
     geodesicLayout->addWidget(geodesicEdges);
     geodesicLayout->addWidget(geodesicButton);
+    geodesicLayout->addWidget(geodesicAllButton);
     geodesicGroup->setLayout(geodesicLayout);
     
     QGroupBox *selectionGroup = new QGroupBox(tr("Selection"));
@@ -87,11 +98,15 @@ void PlushPlugin::pluginsInitialized() {
     curvatureLayout->addWidget(calcCurvatureButton);
     curvatureGroup->setLayout(curvatureLayout);
     
+    layout->addWidget(skeletonWeightGroup);
     layout->addWidget(geodesicGroup);
     layout->addWidget(selectionGroup);
     layout->addWidget(curvatureGroup);
     
+    connect(calcSkeletonWeightButton, SIGNAL(clicked()), this, SLOT(calcSkeletonWeightButtonClicked()));
+    connect(saveSkeletonWeightButton, SIGNAL(clicked()), this, SLOT(saveSkeletonWeightButtonClicked()));
     connect(geodesicButton, SIGNAL(clicked()), this, SLOT(showGeodesicButtonClicked()));
+    connect(geodesicAllButton, SIGNAL(clicked()), this, SLOT(showGeodesicButtonClicked()));
     connect(ridgeButton, SIGNAL(clicked()), this, SLOT(showRidge()));
     connect(loadSelectionButton, SIGNAL(clicked()), this, SLOT(loadSelectionButtonClicked()));
     connect(saveSelectionButton, SIGNAL(clicked()), this, SLOT(saveSelectionButtonClicked()));
@@ -203,6 +218,53 @@ void PlushPlugin::showRidge() {
     }
 }
 
+void PlushPlugin::calcSkeletonWeightButtonClicked() {
+    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
+         ++o_it) {
+        int meshId = o_it->id();
+        
+        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
+            TriMesh *mesh = PluginFunctions::triMesh(*o_it);
+            QString meshName = QFileInfo(o_it->name()).baseName();
+            
+            if (mesh->property(skeletonHandle) == NULL) {
+                if (!loadSkeleton(meshId)) {
+                    return;
+                }
+            }
+            
+            Skeleton *skeleton = mesh->property(skeletonHandle);
+            Weight weightGenerator;
+            mesh->request_face_normals();
+            weightGenerator.computeBoneWeight(mesh, mesh->property(skeletonHandle));
+            mesh->release_face_normals();
+            
+            Eigen::MatrixXd weight = weightGenerator.getWeight();
+            for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
+                double *w = new double[skeleton->bones.size()];
+                for (size_t i = 0; i < skeleton->bones.size(); i++) {
+                    w[i] = weight(i, v_it->idx());
+                }
+                if (mesh->property(bonesWeightHandle, *v_it) != NULL) {
+                    delete[] mesh->property(bonesWeightHandle, *v_it);
+                }
+                mesh->property(bonesWeightHandle, *v_it) = w;
+            }
+        }
+    }
+}
+
+void PlushPlugin::saveSkeletonWeightButtonClicked() {
+    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
+         ++o_it) {
+        int meshId = o_it->id();
+        
+        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
+            saveBoneWeight(meshId);
+        }
+    }
+}
+
 void PlushPlugin::calcCurvatureButtonClicked() {
     if (thread == NULL) {
         thread = new OpenFlipperThread("calcCurvature");
@@ -216,6 +278,11 @@ void PlushPlugin::calcCurvatureButtonClicked() {
 
 void PlushPlugin::showGeodesicButtonClicked() {
     if (thread == NULL) {
+        if (sender() == geodesicButton) {
+            showAllPath = false;
+        } else {
+            showAllPath = true;
+        }
         thread = new OpenFlipperThread("calcGeodesic");
         connect(thread, SIGNAL(finished(QString)), this, SLOT(finishedJob(QString)));
         connect(thread, SIGNAL(function(QString)), this, SLOT(showGeodesicThread(QString)), Qt::DirectConnection);
