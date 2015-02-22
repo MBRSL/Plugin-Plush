@@ -359,7 +359,7 @@ void PlushPlugin::showGeodesicThread(QString _jobId) {
                         edgeList.push_back(eh.idx());
                         prevIdx = *vIdx_it;
                     }
-                    emit log(LOGINFO, QString("Total weight of path #%1: %2").arg(QString::number(i+1), QString::number(weight)));
+                    emit log(LOGINFO, QString("Total weight of path #%1: %2").arg(i+1).arg(weight));
                 }
 
                 RPC::callFunction<int>("meshobjectselection", "clearEdgeSelection", meshId);
