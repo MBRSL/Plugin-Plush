@@ -64,23 +64,34 @@ public:
     }
 };
 
-void translate_mesh_from_OpenMesh_to_CGAL(TriMesh *mesh, Polyhedron *P) {
-    CGAL_Polyhedron_builder<Polyhedron::HalfedgeDS> builder;
-    
-    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++)
-    {
-        TriMesh::Point p = mesh->point(*v_it);
-        builder.coords.push_back(p[0]);
-        builder.coords.push_back(p[1]);
-        builder.coords.push_back(p[2]);
-    }
-    for (FaceIter f_it = mesh->faces_begin(); f_it != mesh->faces_end(); f_it++)
-    {
-        for (TriMesh::FaceVertexIter fv_it = mesh->fv_iter(*f_it); fv_it; fv_it++)
+class CGAL_Polyhedron_helper {
+
+public:
+    static void convert_OpenMesh_to_CGAL(TriMesh *mesh, Polyhedron &P, std::map<int, boost_vertex_descriptor> &verticesMapping) {
+        CGAL_Polyhedron_builder<Polyhedron::HalfedgeDS> builder;
+        
+        for (TriMesh::VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++)
         {
-            builder.tris.push_back(fv_it->idx());
+            TriMesh::Point p = mesh->point(*v_it);
+            builder.coords.push_back(p[0]);
+            builder.coords.push_back(p[1]);
+            builder.coords.push_back(p[2]);
+        }
+        for (TriMesh::FaceIter f_it = mesh->faces_begin(); f_it != mesh->faces_end(); f_it++)
+        {
+            for (TriMesh::FaceVertexIter fv_it = mesh->fv_iter(*f_it); fv_it; fv_it++)
+            {
+                builder.tris.push_back(fv_it->idx());
+            }
+        }
+        P.delegate(builder);
+        
+        size_t i = 0;
+        boost_vertex_iterator v_it, v_it_end;
+        for (boost::tie(v_it, v_it_end) = boost::vertices(P); v_it != v_it_end; v_it++, i++) {
+            (*v_it)->id() = i;
+            verticesMapping.insert(std::make_pair(i, *v_it));
         }
     }
-    P->delegate(builder);
-}
+};
 #endif

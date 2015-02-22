@@ -14,7 +14,7 @@
 
 #include <ObjectTypes/TriangleMesh/TriangleMesh.hh>
 
-#include "GeodesicDistance/geodesic_mesh.hh"
+#include "CGAL_Polyhedron_builder.hh"
 
 #include "SuperDeform/Skeleton.hh"
 
@@ -124,7 +124,11 @@ private:
     void saveBoneWeight(int meshId);
     
     bool calcCurvature(QString _jobId, int meshId);
-    void calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle);
+    void calcGeodesic(TriMesh *mesh,
+                      Polyhedron &P,
+                      std::map<int, Polyhedron::Vertex_handle> &verticesMapping,
+                      VertexHandle sourceHandle,
+                      IdList targetVertices);
     bool calcSpanningTree(QString _jobId, int meshId, std::vector<std::pair<IdList, double> > &result, IdList selectedVertices);
     
     void initProperties(TriMesh *mesh);

@@ -132,13 +132,15 @@ public:
     }
 };
 
-void PlushPlugin::calcGeodesic(TriMesh *mesh, VertexHandle sourceHandle)
+
+void PlushPlugin::calcGeodesic(TriMesh *mesh,
+                               Polyhedron &P,
+                               std::map<int, Polyhedron::Vertex_handle> &verticesMapping,
+                               VertexHandle sourceHandle,
+                               IdList targetVertices)
 {
     std::map<std::pair<VertexHandle, VertexHandle>, double> &geodesicDistance = mesh->property(geodesicDistanceHandle);
     std::map<std::pair<VertexHandle, VertexHandle>, IdList> &geodesicPath = mesh->property(geodesicPathHandle);
-    // convert mesh from OpenFlipper to CGAL
-    Polyhedron P;
-    translate_mesh_from_OpenMesh_to_CGAL(mesh, &P);
     
     // associate indices to the vertices & pre-calculated distance (if available)
     std::vector<double> distance(boost::num_vertices(P));
@@ -235,6 +237,11 @@ bool PlushPlugin::calcSpanningTree(QString _jobId,
     
     std::map<std::pair<VertexHandle, VertexHandle>, double> &geodesicDistance = mesh->property(geodesicDistanceHandle);
     std::map<std::pair<VertexHandle, VertexHandle>, IdList> &geodesicPath = mesh->property(geodesicPathHandle);
+    
+    // convert mesh from OpenFlipper to CGAL
+    Polyhedron P;
+    std::map<int, boost_vertex_descriptor> verticesMapping;
+    CGAL_Polyhedron_helper::convert_OpenMesh_to_CGAL(mesh, P, verticesMapping);
 
     // create a new graph with selectedVerices, calculate all paths between them
     int iterations = 0;
@@ -252,21 +259,18 @@ bool PlushPlugin::calcSpanningTree(QString _jobId,
             VertexHandle destHandle = mesh->vertex_handle(destIdx);
             
             // if result is not found, caculate now
-            std::map<std::pair<VertexHandle, VertexHandle>, double>::iterator found =
-            geodesicDistance.find(std::make_pair(sourceHandle, destHandle));
-            if (found == geodesicDistance.end()) {
-                calcGeodesic(mesh, sourceHandle);
-                found = geodesicDistance.find(std::make_pair(sourceHandle, destHandle));
-            }
-            double cost = found->second;
+            std::map<std::pair<VertexHandle, VertexHandle>, double>::iterator distanceFound =
+                geodesicDistance.find(std::make_pair(sourceHandle, destHandle));
+            std::map<std::pair<VertexHandle, VertexHandle>, IdList>::iterator pathFound =
+                geodesicPath.find(std::make_pair(sourceHandle, destHandle));
             
-            std::map<std::pair<VertexHandle, VertexHandle>, IdList>::iterator found2 =
-            geodesicPath.find(std::make_pair(sourceHandle, destHandle));
-            if (found2 == geodesicPath.end()) {
-                calcGeodesic(mesh, sourceHandle);
-                found2 = geodesicPath.find(std::make_pair(sourceHandle, destHandle));
+            if (distanceFound == geodesicDistance.end() || pathFound == geodesicPath.end()) {
+                calcGeodesic(mesh, P, verticesMapping, sourceHandle, selectedVertices);
+                distanceFound = geodesicDistance.find(std::make_pair(sourceHandle, destHandle));
+                pathFound = geodesicPath.find(std::make_pair(sourceHandle, destHandle));
             }
-            IdList path = found2->second;
+            double cost = distanceFound->second;
+            IdList path = pathFound->second;
             
             // assign edge & weight
             result.push_back(std::make_pair(path, cost));
