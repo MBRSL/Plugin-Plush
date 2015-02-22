@@ -14,14 +14,6 @@
 
 #include <boost/property_map/function_property_map.hpp>
 
-typedef boost::graph_traits<Polyhedron> GraphTraits;
-typedef GraphTraits::vertex_descriptor boost_vertex_descriptor;
-typedef GraphTraits::vertex_iterator boost_vertex_iterator;
-typedef GraphTraits::edge_descriptor boost_edge_descriptor;
-typedef GraphTraits::edge_iterator boost_edge_iterator;
-typedef GraphTraits::halfedge_descriptor boost_halfedge_descriptor;
-typedef GraphTraits::halfedge_iterator boost_halfedge_iterator;
-
 typedef boost::property_map<Polyhedron, boost::vertex_external_index_t>::type VertexIdPropertyMap;
 typedef boost::property_map<Polyhedron, boost::edge_external_index_t>::type EdgeIdPropertyMap;
 
