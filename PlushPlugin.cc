@@ -331,35 +331,11 @@ void PlushPlugin::showGeodesicThread(QString _jobId) {
             selectedVertices = RPC::callFunctionValue<IdList> ("meshobjectselection", "getVertexSelection", meshId);
             geodesicEdges->setMaximum(selectedVertices.size()*(selectedVertices.size()-1)/2);
 
-            std::vector<std::pair<IdList, double> > spanningTree;
-            if (calcSpanningTree(_jobId, meshId, spanningTree, selectedVertices)) {
-                struct Comparator {
-                    bool operator() (std::pair<IdList, double> a,
-                                     std::pair<IdList, double> b) {
-                        return a.second < b.second;
-                    }
-                } comparator;
-                
-                std::sort(spanningTree.begin(), spanningTree.end(), comparator);
-                
+            std::vector<EdgeHandle> spanningTree;
+            if (calcSpanningTree(_jobId, meshId, spanningTree, selectedVertices, geodesicEdges->value(), showAllPath)) {
                 IdList edgeList;
-                int beginNo = 0;
-                int endNo = geodesicEdges->value();
-                if (!showAllPath && endNo != 0) {
-                    beginNo = endNo - 1;
-                }
-                for (int i = beginNo; i < endNo; i++) {
-                    IdList path = spanningTree[i].first;
-                    double weight = spanningTree[i].second;
-                    int prevIdx = *path.begin();
-                    IdList::iterator vIdx_it = (path.begin()+1);
-                    for (; vIdx_it != path.end(); vIdx_it++) {
-                        EdgeHandle eh;
-                        assert(getEdge(mesh, eh, prevIdx, *vIdx_it));
-                        edgeList.push_back(eh.idx());
-                        prevIdx = *vIdx_it;
-                    }
-                    emit log(LOGINFO, QString("Total weight of path #%1: %2").arg(i+1).arg(weight));
+                for (size_t i = 0; i < spanningTree.size(); i++) {
+                    edgeList.push_back(spanningTree[i].idx());
                 }
 
                 RPC::callFunction<int>("meshobjectselection", "clearEdgeSelection", meshId);

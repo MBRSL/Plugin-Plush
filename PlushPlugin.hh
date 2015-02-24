@@ -109,6 +109,8 @@ private:
     OpenFlipperThread *thread;
     
     std::vector<char*> *requiredPlugins;
+    
+    bool isIntersected(TriMesh *mesh, IdList path1, IdList path2);
 
     bool getEdge(TriMesh *mesh, EdgeHandle &_eh, int v1No, int v2No);
     bool getEdge(TriMesh *mesh, EdgeHandle &_eh, VertexHandle v1, VertexHandle v2);
@@ -129,7 +131,7 @@ private:
                       std::map<int, Polyhedron::Vertex_handle> &verticesMapping,
                       VertexHandle sourceHandle,
                       IdList targetVertices);
-    bool calcSpanningTree(QString _jobId, int meshId, std::vector<std::pair<IdList, double> > &result, IdList selectedVertices);
+    bool calcSpanningTree(QString _jobId, int meshId, std::vector<EdgeHandle> &spanningTree, IdList selectedVertices, int limitNum, bool allPaths);
     
     void initProperties(TriMesh *mesh);
     void uninitProperties(TriMesh *mesh);
