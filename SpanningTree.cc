@@ -10,6 +10,15 @@
 #include "PlushPlugin.hh"
 #include "CGAL_Polyhedron_builder.hh"
 
+/**
+ @brief Detect if there are any intersection between two paths.
+ Note that overlapping (paths with identical edges) is not considered intersection here.
+ 
+ @param mesh input mesh
+ @param pathA vertex ids list of path one
+ @param pathB vertex ids list of path two
+ @return is the two paths are interected or not
+ */
 bool PlushPlugin::isIntersected(TriMesh *mesh, IdList pathA, IdList pathB) {
     OpenMesh::Vec3d prevCrossVec(0,0,0);
     // first check if there are any same vertex (says v) in both path
@@ -69,6 +78,19 @@ bool PlushPlugin::isIntersected(TriMesh *mesh, IdList pathA, IdList pathB) {
     return false;
 }
 
+/**
+ *  @brief Generate spanning tree (steiner tree indeed) from given vertices.
+ *  This function will calculate shortest paths between all vertex pairs and then
+ *  tries to connect them to form a minimal spanning tree.
+ *
+ *  @param _jobId Thread identifier
+ *  @param meshId Target mesh id
+ *  @param spanningTree Vector of paths with cost in this spanning tree. Path are composed with vertex ids.
+ *  @param selectedVertices Resulting tree will span through these vertices.
+ *  @param limitNum (Debugging) If set to postive number, only first num paths are used for spanningTree. 0 means no limitation.
+ *  @param allPath (Debugging) If false, only used (limitNum)-th path for spanningTree.
+ *  @return False if error occured.
+ */
 bool PlushPlugin::calcSpanningTree(QString _jobId,
                                    int meshId,
                                    std::vector<EdgeHandle> &spanningTree,

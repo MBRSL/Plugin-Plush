@@ -27,6 +27,11 @@ typedef TriMesh::EdgeIter EdgeIter;
 typedef TriMesh::HalfedgeIter HalfedgeIter;
 typedef TriMesh::FaceIter FaceIter;
 
+/**
+ * @brief The main class for this plugin.
+ *
+ * Including basic initializePlugin(), pluginsInitialized() for OpenFlipper and other custom functions.
+ */
 class PlushPlugin : public QObject,
         BaseInterface,
         ToolboxInterface,
@@ -78,22 +83,32 @@ public:
     QString name() { return (QString("Simple Plush")); };
     QString description( ) { return (QString("Smooths the active Mesh")); };
 
-    // Curvature
+    /// @name Curvature property handle
+    ///@{
+    /// Curvature value/direction of each vertex. It's empty before curvature calculation.
     static OpenMesh::VPropHandleT<double> minCurvatureHandle;
     static OpenMesh::VPropHandleT<double> maxCurvatureHandle;
     static OpenMesh::VPropHandleT<OpenMesh::Vec3d> minCurvatureDirectionHandle;
     static OpenMesh::VPropHandleT<OpenMesh::Vec3d> maxCurvatureDirectionHandle;
+    ///@}
     
-    // Geodesic
+    /// @name Geodesic distance property handle
+    ///@{
+    /// Geodesic distance/path from one vertex to another. It's empty before geodesic calculation.
     static OpenMesh::EPropHandleT<double> edgeWeightHandle;
     static OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, double> > geodesicDistanceHandle;
     static OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, IdList> > geodesicPathHandle;
+    ///@}
     
-    // Skeleton
+    /// @name Skeleton property handle
+    ///@{
+    
+    /// The skeleton of this mesh. It's built during mesh loading unless error occurs
     static OpenMesh::MPropHandleT<Skeleton*> skeletonHandle;
-    // The weight of corresponding bones for each vertex
+    /// The weight of corresponding bones for each vertex
     static OpenMesh::VPropHandleT<double*> bonesWeightHandle;
-
+    ///@}
+    
 private:
     QSpinBox *geodesicEdges;
     QPushButton *geodesicButton;
@@ -105,6 +120,7 @@ private:
     
     bool showAllPath;
 
+    /// Flag for thread stopping
     bool isJobCanceled;
     OpenFlipperThread *thread;
     
