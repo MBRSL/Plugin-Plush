@@ -122,7 +122,11 @@ private slots:
     
     bool checkIfGeneratorExist();
     
+    /// Receive job state from m_patternGenerator and then re-emit with jobId
     void receiveJobState(int);
+    
+    /// Receive message from m_patternGenerator and then re-emit
+    void receiveLog(int, QString);
 
 public slots:
     QString version() { return QString("1.0"); };

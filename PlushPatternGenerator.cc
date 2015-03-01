@@ -12,9 +12,6 @@ OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, std::vec
 OpenMesh::MPropHandleT<Skeleton*> PlushPatternGenerator::skeletonHandle;
 OpenMesh::VPropHandleT<double*> PlushPatternGenerator::bonesWeightHandle;
 
-int PlushPatternGenerator::LOGINFO = 0;
-int PlushPatternGenerator::LOGERR = 1;
-
 PlushPatternGenerator::PlushPatternGenerator(TriMesh *mesh, QString meshName) : m_mesh(mesh), m_meshName(meshName) {
     // convert m_mesh from OpenFlipper to CGAL
     CGAL_Polyhedron_helper::convert_OpenMesh_to_CGAL(m_mesh, m_polyhedron, m_verticesMapping);

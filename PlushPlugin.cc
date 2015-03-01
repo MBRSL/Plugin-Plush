@@ -103,6 +103,8 @@ void PlushPlugin::fileOpened(int _id) {
             connect(this, SIGNAL(cancelingJob()), m_patternGenerator, SLOT(cancelJob()));
             // Get progress info from m_patternGenerator, then re-emit it to OpenFlipper system inside receiveJobState
             connect(m_patternGenerator, SIGNAL(setJobState(int)), this, SLOT(receiveJobState(int)));
+            // Propagate messages from m_patternGenerator to OpenFlipper
+            connect(m_patternGenerator, SIGNAL(log(int, QString)), this, SLOT(receiveLog(int, QString)));
         }
     }
 }
@@ -111,6 +113,7 @@ void PlushPlugin::objectDeleted(int _id) {
     if (!m_triMeshObj && _id == m_triMeshObj->id()) {
         disconnect(this, SIGNAL(cancelingJob()), m_patternGenerator, SLOT(cancelJob()));
         disconnect(m_patternGenerator, SIGNAL(setJobState(int)), this, SLOT(receiveJobState(int)));
+        disconnect(m_patternGenerator, SIGNAL(log(int, QString)), this, SLOT(receiveLog(int, QString)));
 
         delete m_patternGenerator;
         
@@ -295,6 +298,17 @@ void PlushPlugin::finishedJobHandler() {
 void PlushPlugin::receiveJobState(int state) {
     if (m_currentJobId != "") {
         emit setJobState(m_currentJobId, state);
+    }
+}
+
+void PlushPlugin::receiveLog(int type, QString msg) {
+    switch (type) {
+        case PlushPatternGenerator::LOGERR:
+            emit log(LOGERR, msg);
+            break;
+        case PlushPatternGenerator::LOGINFO:
+            emit log(LOGINFO, msg);
+            break;
     }
 }
 

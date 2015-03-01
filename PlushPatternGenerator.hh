@@ -31,6 +31,12 @@ public:
     TriMesh *m_mesh;
     QString m_meshName;
     
+    /// Used for log
+    ///@{
+    static const int LOGERR = 0;
+    static const int LOGINFO = 1;
+    ///@}
+
     /// @name Curvature property handle
     ///@{
     /// Curvature value/direction of each vertex. It's empty before curvature calculation.
@@ -76,9 +82,6 @@ private:
     
     /// Mapping from TriMesh::VertexHandle::idx to boost_vertex_descriptor
     std::map<int, boost_vertex_descriptor> m_verticesMapping;
-    
-    static int LOGERR;
-    static int LOGINFO;
     
     bool isJobCanceled;
     
