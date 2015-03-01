@@ -15,7 +15,7 @@
 #include <CGAL/boost/graph/graph_traits_Polyhedron_3.h>
 #include <CGAL/boost/graph/iterator.h>
 
-#include <ObjectTypes/TriangleMesh/TriangleMesh.hh>
+#include "Common.hh"
 
 typedef CGAL::Simple_cartesian<double>     Kernel;
 typedef CGAL::Polyhedron_3<Kernel, CGAL::Polyhedron_items_with_id_3>         Polyhedron;
@@ -70,14 +70,14 @@ public:
     static void convert_OpenMesh_to_CGAL(TriMesh *mesh, Polyhedron &P, std::map<int, boost_vertex_descriptor> &verticesMapping) {
         CGAL_Polyhedron_builder<Polyhedron::HalfedgeDS> builder;
         
-        for (TriMesh::VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++)
+        for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++)
         {
             TriMesh::Point p = mesh->point(*v_it);
             builder.coords.push_back(p[0]);
             builder.coords.push_back(p[1]);
             builder.coords.push_back(p[2]);
         }
-        for (TriMesh::FaceIter f_it = mesh->faces_begin(); f_it != mesh->faces_end(); f_it++)
+        for (FaceIter f_it = mesh->faces_begin(); f_it != mesh->faces_end(); f_it++)
         {
             for (TriMesh::FaceVertexIter fv_it = mesh->fv_iter(*f_it); fv_it; fv_it++)
             {

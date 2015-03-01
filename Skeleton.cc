@@ -6,98 +6,99 @@
 //
 //
 
-#include "PlushPlugin.hh"
+#include "PlushPatternGenerator.hh"
 #include "SuperDeform/Skeleton.hh"
 #include "SuperDeform/Weight.hh"
 
-bool PlushPlugin::loadBoneWeight(int meshId) {
-    BaseObjectData *obj;
-    PluginFunctions::getObject(meshId, obj);
-    if (!obj->dataType(DATA_TRIANGLE_MESH)) {
-        emit log(LOGERR, QString("Not a valid TriMesh of object %1").arg(QString::number(meshId)));
-        return false;
+bool PlushPatternGenerator::calcSkeletonWeight() {
+    if (m_mesh->property(skeletonHandle) != NULL) {
+        delete m_mesh->property(skeletonHandle);
     }
+    Skeleton *skeleton = new Skeleton;
+    m_mesh->property(skeletonHandle) = skeleton;
     
-    TriMesh *mesh = PluginFunctions::triMesh(obj);
-    QString meshName = QFileInfo(obj->name()).baseName();
+    Weight weightGenerator;
+    m_mesh->request_face_normals();
+    weightGenerator.computeBoneWeight(m_mesh, skeleton);
+    m_mesh->release_face_normals();
+    
+    Eigen::MatrixXd weight = weightGenerator.getWeight();
+    for (VertexIter v_it = m_mesh->vertices_begin(); v_it != m_mesh->vertices_end(); v_it++) {
+        double *w = new double[skeleton->bones.size()];
+        for (size_t i = 0; i < skeleton->bones.size(); i++) {
+            w[i] = weight(i, v_it->idx());
+        }
+        if (m_mesh->property(bonesWeightHandle, *v_it) != NULL) {
+            delete[] m_mesh->property(bonesWeightHandle, *v_it);
+        }
+        m_mesh->property(bonesWeightHandle, *v_it) = w;
+    }
+    return true;
+}
 
-    QString weightFilename = meshName+".skeleton.weight";
-
-    if(mesh->property(skeletonHandle) == NULL)
+bool PlushPatternGenerator::loadBoneWeight() {
+    Skeleton *skeleton = m_mesh->property(skeletonHandle);
+    if(skeleton == NULL)
     {
         // No skeleton yet, try to load skeleton
-        if (!loadSkeleton(meshId)) {
+        if (!loadSkeleton()) {
             return false;
         }
+        skeleton = m_mesh->property(skeletonHandle);
     }
-    Skeleton *skeleton = mesh->property(skeletonHandle);
     
-    ifstream boneWeightFile(weightFilename.toLocal8Bit().data());
-    if(!boneWeightFile.is_open())
+    QString weightFilename = m_meshName + ".skeleton.weight";
+    QFile file(weightFilename);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
     {
         emit log(LOGERR, QString("Error opening file: %1").arg(weightFilename));
         return false;
     }
 
+    QTextStream fin(&file);
     // Assign bone weight to vertices
-    for(VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++)
+    for(VertexIter v_it = m_mesh->vertices_begin(); v_it != m_mesh->vertices_end(); v_it++)
     {
         double *weights = new double[skeleton->bones.size()];
         for(size_t j = 0; j < skeleton->bones.size(); j++)
         {
             double w;
-            boneWeightFile >> w;
+            fin >> w;
             weights[j] = w;
         }
-        if (mesh->property(bonesWeightHandle, *v_it) != NULL) {
-            delete[] mesh->property(bonesWeightHandle, *v_it);
+        if (m_mesh->property(bonesWeightHandle, *v_it) != NULL) {
+            delete[] m_mesh->property(bonesWeightHandle, *v_it);
         }
-        mesh->property(bonesWeightHandle, *v_it) = weights;
+        m_mesh->property(bonesWeightHandle, *v_it) = weights;
     }
-    boneWeightFile.close();
+    file.close();
 
     return true;
 }
 
-void PlushPlugin::saveBoneWeight(int meshId) {
-    BaseObjectData *obj;
-    PluginFunctions::getObject(meshId, obj);
-    if (!obj->dataType(DATA_TRIANGLE_MESH)) {
-        emit log(LOGERR, QString("Not a valid TriMesh of object %1").arg(QString::number(meshId)));
-        return;
+bool PlushPatternGenerator::saveBoneWeight() {
+    QString weightFilename = m_meshName + ".skeleton.weight";
+    QFile file(weightFilename);
+    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        emit log(LOGERR, QString("Error opening file: %1").arg(weightFilename));
+        return false;
     }
     
-    TriMesh *mesh = PluginFunctions::triMesh(obj);
-    QString meshName = QFileInfo(obj->name()).baseName();
-
-    // Prepare file for saving data
-    QFile file(meshName+".skeleton.weight");
-    file.open(QIODevice::WriteOnly | QIODevice::Text);
     QTextStream out(&file);
-    
-    int nBones = mesh->property(skeletonHandle)->bones.size();
-    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
-        double *w = mesh->property(bonesWeightHandle, *v_it);
+    int nBones = m_mesh->property(skeletonHandle)->bones.size();
+    for (VertexIter v_it = m_mesh->vertices_begin(); v_it != m_mesh->vertices_end(); v_it++) {
+        double *w = m_mesh->property(bonesWeightHandle, *v_it);
         for (int i = 0; i < nBones; i++) {
             out << w[i] << " ";
         }
         out << endl;
     }
     file.close();
+    return true;
 }
 
-bool PlushPlugin::loadSkeleton(int meshId) {
-    BaseObjectData *obj;
-    PluginFunctions::getObject(meshId, obj);
-    if (!obj->dataType(DATA_TRIANGLE_MESH)) {
-        emit log(LOGERR, QString("Not a valid TriMesh of object %1").arg(QString::number(meshId)));
-        return false;
-    }
-    
-    TriMesh *mesh = PluginFunctions::triMesh(obj);
-    QString meshName = QFileInfo(obj->name()).baseName();
-
-    QString skeletonFilename = meshName+".skeleton";
+bool PlushPatternGenerator::loadSkeleton() {
+    QString skeletonFilename = m_meshName + ".skeleton";
     
     // Add skeleton to mesh property
     Skeleton *skeleton = new Skeleton;
@@ -108,10 +109,10 @@ bool PlushPlugin::loadSkeleton(int meshId) {
         return false;
     }
     
-    if (mesh->property(skeletonHandle) != NULL) {
-        delete mesh->property(skeletonHandle);
+    if (m_mesh->property(skeletonHandle) != NULL) {
+        delete m_mesh->property(skeletonHandle);
     }
-    mesh->property(skeletonHandle) = skeleton;
+    m_mesh->property(skeletonHandle) = skeleton;
     
     return true;
 }

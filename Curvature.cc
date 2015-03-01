@@ -6,9 +6,9 @@
 //
 //
 
-#include "PlushPlugin.hh"
+#include "PlushPatternGenerator.hh"
 
-#include <OpenFlipper/BasePlugin/RPCWrappers.hh>
+#include <QTextStream>
 
 #include <CGAL/Simple_cartesian.h>
 #include <CGAL/Monge_via_jet_fitting.h>
@@ -40,7 +40,7 @@ bool operator< (const Vertex_distance &A, const Vertex_distance &B) {
     return A.distance < B.distance;
 }
 
-bool PlushPlugin::calcCurvature(QString _jobId, int meshId) {
+bool PlushPatternGenerator::calcCurvature() {
     typedef double                   DFT;
     typedef CGAL::Simple_cartesian<DFT>     Data_Kernel;
     typedef CGAL::Simple_cartesian<DFT>     Local_Kernel;
@@ -54,21 +54,10 @@ bool PlushPlugin::calcCurvature(QString _jobId, int meshId) {
     
     isJobCanceled = false;
     
-    BaseObjectData *obj;
-    PluginFunctions::getObject(meshId, obj);
-    if (!obj->dataType(DATA_TRIANGLE_MESH)) {
-        emit log(LOGERR, QString("Not a valid TriMesh of object %1").arg(QString::number(meshId)));
-        return false;
-    }
-    
-    TriMesh *mesh = PluginFunctions::triMesh(obj);
-    QString meshName = QFileInfo(obj->name()).baseName();
-    emit setJobDescription(_jobId, QString("Calculating curvature: %1").arg(meshName));
-        
-    IdList selectedVertices;
+    std::vector<int> selectedVertices;
     // If no one is selected, show all of them
     if (selectedVertices.size() == 0) {
-        for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
+        for (VertexIter v_it = m_mesh->vertices_begin(); v_it != m_mesh->vertices_end(); v_it++) {
             selectedVertices.push_back(v_it->idx());
         }
     }
@@ -80,7 +69,7 @@ bool PlushPlugin::calcCurvature(QString _jobId, int meshId) {
             return false;
         }
         
-        VertexHandle centerV = mesh->vertex_handle(selectedVertices[i]);
+        VertexHandle centerV = m_mesh->vertex_handle(selectedVertices[i]);
 
         std::set<VertexHandle> neighboringVertices;
         neighboringVertices.insert(centerV);
@@ -91,11 +80,11 @@ bool PlushPlugin::calcCurvature(QString _jobId, int meshId) {
         size_t nNeighbors;
         do {
             nNeighbors = neighboringVertices.size();
-            expandVerticeSelection(mesh, neighboringVertices, 1);
+            expandVerticeSelection(m_mesh, neighboringVertices, 1);
         } while (nNeighbors != neighboringVertices.size() && neighboringVertices.size() < requiredSamples*3);
         
         if (nNeighbors == neighboringVertices.size() && nNeighbors < requiredSamples) {
-            QString str = QString("Not enough points for fitting for object %1: %2").arg(QString::number(meshId), meshName);
+            QString str = QString("Not enough points for fitting for mesh: %1").arg(m_meshName);
             emit log(LOGERR, str);
             continue;
         }
@@ -103,7 +92,7 @@ bool PlushPlugin::calcCurvature(QString _jobId, int meshId) {
         std::vector<DPoint> in_points;
         for (std::set<VertexHandle>::iterator it = neighboringVertices.begin(); it != neighboringVertices.end(); it++)
         {
-            TriMesh::Point p = mesh->point(*it);
+            TriMesh::Point p = m_mesh->point(*it);
             in_points.push_back(DPoint(p[0],p[1],p[2]));
         }
         
@@ -111,7 +100,7 @@ bool PlushPlugin::calcCurvature(QString _jobId, int meshId) {
         My_Monge_via_jet_fitting monge_fit;
         monge_form = monge_fit(in_points.begin(), in_points.end(), d_fitting, d_monge);
         // fix with normal
-        TriMesh::Normal normal = mesh->normal(centerV);
+        TriMesh::Normal normal = m_mesh->normal(centerV);
         CGAL::Vector_3<Data_Kernel> normalACGL(normal[0], normal[1], normal[2]);
         monge_form.comply_wrt_given_normal(normalACGL);
         
@@ -122,28 +111,28 @@ bool PlushPlugin::calcCurvature(QString _jobId, int meshId) {
         OpenMesh::Vec3d d2(monge_form.minimal_principal_direction()[0],
                            monge_form.minimal_principal_direction()[1],
                            monge_form.minimal_principal_direction()[2]);
-        mesh->property(maxCurvatureDirectionHandle, centerV) = d1;
-        mesh->property(minCurvatureDirectionHandle, centerV) = d2;
-        mesh->property(maxCurvatureHandle, centerV) = monge_form.principal_curvatures(0);
-        mesh->property(minCurvatureHandle, centerV) = monge_form.principal_curvatures(1);
+        m_mesh->property(maxCurvatureDirectionHandle, centerV) = d1;
+        m_mesh->property(minCurvatureDirectionHandle, centerV) = d2;
+        m_mesh->property(maxCurvatureHandle, centerV) = monge_form.principal_curvatures(0);
+        m_mesh->property(minCurvatureHandle, centerV) = monge_form.principal_curvatures(1);
         
         int status = (int)((double)i / selectedVertices.size() * 100);
-        emit setJobState(_jobId, status);
+        emit setJobState(status);
     }
     
     // Prepare file for saving data
-    QFile file(meshName+"_curvature.txt");
+    QFile file(m_meshName + "_curvature.txt");
     file.open(QIODevice::WriteOnly | QIODevice::Text);
     QTextStream out(&file);
 
-    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++)
+    for (VertexIter v_it = m_mesh->vertices_begin(); v_it != m_mesh->vertices_end(); v_it++)
     {
-        OpenMesh::Vec3d d1 = mesh->property(maxCurvatureDirectionHandle, *v_it);
-        OpenMesh::Vec3d d2 = mesh->property(minCurvatureDirectionHandle, *v_it);
+        OpenMesh::Vec3d d1 = m_mesh->property(maxCurvatureDirectionHandle, *v_it);
+        OpenMesh::Vec3d d2 = m_mesh->property(minCurvatureDirectionHandle, *v_it);
         out << d1[0] << " " << d1[1] << " " << d1[2] << " ";
         out << d2[0] << " " << d2[1] << " " << d2[2] << " ";
-        out << mesh->property(maxCurvatureHandle, *v_it) << " ";
-        out << mesh->property(minCurvatureHandle, *v_it) << "\n";
+        out << m_mesh->property(maxCurvatureHandle, *v_it) << " ";
+        out << m_mesh->property(minCurvatureHandle, *v_it) << "\n";
     }
     file.close();
     
@@ -151,10 +140,11 @@ bool PlushPlugin::calcCurvature(QString _jobId, int meshId) {
 }
 
 
-void PlushPlugin::loadCurvature(TriMesh *mesh, QString meshName) {
-    QFile file(meshName+"_curvature.txt");
+void PlushPatternGenerator::loadCurvature() {
+    QString curvatureFilename = m_meshName + "_curvature.txt";
+    QFile file(curvatureFilename);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        emit log(LOGERR, QString("Unable to read file %1").arg(meshName+"_curvature.txt"));
+        emit log(LOGERR, QString("Unable to read file %1").arg(curvatureFilename));
         return;
     }
     
@@ -162,11 +152,11 @@ void PlushPlugin::loadCurvature(TriMesh *mesh, QString meshName) {
     
     double minK1 = 1e9, minK2 = 1e9;
     double d1x, d1y, d1z, d2x, d2y, d2z, k1, k2;
-    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
+    for (VertexIter v_it = m_mesh->vertices_begin(); v_it != m_mesh->vertices_end(); v_it++) {
         in >> d1x >> d1y >> d1z >> d2x >> d2y >> d2z >> k1 >> k2;
-        mesh->property(maxCurvatureDirectionHandle, *v_it) = OpenMesh::Vec3d(d1x, d1y, d1z);
-        mesh->property(minCurvatureDirectionHandle, *v_it) = OpenMesh::Vec3d(d2x, d2y, d2z);
-        mesh->property(maxCurvatureHandle, *v_it) = k1;
-        mesh->property(minCurvatureHandle, *v_it) = k2;
+        m_mesh->property(maxCurvatureDirectionHandle, *v_it) = OpenMesh::Vec3d(d1x, d1y, d1z);
+        m_mesh->property(minCurvatureDirectionHandle, *v_it) = OpenMesh::Vec3d(d2x, d2y, d2z);
+        m_mesh->property(maxCurvatureHandle, *v_it) = k1;
+        m_mesh->property(minCurvatureHandle, *v_it) = k2;
     }
 }

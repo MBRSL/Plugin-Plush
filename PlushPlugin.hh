@@ -7,30 +7,16 @@
 #include <OpenFlipper/BasePlugin/LoadSaveInterface.hh>
 #include <OpenFlipper/BasePlugin/KeyInterface.hh>
 #include <OpenFlipper/BasePlugin/PluginFunctions.hh>
-#include <OpenFlipper/BasePlugin/RPCInterface.hh>
 #include <OpenFlipper/BasePlugin/ProcessInterface.hh>
 
-#include <OpenFlipper/common/Types.hh>
+#include "PlushPatternGenerator.hh"
 
-#include <ObjectTypes/TriangleMesh/TriangleMesh.hh>
-
-#include "CGAL_Polyhedron_builder.hh"
-
-#include "SuperDeform/Skeleton.hh"
-
-typedef TriMesh::VertexHandle VertexHandle;
-typedef TriMesh::EdgeHandle EdgeHandle;
-typedef TriMesh::HalfedgeHandle HalfedgeHandle;
-typedef TriMesh::FaceHandle FaceHandle;
-typedef TriMesh::VertexIter VertexIter;
-typedef TriMesh::EdgeIter EdgeIter;
-typedef TriMesh::HalfedgeIter HalfedgeIter;
-typedef TriMesh::FaceIter FaceIter;
+#include "Common.hh"
 
 /**
  * @brief The main class for this plugin.
  *
- * Including basic initializePlugin(), pluginsInitialized() for OpenFlipper and other custom functions.
+ * Including basic initializePlugin(), pluginsInitialized(), and other UI-related functions.
  */
 class PlushPlugin : public QObject,
         BaseInterface,
@@ -38,7 +24,6 @@ class PlushPlugin : public QObject,
         LoggingInterface,
         LoadSaveInterface,
         KeyInterface,
-        RPCInterface,
         ProcessInterface
 {
     Q_OBJECT
@@ -47,7 +32,6 @@ class PlushPlugin : public QObject,
     Q_INTERFACES(LoggingInterface)
     Q_INTERFACES(LoadSaveInterface)
     Q_INTERFACES(KeyInterface)
-    Q_INTERFACES(RPCInterface)
     Q_INTERFACES(ProcessInterface)
     
 signals:
@@ -67,14 +51,14 @@ signals:
     void addHiddenPickMode(const std::string& _mode);
     // KeyInterface
     void registerKey(int _key, Qt::KeyboardModifiers _modifiers, QString _description, bool _multiUse = false);
-    // RPCInterface
-    void pluginExists( QString _pluginName, bool &_exists );
-    void functionExists ( QString _pluginName, QString _functionName, bool &_exists );
     // ProcessInterface
     void startJob (QString _jobId, QString _description, int _min, int _max, bool _blocking=false);
     void finishJob (QString _jobId);
     void setJobState (QString _jobId, int _value);
     void setJobDescription (QString _jobId, QString _text);
+    
+    // Custom canceling signal
+    void cancelingJob();
     
 public:
     PlushPlugin();
@@ -83,33 +67,11 @@ public:
     QString name() { return (QString("Simple Plush")); };
     QString description( ) { return (QString("Smooths the active Mesh")); };
 
-    /// @name Curvature property handle
-    ///@{
-    /// Curvature value/direction of each vertex. It's empty before curvature calculation.
-    static OpenMesh::VPropHandleT<double> minCurvatureHandle;
-    static OpenMesh::VPropHandleT<double> maxCurvatureHandle;
-    static OpenMesh::VPropHandleT<OpenMesh::Vec3d> minCurvatureDirectionHandle;
-    static OpenMesh::VPropHandleT<OpenMesh::Vec3d> maxCurvatureDirectionHandle;
-    ///@}
-    
-    /// @name Geodesic distance property handle
-    ///@{
-    /// Geodesic distance/path from one vertex to another. It's empty before geodesic calculation.
-    static OpenMesh::EPropHandleT<double> edgeWeightHandle;
-    static OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, double> > geodesicDistanceHandle;
-    static OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, IdList> > geodesicPathHandle;
-    ///@}
-    
-    /// @name Skeleton property handle
-    ///@{
-    
-    /// The skeleton of this mesh. It's built during mesh loading unless error occurs
-    static OpenMesh::MPropHandleT<Skeleton*> skeletonHandle;
-    /// The weight of corresponding bones for each vertex
-    static OpenMesh::VPropHandleT<double*> bonesWeightHandle;
-    ///@}
-    
 private:
+    PlushPatternGenerator *m_patternGenerator;
+    /// This obj contains the mesh used by pattern generator. It self contains info such as id and filename in OpenFlipper
+    TriMeshObject *m_triMeshObj;
+    
     QSpinBox *geodesicEdges;
     QPushButton *geodesicButton;
     QPushButton *geodesicAllButton;
@@ -121,37 +83,15 @@ private:
     bool showAllPath;
 
     /// Flag for thread stopping
-    bool isJobCanceled;
-    OpenFlipperThread *thread;
+    bool isJobStopped;
+    QString m_currentJobId;
     
     std::vector<char*> *requiredPlugins;
     
-    bool isIntersected(TriMesh *mesh, IdList path1, IdList path2);
+    int loadSelection(TriMesh *mesh, QString meshName);
+    void saveSelection(TriMesh *mesh, QString meshName);
+    void clearSelection(TriMesh *mesh);
 
-    bool getEdge(TriMesh *mesh, EdgeHandle &_eh, int v1No, int v2No);
-    bool getEdge(TriMesh *mesh, EdgeHandle &_eh, VertexHandle v1, VertexHandle v2);
-    
-    void loadCurvature(TriMesh *mesh, QString meshName);
-    
-    int loadSelection(int meshId, QString meshName);
-    void saveSelection(int meshId, QString meshName);
-    void clearSelection(int meshId);
-    
-    bool loadSkeleton(int meshId);
-    bool loadBoneWeight(int meshId);
-    void saveBoneWeight(int meshId);
-    
-    bool calcCurvature(QString _jobId, int meshId);
-    void calcGeodesic(TriMesh *mesh,
-                      Polyhedron &P,
-                      std::map<int, Polyhedron::Vertex_handle> &verticesMapping,
-                      VertexHandle sourceHandle,
-                      IdList targetVertices);
-    bool calcSpanningTree(QString _jobId, int meshId, std::vector<EdgeHandle> &spanningTree, IdList selectedVertices, int limitNum, bool allPaths);
-    
-    void initProperties(TriMesh *mesh);
-    void uninitProperties(TriMesh *mesh);
-    
 private slots:
     // BaseInterface
     void initializePlugin();
@@ -166,9 +106,9 @@ private slots:
     void calcCurvatureButtonClicked();
 
     // Starter function for thread
-    void showGeodesicThread(QString _jobId);
-    void calcCurvatureThread(QString _jobId);
-
+    void calcCurvatureThread();
+    void showGeodesicThread();
+    
     void slotKeyEvent( QKeyEvent* _event );
     
     // LoadSaveInterface
@@ -177,7 +117,12 @@ private slots:
     
     // ProcessInterface
     void canceledJob(QString _job);
-    void finishedJob(QString _job);
+    // Custom handler
+    void finishedJobHandler();
+    
+    bool checkIfGeneratorExist();
+    
+    void receiveJobState(int);
 
 public slots:
     QString version() { return QString("1.0"); };

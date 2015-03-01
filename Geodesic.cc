@@ -6,8 +6,7 @@
 //
 //
 
-#include "PlushPlugin.hh"
-#include "CGAL_Polyhedron_builder.hh"
+#include "PlushPatternGenerator.hh"
 #include "SuperDeform/Skeleton.hh"
 
 #include <CGAL/boost/graph/dijkstra_shortest_paths.h>
@@ -42,8 +41,8 @@ private:
     }
     
     double curvatureWeight(VertexHandle v1, VertexHandle v2) const {
-        double curvature1 = mesh->property(PlushPlugin::maxCurvatureHandle, v1);
-        double curvature2 = mesh->property(PlushPlugin::maxCurvatureHandle, v2);
+        double curvature1 = mesh->property(PlushPatternGenerator::maxCurvatureHandle, v1);
+        double curvature2 = mesh->property(PlushPatternGenerator::maxCurvatureHandle, v2);
         // clamp curvature to [-1, 1]
         curvature1 = fmax(fmin(curvature1, 1), -1);
         curvature2 = fmax(fmin(curvature2, 1), -1);
@@ -58,15 +57,15 @@ private:
                           VertexHandle v2,
                           TriMesh::Point p1,
                           TriMesh::Point p2) const {
-        Skeleton *skeleton = mesh->property(PlushPlugin::skeletonHandle);
+        Skeleton *skeleton = mesh->property(PlushPatternGenerator::skeletonHandle);
 
         // Calculate corresponding averaged bone direction for each vertex
         OpenMesh::Vec3d avgBoneDirection(0,0,0);
         int i = 0;
         for (std::vector<Bone>::iterator bone_it = skeleton->bones.begin(); bone_it != skeleton->bones.end(); bone_it++, i++) {
             OpenMesh::Vec3d dir = (bone_it->getA() - bone_it->getB()).normalize();
-            double weight1 = mesh->property(PlushPlugin::bonesWeightHandle, v1)[i];
-            double weight2 = mesh->property(PlushPlugin::bonesWeightHandle, v2)[i];
+            double weight1 = mesh->property(PlushPatternGenerator::bonesWeightHandle, v1)[i];
+            double weight2 = mesh->property(PlushPatternGenerator::bonesWeightHandle, v2)[i];
             
             avgBoneDirection += dir * (weight1 + weight2)/2;
         }
@@ -135,14 +134,14 @@ public:
 
         double edgeWeight = 0;
         double pathWeight = 0;
-        if (mesh->property(PlushPlugin::edgeWeightHandle, eh) >= 0) {
-            edgeWeight += mesh->property(PlushPlugin::edgeWeightHandle, eh);
+        if (mesh->property(PlushPatternGenerator::edgeWeightHandle, eh) >= 0) {
+            edgeWeight += mesh->property(PlushPatternGenerator::edgeWeightHandle, eh);
         } else {
 //            edgeWeight += distanceWeight(p1, p2);
 //            edgeWeight += textureWeight(he1, he2);
 //            edgeWeight += curvatureWeight(v1, v2);
             edgeWeight += skeletonWeight(eh, v1, v2, p1, p2);
-            mesh->property(PlushPlugin::edgeWeightHandle, eh) = edgeWeight;
+            mesh->property(PlushPatternGenerator::edgeWeightHandle, eh) = edgeWeight;
         }
 
         // re-calculate smoothness weight every time because it depends on path.
@@ -165,30 +164,26 @@ public:
     }
 };
 
-void PlushPlugin::calcGeodesic(TriMesh *mesh,
-                               Polyhedron &P,
-                               std::map<int, Polyhedron::Vertex_handle> &verticesMapping,
-                               VertexHandle sourceHandle,
-                               IdList targetVertices)
+void PlushPatternGenerator::calcGeodesic(VertexHandle sourceHandle, std::vector<int> targetVertices)
 {
     // Prepare property maps for dijkstra algorithm
-    VertexIdPropertyMap vertex_index_pmap = get(boost::vertex_external_index, P);
-    EdgeIdPropertyMap edge_index_pmap = get(boost::edge_external_index, P);
+    VertexIdPropertyMap vertex_index_pmap = get(boost::vertex_external_index, m_polyhedron);
+    EdgeIdPropertyMap edge_index_pmap = get(boost::edge_external_index, m_polyhedron);
     
-    std::vector<boost_vertex_descriptor> predecessor(boost::num_vertices(P));
+    std::vector<boost_vertex_descriptor> predecessor(boost::num_vertices(m_polyhedron));
     boost::iterator_property_map<std::vector<boost_vertex_descriptor>::iterator, VertexIdPropertyMap> predecessor_pmap(predecessor.begin(), vertex_index_pmap);
 
-    std::vector<double> distance(boost::num_vertices(P));
+    std::vector<double> distance(boost::num_vertices(m_polyhedron));
     boost::iterator_property_map<std::vector<double>::iterator, VertexIdPropertyMap> distance_pmap(distance.begin(), vertex_index_pmap);
     
-    boost_vertex_descriptor source = verticesMapping[sourceHandle.idx()];
+    boost_vertex_descriptor source = m_verticesMapping[sourceHandle.idx()];
     
     // HACK: This is a local variable "shared" by both (functional)weightmap & visitor
     //       so that we can first assign it in visitor and then access it in weightmap
     boost_vertex_descriptor currentV = source;
     
-    WeightFunctor weightFunctor(mesh,
-                                P,
+    WeightFunctor weightFunctor(m_mesh,
+                                m_polyhedron,
                                 &currentV,
                                 predecessor_pmap,
                                 edge_index_pmap);
@@ -198,7 +193,7 @@ void PlushPlugin::calcGeodesic(TriMesh *mesh,
     Dijkstra_visitor visitor(&currentV);
     
     // Calculate geodesic using Dijkstra
-    boost::dijkstra_shortest_paths(P, source,
+    boost::dijkstra_shortest_paths(m_polyhedron, source,
                                    vertex_index_map(vertex_index_pmap)
                                    .weight_map(weightmap)
                                    .distance_map(distance_pmap)
@@ -206,11 +201,11 @@ void PlushPlugin::calcGeodesic(TriMesh *mesh,
                                    .visitor(visitor));
     
     // Save result into property
-    std::map<std::pair<VertexHandle, VertexHandle>, double> &geodesicDistance = mesh->property(geodesicDistanceHandle);
-    std::map<std::pair<VertexHandle, VertexHandle>, IdList> &geodesicPath = mesh->property(geodesicPathHandle);
+    std::map<std::pair<VertexHandle, VertexHandle>, double> &geodesicDistance = m_mesh->property(geodesicDistanceHandle);
+    std::map<std::pair<VertexHandle, VertexHandle>, std::vector<int> > &geodesicPath = m_mesh->property(geodesicPathHandle);
     for (size_t i = 0; i < targetVertices.size(); i++) {
         int id = targetVertices[i];
-        VertexHandle destHandle = mesh->vertex_handle(id);
+        VertexHandle destHandle = m_mesh->vertex_handle(id);
         if (destHandle == sourceHandle) {
             continue;
         }
@@ -225,8 +220,8 @@ void PlushPlugin::calcGeodesic(TriMesh *mesh,
         geodesicPath.erase(edgeDS);
 
         // back tracking
-        IdList path;
-        for(boost_vertex_descriptor predecessor = verticesMapping[id]; predecessor_pmap[predecessor] != predecessor;) {
+        std::vector<int> path;
+        for(boost_vertex_descriptor predecessor = m_verticesMapping[id]; predecessor_pmap[predecessor] != predecessor;) {
             path.push_back(predecessor->id());
             predecessor = predecessor_pmap[predecessor];
         }
@@ -238,8 +233,8 @@ void PlushPlugin::calcGeodesic(TriMesh *mesh,
         }
         
         // write into property
-        geodesicDistance.insert(std::make_pair(edgeSD, distance_pmap[verticesMapping[id]]));
-        geodesicDistance.insert(std::make_pair(edgeDS, distance_pmap[verticesMapping[id]]));
+        geodesicDistance.insert(std::make_pair(edgeSD, distance_pmap[m_verticesMapping[id]]));
+        geodesicDistance.insert(std::make_pair(edgeDS, distance_pmap[m_verticesMapping[id]]));
 
         geodesicPath.insert(std::make_pair(edgeDS, path));
         std::reverse(path.begin(), path.end());

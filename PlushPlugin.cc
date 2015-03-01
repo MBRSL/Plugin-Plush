@@ -1,35 +1,19 @@
-#include <ObjectTypes/PolyMesh/PolyMesh.hh>
-#include <ObjectTypes/TriangleMesh/TriangleMesh.hh>
-
-#include <OpenFlipper/BasePlugin/RPCWrappers.hh>
-#include <OpenFlipper/common/Types.hh>
-
 #include "PlushPlugin.hh"
-#include "SuperDeform/Weight.hh"
 
-OpenMesh::VPropHandleT<double> PlushPlugin::minCurvatureHandle;
-OpenMesh::VPropHandleT<double> PlushPlugin::maxCurvatureHandle;
-OpenMesh::VPropHandleT<OpenMesh::Vec3d> PlushPlugin::minCurvatureDirectionHandle;
-OpenMesh::VPropHandleT<OpenMesh::Vec3d> PlushPlugin::maxCurvatureDirectionHandle;
-
-OpenMesh::EPropHandleT<double> PlushPlugin::edgeWeightHandle;
-OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, double> > PlushPlugin::geodesicDistanceHandle;
-OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, IdList> > PlushPlugin::geodesicPathHandle;
-
-OpenMesh::MPropHandleT<Skeleton*> PlushPlugin::skeletonHandle;
-OpenMesh::VPropHandleT<double*> PlushPlugin::bonesWeightHandle;
+#include <MeshTools/MeshSelectionT.hh>
 
 PlushPlugin::PlushPlugin()
 {
     requiredPlugins = new std::vector<char*>();
     
-    thread = NULL;
+    m_currentJobId = "";
+    
+    m_patternGenerator = NULL;
+    m_triMeshObj = NULL;
 }
 
 void PlushPlugin::initializePlugin()
 {
-    requiredPlugins->push_back("meshobjectselection");
-    
     // Register keys
     emit registerKey(Qt::Key_X,     Qt::NoModifier, "Normal mode");
     emit registerKey(Qt::Key_Z,     Qt::NoModifier, "Plush picking mode");
@@ -39,17 +23,6 @@ PlushPlugin::~PlushPlugin() {
     delete requiredPlugins;
 }
 void PlushPlugin::pluginsInitialized() {
-    bool isPluginsExist;
-    for (std::vector<char*>::iterator it = requiredPlugins->begin(); it != requiredPlugins->end(); it++) {
-        pluginExists(*it, isPluginsExist);
-        if (!isPluginsExist) {
-            char str[100];
-            sprintf(str, "Plugin %s not found.", *it);
-            emit log(LOGERR, str);
-            return;
-        }
-    }
-    
     // Create the Toolbox Widget
     QWidget* toolBox = new QWidget();
     QGridLayout* layout = new QGridLayout(toolBox);
@@ -114,269 +87,215 @@ void PlushPlugin::fileOpened(int _id) {
     // There are some bug loading/saving property in OpenFlipper. we have to handle them by ourselves.
     BaseObjectData *obj;
     PluginFunctions::getObject(_id, obj);
-    QString meshName = QFileInfo(obj->name()).baseName();
     
     if (obj->dataType(DATA_TRIANGLE_MESH)) {
-        TriMesh *mesh;
-        mesh = PluginFunctions::triMesh(obj);
-        
-        // setup properties
-        initProperties(mesh);
-        
-        // Load curvature
-        loadCurvature(mesh, meshName);
-        
-        // Load selection
-        int selectedCount = loadSelection(_id, meshName);
-        geodesicEdges->setMaximum(selectedCount*(selectedCount-1)/2);
-        
-        // Load skeleton
-        loadSkeleton(_id);
-
-        // Load bone weight with skeleton
-        loadBoneWeight(_id);
+        if (!m_patternGenerator) {
+            m_triMeshObj = PluginFunctions::triMeshObject(obj);
+            TriMesh *mesh = PluginFunctions::triMesh(obj);
+            QString meshName = QFileInfo(obj->name()).baseName();
+            m_patternGenerator = new PlushPatternGenerator(mesh, meshName);
+            
+            // Load selection
+            int selectedCount = loadSelection(mesh, meshName);
+            geodesicEdges->setMaximum(selectedCount*(selectedCount-1)/2);
+            
+            // When user click on "cancel" button, cancel this job
+            connect(this, SIGNAL(cancelingJob()), m_patternGenerator, SLOT(cancelJob()));
+            // Get progress info from m_patternGenerator, then re-emit it to OpenFlipper system inside receiveJobState
+            connect(m_patternGenerator, SIGNAL(setJobState(int)), this, SLOT(receiveJobState(int)));
+        }
     }
 }
 
 void PlushPlugin::objectDeleted(int _id) {
-    BaseObjectData *obj;
-    PluginFunctions::getObject(_id, obj);
-    QString meshName = QFileInfo(obj->name()).baseName();
-    
-    if (obj->dataType(DATA_TRIANGLE_MESH)) {
-        TriMesh *mesh;
-        mesh = PluginFunctions::triMesh(obj);
-        uninitProperties(mesh);
+    if (!m_triMeshObj && _id == m_triMeshObj->id()) {
+        disconnect(this, SIGNAL(cancelingJob()), m_patternGenerator, SLOT(cancelJob()));
+        disconnect(m_patternGenerator, SIGNAL(setJobState(int)), this, SLOT(receiveJobState(int)));
+
+        delete m_patternGenerator;
+        
+        m_patternGenerator = NULL;
+        m_triMeshObj = NULL;
     }
 }
 
-void PlushPlugin::initProperties(TriMesh *mesh) {
-    mesh->add_property(minCurvatureHandle, "Min Curvature");
-    mesh->add_property(maxCurvatureHandle, "Max Curvature");
-    mesh->add_property(minCurvatureDirectionHandle, "Min curvature direction");
-    mesh->add_property(maxCurvatureDirectionHandle, "Max curvature direction");
-    
-    mesh->add_property(edgeWeightHandle, "Edge weight");
-    mesh->add_property(geodesicDistanceHandle, "Geodesic distance between vertices pair");
-    mesh->add_property(geodesicPathHandle, "Geodesic path between vertices pair");
-    
-    mesh->add_property(skeletonHandle, "Skeleton");
-    mesh->add_property(bonesWeightHandle, "Bone weights for each vertex");
-    
-//    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
-//    }
-    for (EdgeIter e_it = mesh->edges_begin(); e_it != mesh->edges_end(); e_it++) {
-        mesh->property(edgeWeightHandle, *e_it) = -1;
+int PlushPlugin::loadSelection(TriMesh *mesh, QString meshName) {
+    QFile file(meshName + "_selection.txt");
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        emit log(LOGERR, QString("Unable to read file %1").arg(meshName + "_selection.txt"));
+        return 0;
     }
-}
-
-void PlushPlugin::uninitProperties(TriMesh *mesh) {
-    if (mesh->property(skeletonHandle) != NULL) {
-        delete mesh->property(skeletonHandle);
-    }
-    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
-        if (mesh->property(bonesWeightHandle, *v_it) != NULL) {
-            delete[] mesh->property(bonesWeightHandle, *v_it);
+    
+    QTextStream in(&file);
+    
+    std::vector<int> selectedVertices;
+    QString v;
+    while(!in.atEnd()) {
+        v = in.readLine();
+        bool ok;
+        int vId = v.toInt(&ok);
+        if (ok) {
+            selectedVertices.push_back(vId);
         }
     }
+    
+    MeshSelection::selectVertices(mesh, selectedVertices);
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION_EDGES);
+    return selectedVertices.size();
+}
+
+void PlushPlugin::saveSelection(TriMesh *mesh, QString meshName) {
+    std::vector<int> selectedVertices = MeshSelection::getVertexSelection(mesh);
+    
+    // Prepare file for saving data
+    QFile file(meshName + "_selection.txt");
+    file.open(QIODevice::WriteOnly | QIODevice::Text);
+    QTextStream out(&file);
+    
+    for (std::vector<int>::iterator v_it = selectedVertices.begin(); v_it != selectedVertices.end(); v_it++) {
+        out << *v_it << "\n";
+    }
+    file.close();
+}
+
+void PlushPlugin::clearSelection(TriMesh *mesh) {
+    MeshSelection::clearVertexSelection(mesh);
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION_EDGES);
 }
 
 void PlushPlugin::calcSkeletonWeightButtonClicked() {
-    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
-         ++o_it) {
-        int meshId = o_it->id();
-        
-        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
-            TriMesh *mesh = PluginFunctions::triMesh(*o_it);
-            QString meshName = QFileInfo(o_it->name()).baseName();
-            
-            if (mesh->property(skeletonHandle) == NULL) {
-                if (!loadSkeleton(meshId)) {
-                    return;
-                }
-            }
-            
-            Skeleton *skeleton = mesh->property(skeletonHandle);
-            Weight weightGenerator;
-            mesh->request_face_normals();
-            weightGenerator.computeBoneWeight(mesh, mesh->property(skeletonHandle));
-            mesh->release_face_normals();
-            
-            Eigen::MatrixXd weight = weightGenerator.getWeight();
-            for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
-                double *w = new double[skeleton->bones.size()];
-                for (size_t i = 0; i < skeleton->bones.size(); i++) {
-                    w[i] = weight(i, v_it->idx());
-                }
-                if (mesh->property(bonesWeightHandle, *v_it) != NULL) {
-                    delete[] mesh->property(bonesWeightHandle, *v_it);
-                }
-                mesh->property(bonesWeightHandle, *v_it) = w;
-            }
-        }
+    if (!checkIfGeneratorExist()) {
+        return;
     }
+
+    m_patternGenerator->calcSkeletonWeight();
 }
 
 void PlushPlugin::saveSkeletonWeightButtonClicked() {
-    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
-         ++o_it) {
-        int meshId = o_it->id();
-        
-        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
-            saveBoneWeight(meshId);
-        }
+    if (!checkIfGeneratorExist()) {
+        return;
     }
+
+    m_patternGenerator->saveBoneWeight();
 }
 
 void PlushPlugin::calcCurvatureButtonClicked() {
-    if (thread == NULL) {
-        thread = new OpenFlipperThread("calcCurvature");
-        connect(thread, SIGNAL(finished(QString)), this, SLOT(finishedJob(QString)));
-        connect(thread, SIGNAL(function(QString)), this, SLOT(calcCurvatureThread(QString)), Qt::DirectConnection);
-        emit startJob("calcCurvature", "calculate curvature of whole mesh", 0, 100, true);
-        thread->start();
-        thread->startProcessing();
-    }
-}
-
-void PlushPlugin::showGeodesicButtonClicked() {
-    if (thread == NULL) {
-        if (sender() == geodesicButton) {
-            showAllPath = false;
-        } else {
-            showAllPath = true;
-        }
-        thread = new OpenFlipperThread("calcGeodesic");
-        connect(thread, SIGNAL(finished(QString)), this, SLOT(finishedJob(QString)));
-        connect(thread, SIGNAL(function(QString)), this, SLOT(showGeodesicThread(QString)), Qt::DirectConnection);
-        emit startJob("calcGeodesic", "calculate geodesic of whole mesh", 0, 100, true);
-        thread->start();
-        thread->startProcessing();
-    }
-}
-
-void PlushPlugin::saveSelectionButtonClicked() {
-    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
-         ++o_it) {
-        int meshId = o_it->id();
-        
-        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
-            TriMesh *mesh = PluginFunctions::triMesh(*o_it);
-            
-            QString meshName = QFileInfo(o_it->name()).baseName();
-            saveSelection(meshId, meshName);
-        }
-    }
-}
-
-void PlushPlugin::loadSelectionButtonClicked() {
-    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
-         ++o_it) {
-        int meshId = o_it->id();
-        
-        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
-            TriMesh *mesh = PluginFunctions::triMesh(*o_it);
-            
-            QString meshName = QFileInfo(o_it->name()).baseName();
-            int selectedCount = loadSelection(meshId, meshName);
-            
-            geodesicEdges->setMaximum(selectedCount*(selectedCount-1)/2);
-        }
-    }
-}
-
-void PlushPlugin::clearSelectionButtonClicked() {
-    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
-         ++o_it) {
-        int meshId = o_it->id();
-        
-        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
-            clearSelection(meshId);
-        }
-    }
-}
-
-void PlushPlugin::calcCurvatureThread(QString _jobId) {
-    if (PluginFunctions::objectCount() == 0)
-    {
-        emit log(LOGERR, "Load a model first.");
+    if (!checkIfGeneratorExist()) {
         return;
     }
     
-    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
-         ++o_it) {
-        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
-            int meshId = o_it->id();
-            calcCurvature(_jobId, meshId);
-        }
-    }
-    emit log(LOGINFO, "Curvature calculation done.");
+    m_currentJobId = "calcCurvature";
+    OpenFlipperThread *thread = new OpenFlipperThread(m_currentJobId);
+    connect(thread, SIGNAL(finished(QString)), this, SIGNAL(finishJob(QString)));
+    connect(thread, SIGNAL(function(QString)), this, SLOT(calcCurvatureThread()), Qt::DirectConnection);
+    
+    // Custom handler to set m_currentJobId to "" after finishing job. Also updating screen.
+    connect(thread, SIGNAL(finished(QString)), this, SLOT(finishedJobHandler()));
+    
+    emit startJob(m_currentJobId, "calculate curvature of whole mesh", 0, 100, true);
+    thread->start();
+    thread->startProcessing();
 }
 
-void PlushPlugin::showGeodesicThread(QString _jobId) {
-    if (PluginFunctions::objectCount() == 0)
-    {
-        emit log(LOGERR, "Load a model first.");
+void PlushPlugin::showGeodesicButtonClicked() {
+    if (!checkIfGeneratorExist()) {
         return;
     }
 
-    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS); o_it != PluginFunctions::objectsEnd();
-         ++o_it) {
-        if (o_it->dataType(DATA_TRIANGLE_MESH)) {
-            int meshId = o_it->id();
-            QString meshName = QFileInfo(o_it->name()).baseName();
-            TriMesh *mesh = PluginFunctions::triMesh(*o_it);
-            
-            IdList selectedVertices;
-            selectedVertices = RPC::callFunctionValue<IdList> ("meshobjectselection", "getVertexSelection", meshId);
-            geodesicEdges->setMaximum(selectedVertices.size()*(selectedVertices.size()-1)/2);
+    if (sender() == geodesicButton) {
+        showAllPath = false;
+    } else {
+        showAllPath = true;
+    }
 
-            std::vector<EdgeHandle> spanningTree;
-            if (calcSpanningTree(_jobId, meshId, spanningTree, selectedVertices, geodesicEdges->value(), showAllPath)) {
-                IdList edgeList;
-                for (size_t i = 0; i < spanningTree.size(); i++) {
-                    edgeList.push_back(spanningTree[i].idx());
-                }
+    m_currentJobId = "calcGeodesic";
+    OpenFlipperThread *thread = new OpenFlipperThread(m_currentJobId);
+    connect(thread, SIGNAL(finished(QString)), this, SIGNAL(finishJob(QString)));
+    connect(thread, SIGNAL(function(QString)), this, SLOT(showGeodesicThread()), Qt::DirectConnection);
+    
+    // Custom handler to set m_currentJobId to "" after finishing job. Also updating screen.
+    connect(thread, SIGNAL(finished(QString)), this, SLOT(finishedJobHandler()));
+    
+    emit startJob(m_currentJobId, "calculate geodesic of whole mesh", 0, 100, true);
+    thread->start();
+    thread->startProcessing();
+}
 
-                RPC::callFunction<int>("meshobjectselection", "clearEdgeSelection", meshId);
-                RPC::callFunction<int, IdList>("meshobjectselection", "selectEdges", meshId, edgeList);
-            }
+void PlushPlugin::saveSelectionButtonClicked() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+
+    QString meshName = QFileInfo(m_triMeshObj->name()).baseName();
+    saveSelection(m_triMeshObj->mesh(), meshName);
+}
+
+void PlushPlugin::loadSelectionButtonClicked() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+    
+    QString meshName = QFileInfo(m_triMeshObj->name()).baseName();
+    int selectedCount = loadSelection(m_triMeshObj->mesh(), meshName);
+
+    geodesicEdges->setMaximum(selectedCount*(selectedCount-1)/2);
+}
+
+void PlushPlugin::clearSelectionButtonClicked() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+    
+    clearSelection(m_triMeshObj->mesh());
+}
+
+void PlushPlugin::calcCurvatureThread() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+    
+    m_patternGenerator->calcCurvature();
+    emit log(LOGINFO, "Curvature calculation done.");
+}
+
+void PlushPlugin::showGeodesicThread() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+
+    TriMesh *mesh = m_triMeshObj->mesh();
+
+    std::vector<int> selectedVertices;
+    selectedVertices = MeshSelection::getVertexSelection(mesh);
+    geodesicEdges->setMaximum(selectedVertices.size()*(selectedVertices.size()-1)/2);
+
+    std::vector<EdgeHandle> spanningTree;
+    if (m_patternGenerator->calcSpanningTree(spanningTree, selectedVertices, geodesicEdges->value(), showAllPath)) {
+        std::vector<int> edgeList;
+        for (size_t i = 0; i < spanningTree.size(); i++) {
+            edgeList.push_back(spanningTree[i].idx());
         }
+
+        MeshSelection::clearEdgeSelection(mesh);
+        MeshSelection::selectEdges(mesh, edgeList);
     }
     emit log(LOGINFO, "Geodesic calculation done.");
 }
 
-bool PlushPlugin::getEdge(TriMesh *mesh, EdgeHandle &_eh, VertexHandle v1, VertexHandle v2) {
-    return getEdge(mesh, _eh, v1.idx(), v2.idx());
-}
-
-bool PlushPlugin::getEdge(TriMesh *mesh, EdgeHandle &_eh, int v1No, int v2No) {
-    VertexHandle v1 = mesh->vertex_handle(v1No);
-    VertexHandle v2 = mesh->vertex_handle(v2No);
-    for (TriMesh::VertexEdgeIter ve_it = mesh->ve_iter(v1); ve_it; ve_it++)
-    {
-        HalfedgeHandle heh = mesh->halfedge_handle(*ve_it, 0);
-        if (mesh->from_vertex_handle(heh) == v2
-        ||  mesh->to_vertex_handle(heh) == v2)
-        {
-            _eh = *ve_it;
-            return true;
-        }
-    }
-    return false;
-}
-
 void PlushPlugin::canceledJob(QString _job) {
-    // do nothing
-    isJobCanceled = true;
-    thread = NULL;
+    emit cancelingJob();
 }
 
-void PlushPlugin::finishedJob(QString _job) {
-    // do nothing
-    thread = NULL;
+void PlushPlugin::finishedJobHandler() {
+    m_currentJobId = "";
     
-    emit finishJob(_job);
+    // Update visual changes outside thread, otherwise it will crash
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION_EDGES);
+}
+void PlushPlugin::receiveJobState(int state) {
+    if (m_currentJobId != "") {
+        emit setJobState(m_currentJobId, state);
+    }
 }
 
 void PlushPlugin::slotKeyEvent( QKeyEvent* _event ) {
@@ -396,6 +315,15 @@ void PlushPlugin::slotKeyEvent( QKeyEvent* _event ) {
 //        default:
 //            break;
 //    }
+}
+
+bool PlushPlugin::checkIfGeneratorExist() {
+    if (!m_patternGenerator || !m_triMeshObj)
+    {
+        emit log(LOGERR, "Load a model first.");
+        return false;
+    }
+    return true;
 }
 
 Q_EXPORT_PLUGIN2( plushPlugin , PlushPlugin );
