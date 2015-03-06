@@ -114,7 +114,8 @@ bool PlushPatternGenerator::calcSpanningTree(std::vector<EdgeHandle> &spanningTr
             geodesicDistance.find(std::make_pair(sourceHandle, destHandle));
             std::map<std::pair<VertexHandle, VertexHandle>, std::vector<int> >::iterator pathFound =
             geodesicPath.find(std::make_pair(sourceHandle, destHandle));
-            
+
+            // Calculate geodesic if no cached reuslt
             if (distanceFound == geodesicDistance.end() || pathFound == geodesicPath.end()) {
                 calcGeodesic(sourceHandle, selectedVertices);
                 distanceFound = geodesicDistance.find(std::make_pair(sourceHandle, destHandle));
