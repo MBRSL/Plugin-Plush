@@ -74,7 +74,7 @@ public:
     
     bool calcCurvature();
     void calcGeodesic(VertexHandle sourceHandle, std::vector<int> targetVertices);
-    bool calcSpanningTree(std::vector<EdgeHandle> &spanningTree, std::vector<int> selectedVertices, int limitNum, bool allPaths);
+    bool calcSpanningTree(std::vector<EdgeHandle> &spanningTree, std::vector<int> selectedVertices, int limitNum, bool elimination, bool allPaths);
     bool calcSkeletonWeight();
     
 private:

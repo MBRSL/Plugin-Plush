@@ -14,15 +14,6 @@ PlushPlugin::PlushPlugin()
 
 void PlushPlugin::initializePlugin()
 {
-    // Register keys
-    emit registerKey(Qt::Key_X,     Qt::NoModifier, "Normal mode");
-    emit registerKey(Qt::Key_Z,     Qt::NoModifier, "Plush picking mode");
-}
-
-PlushPlugin::~PlushPlugin() {
-    delete requiredPlugins;
-}
-void PlushPlugin::pluginsInitialized() {
     // Create the Toolbox Widget
     QWidget* toolBox = new QWidget();
     QGridLayout* layout = new QGridLayout(toolBox);
@@ -41,13 +32,19 @@ void PlushPlugin::pluginsInitialized() {
     QLabel *geodesicNumberLabel = new QLabel(tr("#"));
     geodesicEdges = new QSpinBox();
     geodesicEdges->setMinimum(0);
-    geodesicButton = new QPushButton(tr("Show"));
-    geodesicAllButton = new QPushButton(tr("Show all"));
-    QHBoxLayout *geodesicLayout = new QHBoxLayout;
-    geodesicLayout->addWidget(geodesicNumberLabel);
-    geodesicLayout->addWidget(geodesicEdges);
-    geodesicLayout->addWidget(geodesicButton);
-    geodesicLayout->addWidget(geodesicAllButton);
+    geodesicElimination = new QCheckBox(tr("Eliminate crossover paths"));
+    geodesicButton = new QPushButton(tr("Show single path"));
+    geodesicAllButton = new QPushButton(tr("Show all path"));
+    QVBoxLayout *geodesicLayout = new QVBoxLayout;
+    QHBoxLayout *geodesicRow1Layout = new QHBoxLayout;
+    geodesicRow1Layout->addWidget(geodesicNumberLabel);
+    geodesicRow1Layout->addWidget(geodesicEdges);
+    geodesicRow1Layout->addWidget(geodesicElimination);
+    geodesicLayout->addLayout(geodesicRow1Layout);
+    QHBoxLayout *geodesicRow2Layout = new QHBoxLayout;
+    geodesicRow2Layout->addWidget(geodesicButton);
+    geodesicRow2Layout->addWidget(geodesicAllButton);
+    geodesicLayout->addLayout(geodesicRow2Layout);
     geodesicGroup->setLayout(geodesicLayout);
     
     QGroupBox *selectionGroup = new QGroupBox(tr("Selection"));
@@ -81,6 +78,16 @@ void PlushPlugin::pluginsInitialized() {
     connect(calcCurvatureButton, SIGNAL(clicked()), this, SLOT(calcCurvatureButtonClicked()));
     
     emit addToolbox(tr("Plush"), toolBox);
+
+    // Register keys
+    emit registerKey(Qt::Key_X,     Qt::NoModifier, "Next path");
+    emit registerKey(Qt::Key_Z,     Qt::NoModifier, "Previous path");
+}
+
+PlushPlugin::~PlushPlugin() {
+    delete requiredPlugins;
+}
+void PlushPlugin::pluginsInitialized() {
 }
 
 void PlushPlugin::fileOpened(int _id) {
@@ -110,7 +117,7 @@ void PlushPlugin::fileOpened(int _id) {
 }
 
 void PlushPlugin::objectDeleted(int _id) {
-    if (!m_triMeshObj && _id == m_triMeshObj->id()) {
+    if (m_triMeshObj && _id == m_triMeshObj->id()) {
         disconnect(this, SIGNAL(cancelingJob()), m_patternGenerator, SLOT(cancelJob()));
         disconnect(m_patternGenerator, SIGNAL(setJobState(int)), this, SLOT(receiveJobState(int)));
         disconnect(m_patternGenerator, SIGNAL(log(int, QString)), this, SLOT(receiveLog(int, QString)));
@@ -273,7 +280,7 @@ void PlushPlugin::showGeodesicThread() {
     geodesicEdges->setMaximum(selectedVertices.size()*(selectedVertices.size()-1)/2);
 
     std::vector<EdgeHandle> spanningTree;
-    if (m_patternGenerator->calcSpanningTree(spanningTree, selectedVertices, geodesicEdges->value(), showAllPath)) {
+    if (m_patternGenerator->calcSpanningTree(spanningTree, selectedVertices, geodesicEdges->value(), geodesicElimination->isChecked(), showAllPath)) {
         std::vector<int> edgeList;
         for (size_t i = 0; i < spanningTree.size(); i++) {
             edgeList.push_back(spanningTree[i].idx());
@@ -314,21 +321,24 @@ void PlushPlugin::receiveLog(int type, QString msg) {
 
 void PlushPlugin::slotKeyEvent( QKeyEvent* _event ) {
     // Switch pressed keys
-//    switch (_event->key())
-//    {
-//        case Qt::Key_X:
-//            if (!pickButton_->isChecked()) {
-//                pickButton_->click();
-//            }
-//            break;
-//        case Qt::Key_Z:
-//            if (pickButton_->isChecked()) {
-//                pickButton_->click();
-//            }
-//            break;
-//        default:
-//            break;
-//    }
+    int currentEdgeNo = geodesicEdges->value();
+    switch (_event->key())
+    {
+        case Qt::Key_X:
+            if (currentEdgeNo < geodesicEdges->maximum()) {
+                geodesicEdges->setValue(currentEdgeNo+1);
+            }
+            geodesicButton->click();
+            break;
+        case Qt::Key_Z:
+            if (currentEdgeNo > 0) {
+                geodesicEdges->setValue(currentEdgeNo-1);
+            }
+            geodesicButton->click();
+            break;
+        default:
+            break;
+    }
 }
 
 bool PlushPlugin::checkIfGeneratorExist() {

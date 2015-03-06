@@ -9,7 +9,11 @@
 #include "PlushPatternGenerator.hh"
 
 /**
- @brief Detect if there are any intersection between two paths.
+ @brief Detect if there are any intersections between two paths.
+ This function returns true if
+ 1. One path contains both the starting/ending points of another path.
+ 2. One path crossover another path.
+ 
  Note that overlapping (paths with identical edges) is not considered intersection here.
  
  @param pathA vertex ids list of path one
@@ -18,6 +22,11 @@
  */
 bool PlushPatternGenerator::isIntersected(std::vector<int> pathA, std::vector<int> pathB) {
     OpenMesh::Vec3d prevCrossVec(0,0,0);
+    
+    bool AcontainsStartingPointB = false;
+    bool AcontainsEndingPointB = false;
+    bool BcontainsStartingPointA = false;
+    bool BcontainsEndingPointA = false;
     // first check if there are any same vertex (says v) in both path
     for (int i = 0; i < (int)pathA.size(); i++) {
         VertexHandle vA = m_mesh->vertex_handle(pathA[i]);
@@ -25,9 +34,26 @@ bool PlushPatternGenerator::isIntersected(std::vector<int> pathA, std::vector<in
             VertexHandle vB = m_mesh->vertex_handle(pathB[j]);
             if (vA == vB) {
                 // index out of range, which means v1 or v2 is at the end.
-                // consider no crossover at this vertex
                 if (i-1 < 0 || i+1 >= (int)pathA.size()
                 ||  j-1 < 0 || j+1 >= (int)pathB.size()) {
+                    if (i-1 < 0) {
+                        BcontainsStartingPointA = true;
+                    }
+                    if (i+1 >= (int)pathA.size()) {
+                        BcontainsEndingPointA = true;
+                    }
+                    if (j-1 < 0) {
+                        AcontainsStartingPointB = true;
+                    }
+                    if (j+1 >= (int)pathB.size()) {
+                        AcontainsEndingPointB = true;
+                    }
+                    // Detecting case 1
+                    if ((AcontainsStartingPointB && AcontainsEndingPointB)
+                    ||  (BcontainsStartingPointA && BcontainsEndingPointA)) {
+                        return true;
+                    }
+                    // If not case 1, consider no crossover on these vertices
                     continue;
                 }
                 // then compare the sign of the following cross products
@@ -87,26 +113,28 @@ bool PlushPatternGenerator::isIntersected(std::vector<int> pathA, std::vector<in
  *  @return False if error occured.
  */
 bool PlushPatternGenerator::calcSpanningTree(std::vector<EdgeHandle> &spanningTree,
-                                   std::vector<int> selectedVertices,
-                                   int limitNum = 0,
-                                   bool allPath = true) {
+                                             std::vector<int> selectedVertices,
+                                             int limitNum = 0,
+                                             bool elimination = false,
+                                             bool allPath = true) {
     isJobCanceled = false;
     
     std::map<std::pair<VertexHandle, VertexHandle>, double> &geodesicDistance = m_mesh->property(geodesicDistanceHandle);
     std::map<std::pair<VertexHandle, VertexHandle>, std::vector<int> > &geodesicPath = m_mesh->property(geodesicPathHandle);
     
     // create a new graph with selectedVerices, calculate all paths between them
-    std::vector< std::pair<double, std::vector<int> > > result;
+    std::vector< std::pair<double, std::vector<int> > > pathCandidates;
     for (size_t i = 0; i < selectedVertices.size(); i++) {
+        int sourceIdx = selectedVertices[i];
+        VertexHandle sourceHandle = m_mesh->vertex_handle(sourceIdx);
+
         for (size_t j = i+1; j < selectedVertices.size(); j++) {
             if (isJobCanceled) {
                 emit log(LOGINFO, "Geodesic calculation canceled.");
                 return false;
             }
             
-            int sourceIdx = selectedVertices[i];
             int destIdx = selectedVertices[j];
-            VertexHandle sourceHandle = m_mesh->vertex_handle(sourceIdx);
             VertexHandle destHandle = m_mesh->vertex_handle(destIdx);
             
             // if result is not found, caculate now
@@ -120,37 +148,50 @@ bool PlushPatternGenerator::calcSpanningTree(std::vector<EdgeHandle> &spanningTr
                 calcGeodesic(sourceHandle, selectedVertices);
                 distanceFound = geodesicDistance.find(std::make_pair(sourceHandle, destHandle));
                 pathFound = geodesicPath.find(std::make_pair(sourceHandle, destHandle));
+                if (pathFound == geodesicPath.end()) {
+                    emit log(LOGERR, QString("Unreachable from vertex %1 to %2.").arg(sourceIdx, destIdx));
+                    continue;
+                }
             }
             double cost = distanceFound->second;
             std::vector<int> path = pathFound->second;
             
             // assign edge & weight
-            result.push_back(std::make_pair(cost, path));
+            pathCandidates.push_back(std::make_pair(cost, path));
         }
         // most of the time is spent on geodesic calculation
         int status = (double)(i+1)/selectedVertices.size() * 100;
         emit setJobState(status);
     }
+
+    // Sort candidates from lost cost to high cost
+    std::sort(pathCandidates.begin(), pathCandidates.end());
     
-    // remove paths which intersect with previous (lower-cost) path.
-    std::sort(result.begin(), result.end());
-    bool modified = false;
-    do {
-        modified = false;
-        for (std::vector<std::pair<double, std::vector<int> > >::iterator it = result.begin(); it != result.end() && ! modified; it++) {
-            for (std::vector<std::pair<double, std::vector<int> > >::iterator it2 = result.begin()+1; it2 != result.end() && !modified; it2++) {
-                if (isIntersected(it->second, it2->second)) {
-                    result.erase(it2);
-                    modified = true;
+    // Choose paths which do not intersect with previous (lower-cost) path.
+    std::vector< std::pair<double, std::vector<int> > > result;
+    if (elimination) {
+        for (std::vector<std::pair<double, std::vector<int> > >::iterator it = pathCandidates.begin(); it != pathCandidates.end(); it++) {
+            bool noIntersection = true;
+            std::vector<int> path1 = it->second;
+            
+            for (std::vector<std::pair<double, std::vector<int> > >::iterator it2 = result.begin(); it2 != result.end(); it2++) {
+                std::vector<int> path2 = it2->second;
+                if (isIntersected(path1, path2)) {
+                    noIntersection = false;
                     break;
                 }
             }
+            if (noIntersection) {
+                result.push_back(*it);
+            }
         }
-    } while (modified);
+    } else {
+        result = pathCandidates;
+    }
     
     // insert edges into spanning tree
     int count = 0;
-    for (std::vector<std::pair<double, std::vector<int> > >::iterator it = result.begin(); it != result.end() && ! modified; it++, count++) {
+    for (std::vector<std::pair<double, std::vector<int> > >::iterator it = result.begin(); it != result.end(); it++, count++) {
         // Break if we reach limitNum
         if (count >= limitNum && limitNum != 0) {
             break;
@@ -170,7 +211,7 @@ bool PlushPatternGenerator::calcSpanningTree(std::vector<EdgeHandle> &spanningTr
             spanningTree.push_back(eh);
         }
         
-        QString msg = QString("Total weight of path #%1: %2").arg(count+1).arg(it->first);
+        QString msg = QString("Weight of path #%1 from %2 to %3: %4").arg(count+1).arg(*path.begin()).arg(*(path.end()-1)).arg(it->first);
         emit log(LOGINFO, msg);
     }
     

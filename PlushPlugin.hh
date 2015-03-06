@@ -75,6 +75,8 @@ private:
     QSpinBox *geodesicEdges;
     QPushButton *geodesicButton;
     QPushButton *geodesicAllButton;
+    QCheckBox *geodesicElimination;
+    
     QPushButton *loadSelectionButton;
     QPushButton *saveSelectionButton;
     QPushButton *clearSelectionButton;
