@@ -72,9 +72,10 @@ private:
     /// This obj contains the mesh used by pattern generator. It self contains info such as id and filename in OpenFlipper
     TriMeshObject *m_triMeshObj;
     
-    QSpinBox *geodesicEdges;
-    QPushButton *geodesicButton;
-    QPushButton *geodesicAllButton;
+    QSpinBox *geodesicNumPaths;
+    QPushButton *geodesicCalcButton;
+    QPushButton *geodesicShowSingleButton;
+    QPushButton *geodesicShowAllButton;
     QCheckBox *geodesicElimination;
     
     QPushButton *loadSelectionButton;
@@ -102,6 +103,7 @@ private slots:
     void calcSkeletonWeightButtonClicked();
     void saveSkeletonWeightButtonClicked();
     void showGeodesicButtonClicked();
+    void calcGeodesicButtonClicked();
     void loadSelectionButtonClicked();
     void saveSelectionButtonClicked();
     void clearSelectionButtonClicked();
@@ -109,7 +111,7 @@ private slots:
 
     // Starter function for thread
     void calcCurvatureThread();
-    void showGeodesicThread();
+    void calcGeodesicThread();
     
     void slotKeyEvent( QKeyEvent* _event );
     

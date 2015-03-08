@@ -7,7 +7,7 @@ OpenMesh::VPropHandleT<OpenMesh::Vec3d> PlushPatternGenerator::maxCurvatureDirec
 
 OpenMesh::EPropHandleT<double> PlushPatternGenerator::edgeWeightHandle;
 OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, double> > PlushPatternGenerator::geodesicDistanceHandle;
-OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, std::vector<int> > > PlushPatternGenerator::geodesicPathHandle;
+OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, std::vector<VertexHandle> > > PlushPatternGenerator::geodesicPathHandle;
 
 OpenMesh::MPropHandleT<Skeleton*> PlushPatternGenerator::skeletonHandle;
 OpenMesh::VPropHandleT<double*> PlushPatternGenerator::bonesWeightHandle;

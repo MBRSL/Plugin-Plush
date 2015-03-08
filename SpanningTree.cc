@@ -20,7 +20,7 @@
  @param pathB vertex ids list of path two
  @return is the two paths are interected or not
  */
-bool PlushPatternGenerator::isIntersected(std::vector<int> pathA, std::vector<int> pathB) {
+bool PlushPatternGenerator::isIntersected(std::vector<VertexHandle> pathA, std::vector<VertexHandle> pathB) {
     OpenMesh::Vec3d prevCrossVec(0,0,0);
     
     bool AcontainsStartingPointB = false;
@@ -29,9 +29,9 @@ bool PlushPatternGenerator::isIntersected(std::vector<int> pathA, std::vector<in
     bool BcontainsEndingPointA = false;
     // first check if there are any same vertex (says v) in both path
     for (int i = 0; i < (int)pathA.size(); i++) {
-        VertexHandle vA = m_mesh->vertex_handle(pathA[i]);
+        VertexHandle vA = pathA[i];
         for (int j = 0; j < (int)pathB.size(); j++) {
-            VertexHandle vB = m_mesh->vertex_handle(pathB[j]);
+            VertexHandle vB = pathB[j];
             if (vA == vB) {
                 // index out of range, which means v1 or v2 is at the end.
                 if (i-1 < 0 || i+1 >= (int)pathA.size()
@@ -60,13 +60,13 @@ bool PlushPatternGenerator::isIntersected(std::vector<int> pathA, std::vector<in
                 // (edge_before_v_on_path1 x edge_before_v_on_path2)
                 // and
                 // (edge_after_v_on_path1 x edge_after_v_on_path2)
-                VertexHandle vA0 = m_mesh->vertex_handle(pathA[i-1]);
-                VertexHandle vA1 = m_mesh->vertex_handle(pathA[i]);
-                VertexHandle vA2 = m_mesh->vertex_handle(pathA[i+1]);
+                VertexHandle vA0 = pathA[i-1];
+                VertexHandle vA1 = pathA[i];
+                VertexHandle vA2 = pathA[i+1];
                 
-                VertexHandle vB0 = m_mesh->vertex_handle(pathB[j-1]);
-                VertexHandle vB1 = m_mesh->vertex_handle(pathB[j]);
-                VertexHandle vB2 = m_mesh->vertex_handle(pathB[j+1]);
+                VertexHandle vB0 = pathB[j-1];
+                VertexHandle vB1 = pathB[j];
+                VertexHandle vB2 = pathB[j+1];
                 
                 OpenMesh::Vec3d vecA01 = m_mesh->point(vA0) - m_mesh->point(vA1);
                 OpenMesh::Vec3d vecB01 = m_mesh->point(vB0) - m_mesh->point(vB1);
@@ -105,77 +105,62 @@ bool PlushPatternGenerator::isIntersected(std::vector<int> pathA, std::vector<in
  *  @brief Generate spanning tree (steiner tree indeed) from given vertices.
  *  This function will calculate shortest paths between all vertex pairs and then
  *  tries to connect them to form a minimal spanning tree.
+ *  This function requires geodesicDistance & geodesicPath of given vertices. They should be calculated before calling this function.
  *
  *  @param spanningTree Vector of paths with cost in this spanning tree. Path are composed with vertex ids.
  *  @param selectedVertices Resulting tree will span through these vertices.
+ *  @param elimination (Debugging) If set to true, it will to remove paths which intersected with lower-cost paths.
  *  @param limitNum (Debugging) If set to postive number, only first num paths are used for spanningTree. 0 means no limitation.
  *  @param allPath (Debugging) If false, only used (limitNum)-th path for spanningTree.
  *  @return False if error occured.
  */
 bool PlushPatternGenerator::calcSpanningTree(std::vector<EdgeHandle> &spanningTree,
-                                             std::vector<int> selectedVertices,
+                                             std::vector<VertexHandle> selectedVertices,
                                              int limitNum = 0,
                                              bool elimination = false,
                                              bool allPath = true) {
-    isJobCanceled = false;
-    
     std::map<std::pair<VertexHandle, VertexHandle>, double> &geodesicDistance = m_mesh->property(geodesicDistanceHandle);
-    std::map<std::pair<VertexHandle, VertexHandle>, std::vector<int> > &geodesicPath = m_mesh->property(geodesicPathHandle);
+    std::map<std::pair<VertexHandle, VertexHandle>, std::vector<VertexHandle> > &geodesicPath = m_mesh->property(geodesicPathHandle);
     
     // create a new graph with selectedVerices, calculate all paths between them
-    std::vector< std::pair<double, std::vector<int> > > pathCandidates;
+    std::vector< std::pair<double, std::vector<VertexHandle> > > pathCandidates;
     for (size_t i = 0; i < selectedVertices.size(); i++) {
-        int sourceIdx = selectedVertices[i];
-        VertexHandle sourceHandle = m_mesh->vertex_handle(sourceIdx);
+        VertexHandle sourceHandle = selectedVertices[i];
 
         for (size_t j = i+1; j < selectedVertices.size(); j++) {
-            if (isJobCanceled) {
-                emit log(LOGINFO, "Geodesic calculation canceled.");
-                return false;
-            }
-            
-            int destIdx = selectedVertices[j];
-            VertexHandle destHandle = m_mesh->vertex_handle(destIdx);
+            VertexHandle destHandle = selectedVertices[j];
             
             // if result is not found, caculate now
             std::map<std::pair<VertexHandle, VertexHandle>, double>::iterator distanceFound =
             geodesicDistance.find(std::make_pair(sourceHandle, destHandle));
-            std::map<std::pair<VertexHandle, VertexHandle>, std::vector<int> >::iterator pathFound =
+            std::map<std::pair<VertexHandle, VertexHandle>, std::vector<VertexHandle> >::iterator pathFound =
             geodesicPath.find(std::make_pair(sourceHandle, destHandle));
 
-            // Calculate geodesic if no cached reuslt
             if (distanceFound == geodesicDistance.end() || pathFound == geodesicPath.end()) {
-                calcGeodesic(sourceHandle, selectedVertices);
-                distanceFound = geodesicDistance.find(std::make_pair(sourceHandle, destHandle));
-                pathFound = geodesicPath.find(std::make_pair(sourceHandle, destHandle));
-                if (pathFound == geodesicPath.end()) {
-                    emit log(LOGERR, QString("Unreachable from vertex %1 to %2.").arg(sourceIdx, destIdx));
-                    continue;
-                }
+                emit log(LOGERR, QString("Unreachable from vertex %1 to %2.").arg(sourceHandle.idx(), destHandle.idx()));
+                emit log(LOGERR, "Do you have geodesic calculated before?");
+                return false;
             }
             double cost = distanceFound->second;
-            std::vector<int> path = pathFound->second;
+            std::vector<VertexHandle> path = pathFound->second;
             
             // assign edge & weight
             pathCandidates.push_back(std::make_pair(cost, path));
         }
-        // most of the time is spent on geodesic calculation
-        int status = (double)(i+1)/selectedVertices.size() * 100;
-        emit setJobState(status);
     }
 
     // Sort candidates from lost cost to high cost
     std::sort(pathCandidates.begin(), pathCandidates.end());
     
     // Choose paths which do not intersect with previous (lower-cost) path.
-    std::vector< std::pair<double, std::vector<int> > > result;
+    std::vector< std::pair<double, std::vector<VertexHandle> > > result;
     if (elimination) {
-        for (std::vector<std::pair<double, std::vector<int> > >::iterator it = pathCandidates.begin(); it != pathCandidates.end(); it++) {
+        for (std::vector<std::pair<double, std::vector<VertexHandle> > >::iterator it = pathCandidates.begin(); it != pathCandidates.end(); it++) {
             bool noIntersection = true;
-            std::vector<int> path1 = it->second;
+            std::vector<VertexHandle> path1 = it->second;
             
-            for (std::vector<std::pair<double, std::vector<int> > >::iterator it2 = result.begin(); it2 != result.end(); it2++) {
-                std::vector<int> path2 = it2->second;
+            for (std::vector<std::pair<double, std::vector<VertexHandle> > >::iterator it2 = result.begin(); it2 != result.end(); it2++) {
+                std::vector<VertexHandle> path2 = it2->second;
                 if (isIntersected(path1, path2)) {
                     noIntersection = false;
                     break;
@@ -191,7 +176,7 @@ bool PlushPatternGenerator::calcSpanningTree(std::vector<EdgeHandle> &spanningTr
     
     // insert edges into spanning tree
     int count = 0;
-    for (std::vector<std::pair<double, std::vector<int> > >::iterator it = result.begin(); it != result.end(); it++, count++) {
+    for (std::vector<std::pair<double, std::vector<VertexHandle> > >::iterator it = result.begin(); it != result.end(); it++, count++) {
         // Break if we reach limitNum
         if (count >= limitNum && limitNum != 0) {
             break;
@@ -200,18 +185,18 @@ bool PlushPatternGenerator::calcSpanningTree(std::vector<EdgeHandle> &spanningTr
         if (!allPath && count != limitNum-1) {
             continue;
         }
-        std::vector<int> path = it->second;
+        std::vector<VertexHandle> path = it->second;
         
         // There should be at least two vertices on a path.
         assert(path.size() > 1);
         
-        for (int i = 1; i < (int)path.size(); i++) {
+        for (size_t i = 1; i < path.size(); i++) {
             EdgeHandle eh;
             assert(getEdge(m_mesh, eh, path[i-1], path[i]));
             spanningTree.push_back(eh);
         }
         
-        QString msg = QString("Weight of path #%1 from %2 to %3: %4").arg(count+1).arg(*path.begin()).arg(*(path.end()-1)).arg(it->first);
+        QString msg = QString("Weight of path #%1 from %2 to %3: %4").arg(count+1).arg((path.begin())->idx()).arg((path.end()-1)->idx()).arg(it->first);
         emit log(LOGINFO, msg);
     }
     

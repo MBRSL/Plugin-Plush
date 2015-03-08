@@ -51,7 +51,7 @@ public:
     /// Geodesic distance/path from one vertex to another. It's empty before geodesic calculation.
     static OpenMesh::EPropHandleT<double> edgeWeightHandle;
     static OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, double> > geodesicDistanceHandle;
-    static OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, std::vector<int> > > geodesicPathHandle;
+    static OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, std::vector<VertexHandle> > > geodesicPathHandle;
     ///@}
     
     /// @name Skeleton property handle
@@ -73,8 +73,11 @@ public:
     bool saveBoneWeight();
     
     bool calcCurvature();
-    void calcGeodesic(VertexHandle sourceHandle, std::vector<int> targetVertices);
-    bool calcSpanningTree(std::vector<EdgeHandle> &spanningTree, std::vector<int> selectedVertices, int limitNum, bool elimination, bool allPaths);
+    
+    void calcGeodesic(std::vector<VertexHandle> targetVertices);
+    
+    bool calcSpanningTree(std::vector<EdgeHandle> &spanningTree, std::vector<VertexHandle> selectedVertices, int limitNum, bool elimination, bool allPaths);
+    
     bool calcSkeletonWeight();
     
 private:
@@ -85,7 +88,7 @@ private:
     
     bool isJobCanceled;
     
-    bool isIntersected(std::vector<int> path1, std::vector<int> path2);
+    bool isIntersected(std::vector<VertexHandle> path1, std::vector<VertexHandle> path2);
     
     static bool getEdge(TriMesh *mesh, EdgeHandle &_eh, int v1No, int v2No);
     static bool getEdge(TriMesh *mesh, EdgeHandle &_eh, VertexHandle v1, VertexHandle v2);

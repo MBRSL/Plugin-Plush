@@ -179,119 +179,132 @@ double WeightFunctor::operator()(boost_edge_descriptor e) const {
     return (edgeWeight + pathWeight) / coefficients;
 }
 
-void PlushPatternGenerator::calcGeodesic(VertexHandle sourceHandle, std::vector<int> targetVertices)
+void PlushPatternGenerator::calcGeodesic(std::vector<VertexHandle> targetVertices)
 {
     // Prepare property maps for dijkstra algorithm
     VertexIdPropertyMap vertex_index_pmap = get(boost::vertex_external_index, m_polyhedron);
     EdgeIdPropertyMap edge_index_pmap = get(boost::edge_external_index, m_polyhedron);
-    
-    std::vector<boost_vertex_descriptor> predecessor(boost::num_vertices(m_polyhedron));
-    boost::iterator_property_map<std::vector<boost_vertex_descriptor>::iterator, VertexIdPropertyMap> predecessor_pmap(predecessor.begin(), vertex_index_pmap);
 
-    std::vector<double> distance(boost::num_vertices(m_polyhedron));
-    boost::iterator_property_map<std::vector<double>::iterator, VertexIdPropertyMap> distance_pmap(distance.begin(), vertex_index_pmap);
-    
-    boost_vertex_descriptor source = m_verticesMapping[sourceHandle.idx()];
-    
-    // HACK: This is a local variable "shared" by both (functional)weightmap & visitor
-    //       so that we can first assign it in visitor and then access it in weightmap
-    boost_vertex_descriptor currentV = source;
-    
-    WeightFunctor weightFunctor(m_mesh,
-                                m_polyhedron,
-                                &currentV,
-                                predecessor_pmap,
-                                edge_index_pmap);
-    auto weightmap = boost::make_function_property_map< boost_edge_descriptor,
-                                                        double,
-                                                        WeightFunctor > (weightFunctor);
-    Dijkstra_visitor visitor(&currentV);
-    
-    // Calculate geodesic using Dijkstra
-    boost::dijkstra_shortest_paths(m_polyhedron, source,
-                                   vertex_index_map(vertex_index_pmap)
-                                   .weight_map(weightmap)
-                                   .distance_map(distance_pmap)
-                                   .predecessor_map(predecessor_pmap)
-                                   .visitor(visitor));
-    
-    // Save result into property
-    std::map<std::pair<VertexHandle, VertexHandle>, double> &geodesicDistance = m_mesh->property(geodesicDistanceHandle);
-    std::map<std::pair<VertexHandle, VertexHandle>, std::vector<int> > &geodesicPath = m_mesh->property(geodesicPathHandle);
+    isJobCanceled = false;
+
     for (size_t i = 0; i < targetVertices.size(); i++) {
-        int id = targetVertices[i];
-    VertexHandle destHandle = m_mesh->vertex_handle(id);
-//    for (VertexIter v_it = m_mesh->vertices_begin(); v_it != m_mesh->vertices_end(); v_it++) {
-//        VertexHandle destHandle = *v_it;
-//        int id = v_it->idx();
-        if (destHandle == sourceHandle) {
-            continue;
-        }
-
-        // Directions. from source to destination, or from destination to source
-        std::pair<VertexHandle, VertexHandle> edgeSD = std::make_pair(sourceHandle, destHandle);
-        std::pair<VertexHandle, VertexHandle> edgeDS = std::make_pair(destHandle, sourceHandle);
-        
-        // Back tracking
-        std::vector<int> path;
-        for(boost_vertex_descriptor predecessor = m_verticesMapping[id]; predecessor_pmap[predecessor] != predecessor;) {
-            path.push_back(predecessor->id());
-            predecessor = predecessor_pmap[predecessor];
-        }
-        
-        if (path.size() <= 0) {
-            // Unreachable
+        if (isJobCanceled) {
+            emit log(LOGINFO, "Geodesic calculation canceled.");
             return;
-        } else {
-            // Add source to path
-            path.push_back(sourceHandle.idx());
         }
-        // It's reversed using back tracking, flip it back.
-        std::reverse(path.begin(), path.end());
 
-        // DEBUGGING
-        // The cost is sometimes non symmetric, this should not happen.
-//        if (geodesicDistance.find(edgeSD) != geodesicDistance.end()) {
-//            double prevDist = geodesicDistance[edgeSD];
-//            if (abs(prevDist - distance_pmap[m_verticesMapping[id]]) > 1e-5) {
-//                double newDist = distance_pmap[m_verticesMapping[id]];
-//            }
-//        }
+        VertexHandle sourceHandle = targetVertices[i];
         
-        // TODO:
-        // The true distance from A to B should be identical with distance from B to A
-        // Currently we only choose the direction with smaller cost
-        double cost = distance_pmap[m_verticesMapping[id]];
-        
-        // First, check if opposite direction is already calculated
-        std::map<std::pair<VertexHandle, VertexHandle>, double>::iterator cost_reverse_it = geodesicDistance.find(edgeDS);
-        if (cost_reverse_it != geodesicDistance.end()) {
-            double cost_reverse = cost_reverse_it->second;
+        std::vector<boost_vertex_descriptor> predecessor(boost::num_vertices(m_polyhedron));
+        boost::iterator_property_map<std::vector<boost_vertex_descriptor>::iterator, VertexIdPropertyMap> predecessor_pmap(predecessor.begin(), vertex_index_pmap);
 
-            if (cost_reverse < cost) {
-                // Copy cost and path from reverse direction
-                geodesicDistance.insert(std::make_pair(edgeSD, cost_reverse));
-                
-                std::map<std::pair<VertexHandle, VertexHandle>, std::vector<int> >::iterator path_reverse_it = geodesicPath.find(edgeDS);
-                // Path should exist because they are calculated together
-                assert(path_reverse_it != geodesicPath.end());
-                geodesicPath.insert(std::make_pair(edgeSD, path_reverse_it->second));
+        std::vector<double> distance(boost::num_vertices(m_polyhedron));
+        boost::iterator_property_map<std::vector<double>::iterator, VertexIdPropertyMap> distance_pmap(distance.begin(), vertex_index_pmap);
+        
+        boost_vertex_descriptor source = m_verticesMapping[targetVertices[i].idx()];
+        
+        // HACK: This is a local variable "shared" by both (functional)weightmap & visitor
+        //       so that we can first assign it in visitor and then access it in weightmap
+        boost_vertex_descriptor currentV = source;
+        
+        WeightFunctor weightFunctor(m_mesh,
+                                    m_polyhedron,
+                                    &currentV,
+                                    predecessor_pmap,
+                                    edge_index_pmap);
+        auto weightmap = boost::make_function_property_map< boost_edge_descriptor,
+                                                            double,
+                                                            WeightFunctor > (weightFunctor);
+        Dijkstra_visitor visitor(&currentV);
+        
+        // Calculate geodesic using Dijkstra
+        boost::dijkstra_shortest_paths(m_polyhedron, source,
+                                       vertex_index_map(vertex_index_pmap)
+                                       .weight_map(weightmap)
+                                       .distance_map(distance_pmap)
+                                       .predecessor_map(predecessor_pmap)
+                                       .visitor(visitor));
+        
+        // Save result into property
+        std::map<std::pair<VertexHandle, VertexHandle>, double> &geodesicDistance = m_mesh->property(geodesicDistanceHandle);
+        std::map<std::pair<VertexHandle, VertexHandle>, std::vector<VertexHandle> > &geodesicPath = m_mesh->property(geodesicPathHandle);
+        for (size_t j = 0; j < targetVertices.size(); j++) {
+        VertexHandle destHandle = targetVertices[j];
+    //    for (VertexIter v_it = m_mesh->vertices_begin(); v_it != m_mesh->vertices_end(); v_it++) {
+    //        VertexHandle destHandle = *v_it;
+    //        int id = v_it->idx();
+            if (destHandle == sourceHandle) {
+                continue;
+            }
+
+            // Directions. from source to destination, or from destination to source
+            std::pair<VertexHandle, VertexHandle> edgeSD = std::make_pair(sourceHandle, destHandle);
+            std::pair<VertexHandle, VertexHandle> edgeDS = std::make_pair(destHandle, sourceHandle);
+            
+            // Back tracking
+            std::vector<VertexHandle> path;
+            for(boost_vertex_descriptor predecessor = m_verticesMapping[destHandle.idx()]; predecessor_pmap[predecessor] != predecessor;) {
+                path.push_back(m_mesh->vertex_handle(predecessor->id()));
+                predecessor = predecessor_pmap[predecessor];
+            }
+            
+            if (path.size() <= 0) {
+                // Unreachable
+                return;
             } else {
-                // Replace reverse direction with current cost and path
-                geodesicDistance.erase(edgeDS);
-                geodesicPath.erase(edgeDS);
-                
+                // Add source to path
+                path.push_back(sourceHandle);
+            }
+            // It's reversed using back tracking, flip it back.
+            std::reverse(path.begin(), path.end());
+
+            // DEBUGGING
+            // The cost is sometimes non symmetric, this should not happen.
+    //        if (geodesicDistance.find(edgeSD) != geodesicDistance.end()) {
+    //            double prevDist = geodesicDistance[edgeSD];
+    //            if (abs(prevDist - distance_pmap[m_verticesMapping[id]]) > 1e-5) {
+    //                double newDist = distance_pmap[m_verticesMapping[id]];
+    //            }
+    //        }
+            
+            // TODO:
+            // The true distance from A to B should be identical with distance from B to A
+            // Currently we only choose the direction with smaller cost
+            double cost = distance_pmap[m_verticesMapping[destHandle.idx()]];
+            
+            // First, check if opposite direction is already calculated
+            std::map<std::pair<VertexHandle, VertexHandle>, double>::iterator cost_reverse_it = geodesicDistance.find(edgeDS);
+            if (cost_reverse_it != geodesicDistance.end()) {
+                double cost_reverse = cost_reverse_it->second;
+
+                if (cost_reverse < cost) {
+                    // Copy cost and path from reverse direction
+                    geodesicDistance.insert(std::make_pair(edgeSD, cost_reverse));
+                    
+                    std::map<std::pair<VertexHandle, VertexHandle>, std::vector<VertexHandle> >::iterator path_reverse_it = geodesicPath.find(edgeDS);
+                    // Path should exist because they are calculated together
+                    assert(path_reverse_it != geodesicPath.end());
+                    geodesicPath.insert(std::make_pair(edgeSD, path_reverse_it->second));
+                } else {
+                    // Replace reverse direction with current cost and path
+                    geodesicDistance.erase(edgeDS);
+                    geodesicPath.erase(edgeDS);
+                    
+                    geodesicDistance.insert(std::make_pair(edgeSD, cost));
+                    geodesicDistance.insert(std::make_pair(edgeDS, cost));
+                    geodesicPath.insert(std::make_pair(edgeSD, path));
+                    std::reverse(path.begin(), path.end());
+                    geodesicPath.insert(std::make_pair(edgeDS, path));
+                }
+            }
+            // If not, just save it into property
+            else {
                 geodesicDistance.insert(std::make_pair(edgeSD, cost));
-                geodesicDistance.insert(std::make_pair(edgeDS, cost));
                 geodesicPath.insert(std::make_pair(edgeSD, path));
-                std::reverse(path.begin(), path.end());
-                geodesicPath.insert(std::make_pair(edgeDS, path));
             }
         }
-        // If not, just save it into property
-        else {
-            geodesicDistance.insert(std::make_pair(edgeSD, cost));
-            geodesicPath.insert(std::make_pair(edgeSD, path));
-        }
+        // most of the time is spent on geodesic calculation
+        int status = (double)(i+1)/targetVertices.size() * 100;
+        emit setJobState(status);
     }
 }
