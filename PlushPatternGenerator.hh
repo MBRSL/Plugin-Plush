@@ -75,6 +75,8 @@ public:
     bool calcCurvature();
     
     void calcGeodesic(std::vector<VertexHandle> targetVertices);
+    bool loadGeodesic();
+    bool saveGeodesic(std::vector<VertexHandle> selectedVertices);
     
     bool calcSpanningTree(std::vector<EdgeHandle> &spanningTree, std::vector<VertexHandle> selectedVertices, int limitNum, bool elimination, bool allPaths);
     

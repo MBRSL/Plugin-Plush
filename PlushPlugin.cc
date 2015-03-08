@@ -20,14 +20,6 @@ void PlushPlugin::initializePlugin()
     
     // Create button that can be toggled
     // to (de)activate plugin's picking mode
-    QGroupBox *skeletonWeightGroup = new QGroupBox(tr("Skeleton weight"));
-    QPushButton *calcSkeletonWeightButton = new QPushButton(tr("Calculate"));
-    QPushButton *saveSkeletonWeightButton = new QPushButton(tr("Save"));
-    QHBoxLayout *skeletonWeightLayout = new QHBoxLayout;
-    skeletonWeightLayout->addWidget(calcSkeletonWeightButton);
-    skeletonWeightLayout->addWidget(saveSkeletonWeightButton);
-    skeletonWeightGroup->setLayout(skeletonWeightLayout);
-    
     QGroupBox *geodesicGroup = new QGroupBox(tr("Geodesic paths"));
     QLabel *geodesicNumberLabel = new QLabel(tr("#"));
     geodesicNumPaths = new QSpinBox();
@@ -67,13 +59,18 @@ void PlushPlugin::initializePlugin()
     curvatureLayout->addWidget(calcCurvatureButton);
     curvatureGroup->setLayout(curvatureLayout);
     
-    layout->addWidget(skeletonWeightGroup);
+    QGroupBox *skeletonWeightGroup = new QGroupBox(tr("Skeleton weight"));
+    QPushButton *calcSkeletonWeightButton = new QPushButton(tr("Calculate"));
+    QHBoxLayout *skeletonWeightLayout = new QHBoxLayout;
+    skeletonWeightLayout->addWidget(calcSkeletonWeightButton);
+    skeletonWeightGroup->setLayout(skeletonWeightLayout);
+    
     layout->addWidget(geodesicGroup);
     layout->addWidget(selectionGroup);
     layout->addWidget(curvatureGroup);
+    layout->addWidget(skeletonWeightGroup);
     
     connect(calcSkeletonWeightButton, SIGNAL(clicked()), this, SLOT(calcSkeletonWeightButtonClicked()));
-    connect(saveSkeletonWeightButton, SIGNAL(clicked()), this, SLOT(saveSkeletonWeightButtonClicked()));
     connect(geodesicShowSingleButton, SIGNAL(clicked()), this, SLOT(showGeodesicButtonClicked()));
     connect(geodesicShowAllButton, SIGNAL(clicked()), this, SLOT(showGeodesicButtonClicked()));
     connect(geodesicCalcButton, SIGNAL(clicked()), this, SLOT(calcGeodesicButtonClicked()));
@@ -184,13 +181,6 @@ void PlushPlugin::calcSkeletonWeightButtonClicked() {
     }
 
     m_patternGenerator->calcSkeletonWeight();
-}
-
-void PlushPlugin::saveSkeletonWeightButtonClicked() {
-    if (!checkIfGeneratorExist()) {
-        return;
-    }
-
     m_patternGenerator->saveBoneWeight();
 }
 
@@ -318,6 +308,7 @@ void PlushPlugin::calcGeodesicThread() {
         selectedVertices.push_back(mesh->vertex_handle(selectedVerticesId[i]));
     }
     m_patternGenerator->calcGeodesic(selectedVertices);
+    m_patternGenerator->saveGeodesic(selectedVertices);
 
     emit log(LOGINFO, "Geodesic calculation done.");
 }

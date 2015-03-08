@@ -24,6 +24,8 @@ PlushPatternGenerator::PlushPatternGenerator(TriMesh *mesh, QString meshName) : 
     loadSkeleton();
     
     loadBoneWeight();
+    
+    loadGeodesic();
 }
 
 PlushPatternGenerator::~PlushPatternGenerator() {

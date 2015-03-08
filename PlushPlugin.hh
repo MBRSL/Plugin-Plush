@@ -101,7 +101,6 @@ private slots:
     void pluginsInitialized();
     
     void calcSkeletonWeightButtonClicked();
-    void saveSkeletonWeightButtonClicked();
     void showGeodesicButtonClicked();
     void calcGeodesicButtonClicked();
     void loadSelectionButtonClicked();

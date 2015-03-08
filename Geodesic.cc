@@ -14,6 +14,8 @@
 
 #include <boost/property_map/function_property_map.hpp>
 
+#include <QTextStream>
+
 typedef boost::property_map<Polyhedron, boost::vertex_external_index_t>::type VertexIdPropertyMap;
 typedef boost::property_map<Polyhedron, boost::edge_external_index_t>::type EdgeIdPropertyMap;
 
@@ -307,4 +309,93 @@ void PlushPatternGenerator::calcGeodesic(std::vector<VertexHandle> targetVertice
         int status = (double)(i+1)/targetVertices.size() * 100;
         emit setJobState(status);
     }
+}
+
+bool PlushPatternGenerator::saveGeodesic(std::vector<VertexHandle> selectedVertices) {
+    QString geodesicFilename = m_meshName + ".geodesic";
+    QFile file(geodesicFilename);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        emit log(LOGERR, QString("Error opening file: %1").arg(geodesicFilename));
+        return false;
+    }
+    
+    std::map<std::pair<VertexHandle, VertexHandle>, double> &geodesicDistance = m_mesh->property(geodesicDistanceHandle);
+    std::map<std::pair<VertexHandle, VertexHandle>, std::vector<VertexHandle> > &geodesicPath = m_mesh->property(geodesicPathHandle);
+
+    QTextStream out(&file);
+    for (size_t i = 0; i < selectedVertices.size(); i++) {
+        for (size_t j = i+1; j < selectedVertices.size(); j++) {
+            VertexHandle sourceHandle = selectedVertices[i];
+            VertexHandle destHandle = selectedVertices[j];
+
+            // Directions. from source to destination, or from destination to source
+            std::pair<VertexHandle, VertexHandle> edgeSD = std::make_pair(sourceHandle, destHandle);
+            std::pair<VertexHandle, VertexHandle> edgeDS = std::make_pair(destHandle, sourceHandle);
+            
+            // source / dest / cost
+            out << sourceHandle.idx() << " " << destHandle.idx() << " " << geodesicDistance[edgeSD] << endl;
+            
+            // num of Vertices on path/ v1 v2 ...
+            std::vector<VertexHandle> path = geodesicPath[edgeSD];
+            out << path.size();
+            for (size_t pi = 0; pi < path.size(); pi++) {
+                out << " " << path[pi].idx();
+            }
+            out << endl;
+        }
+    }
+    file.close();
+    return true;
+}
+
+bool PlushPatternGenerator::loadGeodesic() {
+    QString geodesicFilename = m_meshName + ".geodesic";
+    
+    QFile file(geodesicFilename);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        emit log(LOGERR, QString("Error opening file: %1").arg(geodesicFilename));
+        return false;
+    }
+    
+    std::map<std::pair<VertexHandle, VertexHandle>, double> &geodesicDistance = m_mesh->property(geodesicDistanceHandle);
+    std::map<std::pair<VertexHandle, VertexHandle>, std::vector<VertexHandle> > &geodesicPath = m_mesh->property(geodesicPathHandle);
+    
+    QTextStream fin(&file);
+    while (!fin.atEnd()) {
+        int sourceIdx, destIdx;
+        double cost;
+        fin >> sourceIdx >> destIdx >> cost;
+        
+        VertexHandle sourceHandle = m_mesh->vertex_handle(sourceIdx);
+        VertexHandle destHandle = m_mesh->vertex_handle(destIdx);
+
+        // Directions. from source to destination, or from destination to source
+        std::pair<VertexHandle, VertexHandle> edgeSD = std::make_pair(sourceHandle, destHandle);
+        std::pair<VertexHandle, VertexHandle> edgeDS = std::make_pair(destHandle, sourceHandle);
+        
+        geodesicDistance.erase(edgeSD);
+        geodesicDistance.erase(edgeDS);
+        geodesicDistance.emplace(edgeSD, cost);
+        geodesicDistance.emplace(edgeDS, cost);
+
+        // consume endl
+        fin.readLine();
+        QString pathStr = fin.readLine();
+        QStringList vertices = pathStr.split(" ");
+        // The first one is number of vertices on path
+        int num = vertices[0].toInt();
+        
+        std::vector<VertexHandle> path;
+        for (int i = 1; i <= num; i++) {
+            path.push_back(m_mesh->vertex_handle(vertices[i].toInt()));
+        }
+        
+        geodesicPath.erase(edgeSD);
+        geodesicPath.erase(edgeDS);
+        geodesicPath.emplace(edgeSD, path);
+        reverse(path.begin(), path.end());
+        geodesicPath.emplace(edgeDS, path);
+    }
+    file.close();
+    return true;
 }
