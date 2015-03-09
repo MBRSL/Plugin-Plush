@@ -27,7 +27,6 @@ typedef GraphTraits::edge_iterator boost_edge_iterator;
 typedef GraphTraits::halfedge_descriptor boost_halfedge_descriptor;
 typedef GraphTraits::halfedge_iterator boost_halfedge_iterator;
 
-// A modifier creating a triangle with the incremental builder.
 template<class HDS>
 class CGAL_Polyhedron_builder : public CGAL::Modifier_base<HDS> {
 private:
@@ -64,8 +63,13 @@ public:
     }
 };
 
-class CGAL_Polyhedron_helper {
+/**
+ * @brief A convertor from TriMesh to CGAL Polyhedron
+ * Threre is a important assumption that the vertex order in TriMesh is the same of Polyhedron
+ */
 
+class CGAL_Polyhedron_helper {
+    
 public:
     static void convert_OpenMesh_to_CGAL(TriMesh *mesh, Polyhedron &P, std::map<int, boost_vertex_descriptor> &verticesMapping) {
         CGAL_Polyhedron_builder<Polyhedron::HalfedgeDS> builder;

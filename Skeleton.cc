@@ -11,11 +11,14 @@
 #include "SuperDeform/Weight.hh"
 
 bool PlushPatternGenerator::calcSkeletonWeight() {
-    if (m_mesh->property(skeletonHandle) != NULL) {
-        delete m_mesh->property(skeletonHandle);
+    Skeleton *skeleton = m_mesh->property(skeletonHandle);
+    if (!skeleton) {
+        loadSkeleton();
+        if (!skeleton) {
+            return false;
+        }
+        skeleton = m_mesh->property(skeletonHandle);
     }
-    Skeleton *skeleton = new Skeleton;
-    m_mesh->property(skeletonHandle) = skeleton;
     
     Weight weightGenerator;
     m_mesh->request_face_normals();
@@ -79,7 +82,7 @@ bool PlushPatternGenerator::loadBoneWeight() {
 bool PlushPatternGenerator::saveBoneWeight() {
     QString weightFilename = m_meshName + ".skeleton.weight";
     QFile file(weightFilename);
-    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         emit log(LOGERR, QString("Error opening file: %1").arg(weightFilename));
         return false;
     }
