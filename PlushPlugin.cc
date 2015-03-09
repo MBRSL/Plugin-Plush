@@ -1,6 +1,7 @@
 #include "PlushPlugin.hh"
 
 #include <MeshTools/MeshSelectionT.hh>
+#include <ObjectTypes/PolyLine/PolyLine.hh>
 
 PlushPlugin::PlushPlugin()
 {
@@ -43,6 +44,12 @@ void PlushPlugin::initializePlugin()
     geodesicLayout->addLayout(geodesicRow3Layout);
     geodesicGroup->setLayout(geodesicLayout);
     
+    QGroupBox *flatteningGroup = new QGroupBox(tr("Flattening"));
+    QPushButton *flattenButton = new QPushButton(tr("Add plane"));
+    QHBoxLayout *flatteningLayout = new QHBoxLayout;
+    flatteningLayout->addWidget(flattenButton);
+    flatteningGroup->setLayout(flatteningLayout);
+    
     QGroupBox *selectionGroup = new QGroupBox(tr("Selection"));
     loadSelectionButton = new QPushButton(tr("Load"));
     saveSelectionButton = new QPushButton(tr("Save"));
@@ -67,6 +74,7 @@ void PlushPlugin::initializePlugin()
     
     layout->addWidget(geodesicGroup);
     layout->addWidget(selectionGroup);
+    layout->addWidget(flatteningGroup);
     layout->addWidget(curvatureGroup);
     layout->addWidget(skeletonWeightGroup);
     
@@ -77,6 +85,7 @@ void PlushPlugin::initializePlugin()
     connect(loadSelectionButton, SIGNAL(clicked()), this, SLOT(loadSelectionButtonClicked()));
     connect(saveSelectionButton, SIGNAL(clicked()), this, SLOT(saveSelectionButtonClicked()));
     connect(clearSelectionButton, SIGNAL(clicked()), this, SLOT(clearSelectionButtonClicked()));
+    connect(flattenButton, SIGNAL(clicked()), this, SLOT(flattenButtonClicked()));
     connect(calcCurvatureButton, SIGNAL(clicked()), this, SLOT(calcCurvatureButtonClicked()));
     
     emit addToolbox(tr("Plush"), toolBox);
@@ -242,11 +251,10 @@ void PlushPlugin::showGeodesicButtonClicked() {
         selectedVertices.push_back(mesh->vertex_handle(selectedVerticesId[i]));
     }
     
-    std::vector<EdgeHandle> spanningTree;
-    if (m_patternGenerator->calcSpanningTree(spanningTree, selectedVertices, geodesicNumPaths->value(), geodesicElimination->isChecked(), showAllPath)) {
+    if (m_patternGenerator->calcSpanningTree(selectedVertices, geodesicNumPaths->value(), geodesicElimination->isChecked(), showAllPath)) {
         std::vector<int> edgeList;
-        for (size_t i = 0; i < spanningTree.size(); i++) {
-            edgeList.push_back(spanningTree[i].idx());
+        for (size_t i = 0; i < m_patternGenerator->m_spanningTree.size(); i++) {
+            edgeList.push_back(m_patternGenerator->m_spanningTree[i].idx());
         }
         
         MeshSelection::clearEdgeSelection(mesh);
@@ -281,6 +289,52 @@ void PlushPlugin::clearSelectionButtonClicked() {
     }
     
     clearSelection(m_triMeshObj->mesh());
+}
+
+void PlushPlugin::flattenButtonClicked() {
+    if (m_patternGenerator->m_spanningTree.size() == 0) {
+        emit log(LOGERR, "No spanning tree calculated. Use show geodesic path.");
+        return;
+    }
+    
+    // Remove previous polyline
+    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::ALL_OBJECTS); o_it != PluginFunctions::objectsEnd();
+         ++o_it) {
+        int objId = o_it->id();
+        
+        if (o_it->dataType(DATA_POLY_LINE)) {
+            emit deleteObject(objId);
+        }
+    }
+    
+    TriMesh *mesh = m_patternGenerator->m_mesh;
+
+    std::vector<int> selectedVerticesId;
+    selectedVerticesId = MeshSelection::getVertexSelection(mesh);
+    
+    std::vector<VertexHandle> selectedVertices;
+    for (size_t i = 0; i < selectedVerticesId.size(); i++) {
+        selectedVertices.push_back(mesh->vertex_handle(selectedVerticesId[i]));
+    }
+
+    std::vector< std::vector<HalfedgeHandle> > loops;
+    m_patternGenerator->getLoops(loops, selectedVertices);
+    
+    for (size_t i = 0; i < loops.size(); i++) {
+        int objId;
+        emit addEmptyObject(DATA_POLY_LINE, objId);
+        
+        // Get the newly created object
+        PolyLineObject *object = 0;
+        PluginFunctions::getObject(objId, object);
+        PolyLine *polyLine = object->line();
+
+        polyLine->add_point(mesh->point(mesh->from_vertex_handle(loops[i][0])));
+        for (size_t j = 0; j < loops[i].size(); j++) {
+            HalfedgeHandle heh = loops[i][j];
+            polyLine->add_point(mesh->point(mesh->to_vertex_handle(heh)));
+        }
+    }
 }
 
 void PlushPlugin::calcCurvatureThread() {

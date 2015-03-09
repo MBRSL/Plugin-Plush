@@ -46,6 +46,7 @@ signals:
     // LoadSaveInterface
     void load( QString _filename, DataType _dataType, int &_id);
     void addEmptyObject( DataType _type, int& _id );
+    void deleteObject( int _id );
     // PickingInterface
     void addPickMode( const std::string& _mode );
     void addHiddenPickMode(const std::string& _mode);
@@ -106,6 +107,7 @@ private slots:
     void loadSelectionButtonClicked();
     void saveSelectionButtonClicked();
     void clearSelectionButtonClicked();
+    void flattenButtonClicked();
     void calcCurvatureButtonClicked();
 
     // Starter function for thread

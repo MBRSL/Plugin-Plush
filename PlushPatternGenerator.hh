@@ -3,6 +3,7 @@
 
 // This one must be included before any other OpenFlipper headers, otherwise it will cause weird runtime errors.
 #include <OpenFlipper/BasePlugin/BaseInterface.hh>
+#include <ObjectTypes/PolyLine/PolyLine.hh>
 
 #include "CGAL_Polyhedron_builder.hh"
 
@@ -30,6 +31,7 @@ signals:
 public:
     TriMesh *m_mesh;
     QString m_meshName;
+    std::vector<EdgeHandle> m_spanningTree;
     
     /// Used for log
     ///@{
@@ -63,6 +65,13 @@ public:
     static OpenMesh::VPropHandleT<double*> bonesWeightHandle;
     ///@}
     
+    static bool getHalfedge(TriMesh *mesh, HalfedgeHandle &heh, int fromNo, int toNo);
+    static bool getHalfedge(TriMesh *mesh, HalfedgeHandle &heh, VertexHandle from, VertexHandle to);
+    static bool getEdge(TriMesh *mesh, EdgeHandle &eh, int v1No, int v2No);
+    static bool getEdge(TriMesh *mesh, EdgeHandle &eh, VertexHandle v1, VertexHandle v2);
+    static OpenMesh::Vec3d getVector(TriMesh *mesh, EdgeHandle &_eh);
+    static OpenMesh::Vec3d getVector(TriMesh *mesh, HalfedgeHandle &_heh);
+    
     PlushPatternGenerator(TriMesh *mesh, QString meshName);
     ~PlushPatternGenerator();
     
@@ -78,10 +87,12 @@ public:
     bool loadGeodesic();
     bool saveGeodesic(std::vector<VertexHandle> selectedVertices);
     
-    bool calcSpanningTree(std::vector<EdgeHandle> &spanningTree, std::vector<VertexHandle> selectedVertices, int limitNum, bool elimination, bool allPaths);
-    
+    bool calcSpanningTree(std::vector<VertexHandle> selectedVertices, int limitNum, bool elimination, bool allPaths);
+
     bool calcSkeletonWeight();
     
+    void getLoops(std::vector< std::vector<HalfedgeHandle> > &loops, std::vector<VertexHandle> &selectedVertices);
+
 private:
     Polyhedron m_polyhedron;
     
@@ -91,9 +102,6 @@ private:
     bool isJobCanceled;
     
     bool isIntersected(std::vector<VertexHandle> path1, std::vector<VertexHandle> path2);
-    
-    static bool getEdge(TriMesh *mesh, EdgeHandle &_eh, int v1No, int v2No);
-    static bool getEdge(TriMesh *mesh, EdgeHandle &_eh, VertexHandle v1, VertexHandle v2);
     
     void initProperties();
     void uninitProperties();

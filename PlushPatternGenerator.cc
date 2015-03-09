@@ -67,22 +67,55 @@ void PlushPatternGenerator::cancelJob() {
     isJobCanceled = true;
 }
 
-bool PlushPatternGenerator::getEdge(TriMesh *mesh, EdgeHandle &_eh, VertexHandle v1, VertexHandle v2) {
-    return getEdge(mesh, _eh, v1.idx(), v2.idx());
-}
-
-bool PlushPatternGenerator::getEdge(TriMesh *mesh, EdgeHandle &_eh, int v1No, int v2No) {
-    VertexHandle v1 = mesh->vertex_handle(v1No);
-    VertexHandle v2 = mesh->vertex_handle(v2No);
-    for (TriMesh::VertexEdgeIter ve_it = mesh->ve_iter(v1); ve_it; ve_it++)
+bool PlushPatternGenerator::getHalfedge(TriMesh *mesh, HalfedgeHandle &heh, VertexHandle from, VertexHandle to) {
+    for (TriMesh::VertexEdgeIter ve_it = mesh->ve_iter(from); ve_it; ve_it++)
     {
-        HalfedgeHandle heh = mesh->halfedge_handle(*ve_it, 0);
-        if (mesh->from_vertex_handle(heh) == v2
-            ||  mesh->to_vertex_handle(heh) == v2)
+        // Return halfedge with correct direction
+        HalfedgeHandle _heh = mesh->halfedge_handle(*ve_it, 0);
+        if (mesh->from_vertex_handle(_heh) == from
+            &&  mesh->to_vertex_handle(_heh) == to)
         {
-            _eh = *ve_it;
+            heh = _heh;
+            return true;
+        } else if (mesh->from_vertex_handle(_heh) == to
+                   &&  mesh->to_vertex_handle(_heh) == from) {
+            heh = mesh->halfedge_handle(*ve_it, 1);
             return true;
         }
     }
     return false;
+}
+
+bool PlushPatternGenerator::getHalfedge(TriMesh *mesh, HalfedgeHandle &heh, int fromNo, int toNo) {
+    VertexHandle from = mesh->vertex_handle(fromNo);
+    VertexHandle to = mesh->vertex_handle(toNo);
+    return getHalfedge(mesh, heh, from, to);
+}
+
+bool PlushPatternGenerator::getEdge(TriMesh *mesh, EdgeHandle &eh, VertexHandle v1, VertexHandle v2) {
+    HalfedgeHandle _heh;
+    bool result = getHalfedge(mesh, _heh, v1, v2);
+    if (result) {
+        eh = mesh->edge_handle(_heh);
+        return true;
+    } else {
+        return false;
+    }
+}
+
+bool PlushPatternGenerator::getEdge(TriMesh *mesh, EdgeHandle &eh, int v1No, int v2No) {
+    VertexHandle v1 = mesh->vertex_handle(v1No);
+    VertexHandle v2 = mesh->vertex_handle(v2No);
+    return getEdge(mesh, eh, v1, v2);
+}
+
+OpenMesh::Vec3d PlushPatternGenerator::getVector(TriMesh *mesh, EdgeHandle &_eh) {
+    HalfedgeHandle heh = mesh->halfedge_handle(_eh, 0);
+    return getVector(mesh, heh);
+}
+
+OpenMesh::Vec3d PlushPatternGenerator::getVector(TriMesh *mesh, HalfedgeHandle &_heh) {
+    TriMesh::Point p1 = mesh->point(mesh->from_vertex_handle(_heh));
+    TriMesh::Point p2 = mesh->point(mesh->to_vertex_handle(_heh));
+    return p2-p1;
 }

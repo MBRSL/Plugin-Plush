@@ -114,8 +114,7 @@ bool PlushPatternGenerator::isIntersected(std::vector<VertexHandle> pathA, std::
  *  @param allPath (Debugging) If false, only used (limitNum)-th path for spanningTree.
  *  @return False if error occured.
  */
-bool PlushPatternGenerator::calcSpanningTree(std::vector<EdgeHandle> &spanningTree,
-                                             std::vector<VertexHandle> selectedVertices,
+bool PlushPatternGenerator::calcSpanningTree(std::vector<VertexHandle> selectedVertices,
                                              int limitNum = 0,
                                              bool elimination = false,
                                              bool allPath = true) {
@@ -176,6 +175,7 @@ bool PlushPatternGenerator::calcSpanningTree(std::vector<EdgeHandle> &spanningTr
     
     // insert edges into spanning tree
     int count = 0;
+    m_spanningTree.clear();
     for (std::vector<std::pair<double, std::vector<VertexHandle> > >::iterator it = result.begin(); it != result.end(); it++, count++) {
         // Break if we reach limitNum
         if (count >= limitNum && limitNum != 0) {
@@ -193,7 +193,7 @@ bool PlushPatternGenerator::calcSpanningTree(std::vector<EdgeHandle> &spanningTr
         for (size_t i = 1; i < path.size(); i++) {
             EdgeHandle eh;
             assert(getEdge(m_mesh, eh, path[i-1], path[i]));
-            spanningTree.push_back(eh);
+            m_spanningTree.push_back(eh);
         }
         
         QString msg = QString("Weight of path #%1 from %2 to %3: %4").arg(count+1).arg((path.begin())->idx()).arg((path.end()-1)->idx()).arg(it->first);
