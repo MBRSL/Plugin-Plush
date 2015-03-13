@@ -8,6 +8,7 @@
 #include <OpenFlipper/BasePlugin/KeyInterface.hh>
 #include <OpenFlipper/BasePlugin/PluginFunctions.hh>
 #include <OpenFlipper/BasePlugin/ProcessInterface.hh>
+#include <OpenFlipper/BasePlugin/RPCInterface.hh>
 
 #include "PlushPatternGenerator.hh"
 
@@ -24,7 +25,8 @@ class PlushPlugin : public QObject,
         LoggingInterface,
         LoadSaveInterface,
         KeyInterface,
-        ProcessInterface
+        ProcessInterface,
+        RPCInterface
 {
     Q_OBJECT
     Q_INTERFACES(BaseInterface)
@@ -33,6 +35,7 @@ class PlushPlugin : public QObject,
     Q_INTERFACES(LoadSaveInterface)
     Q_INTERFACES(KeyInterface)
     Q_INTERFACES(ProcessInterface)
+    Q_INTERFACES(RPCInterface)
     
 signals:
     //BaseInterface
@@ -85,7 +88,6 @@ private:
     QPushButton *calcCurvatureButton;
     
     bool showAllPath;
-
     /// Flag for thread stopping
     bool isJobStopped;
     QString m_currentJobId;
@@ -102,17 +104,23 @@ private slots:
     void pluginsInitialized();
     
     void calcSkeletonWeightButtonClicked();
+    
     void showGeodesicButtonClicked();
     void calcGeodesicButtonClicked();
+    
     void loadSelectionButtonClicked();
     void saveSelectionButtonClicked();
     void clearSelectionButtonClicked();
-    void flattenButtonClicked();
+    
+    void showFlattenedGrpahButtonClicked();
+    void calcFlattenedGraphButtonClicked();
+    
     void calcCurvatureButtonClicked();
 
     // Starter function for thread
     void calcCurvatureThread();
     void calcGeodesicThread();
+    void calcFlattenedGraphThread();
     
     void slotKeyEvent( QKeyEvent* _event );
     

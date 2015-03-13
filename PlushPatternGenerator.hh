@@ -32,6 +32,7 @@ public:
     TriMesh *m_mesh;
     QString m_meshName;
     std::vector<EdgeHandle> m_spanningTree;
+    std::vector<PolyLine> m_flattenedGraph;
     
     /// Used for log
     ///@{
@@ -72,6 +73,9 @@ public:
     static OpenMesh::Vec3d getVector(TriMesh *mesh, EdgeHandle &_eh);
     static OpenMesh::Vec3d getVector(TriMesh *mesh, HalfedgeHandle &_heh);
     
+    /// Calculate the sum of inner (clockwise) angles by iterating from one halfedge to another.
+    static double getSumInnerAngle(TriMesh *mesh, HalfedgeHandle heh1, HalfedgeHandle heh2);
+    
     PlushPatternGenerator(TriMesh *mesh, QString meshName);
     ~PlushPatternGenerator();
     
@@ -92,6 +96,10 @@ public:
     bool calcSkeletonWeight();
     
     void getLoops(std::vector< std::vector<HalfedgeHandle> > &loops, std::vector<VertexHandle> &selectedVertices);
+    /// Flatten 3D loops into 2D loops using LPFB.
+    bool calcFlattenedGraph(std::vector< std::vector<HalfedgeHandle> > &loops);
+    /// Organize 2D loops to prevent overlapping while minimize bounding area.
+    bool packFlattenedGraph();
 
 private:
     Polyhedron m_polyhedron;

@@ -119,3 +119,20 @@ OpenMesh::Vec3d PlushPatternGenerator::getVector(TriMesh *mesh, HalfedgeHandle &
     TriMesh::Point p2 = mesh->point(mesh->to_vertex_handle(_heh));
     return p2-p1;
 }
+
+double PlushPatternGenerator::getSumInnerAngle(TriMesh *mesh, HalfedgeHandle heh1, HalfedgeHandle heh2) {
+    double sumInnerAngle = 0;
+
+    // Loop through inner edges and sum up inner angles
+    HalfedgeHandle current_heh = heh1;
+    while (mesh->edge_handle(current_heh) != mesh->edge_handle(heh2)) {
+        HalfedgeHandle next_heh = mesh->opposite_halfedge_handle(
+                                  mesh->next_halfedge_handle(current_heh));
+        OpenMesh::Vec3d vec1 = PlushPatternGenerator::getVector(mesh, current_heh);
+        OpenMesh::Vec3d vec2 = PlushPatternGenerator::getVector(mesh, next_heh);
+        sumInnerAngle += acos((vec1|vec2) / (vec1.norm()*vec2.norm()));
+        
+        current_heh = next_heh;
+    }
+    return sumInnerAngle;
+}

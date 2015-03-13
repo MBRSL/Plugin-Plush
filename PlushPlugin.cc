@@ -45,9 +45,11 @@ void PlushPlugin::initializePlugin()
     geodesicGroup->setLayout(geodesicLayout);
     
     QGroupBox *flatteningGroup = new QGroupBox(tr("Flattening"));
-    QPushButton *flattenButton = new QPushButton(tr("Add plane"));
+    QPushButton *calcFlattenButton = new QPushButton(tr("Calculate flattened graph"));
+    QPushButton *showFlattenButton = new QPushButton(tr("Show graph"));
     QHBoxLayout *flatteningLayout = new QHBoxLayout;
-    flatteningLayout->addWidget(flattenButton);
+    flatteningLayout->addWidget(calcFlattenButton);
+    flatteningLayout->addWidget(showFlattenButton);
     flatteningGroup->setLayout(flatteningLayout);
     
     QGroupBox *selectionGroup = new QGroupBox(tr("Selection"));
@@ -85,7 +87,8 @@ void PlushPlugin::initializePlugin()
     connect(loadSelectionButton, SIGNAL(clicked()), this, SLOT(loadSelectionButtonClicked()));
     connect(saveSelectionButton, SIGNAL(clicked()), this, SLOT(saveSelectionButtonClicked()));
     connect(clearSelectionButton, SIGNAL(clicked()), this, SLOT(clearSelectionButtonClicked()));
-    connect(flattenButton, SIGNAL(clicked()), this, SLOT(flattenButtonClicked()));
+    connect(calcFlattenButton, SIGNAL(clicked()), this, SLOT(calcFlattenedGraphButtonClicked()));
+    connect(showFlattenButton, SIGNAL(clicked()), this, SLOT(showFlattenedGrpahButtonClicked()));
     connect(calcCurvatureButton, SIGNAL(clicked()), this, SLOT(calcCurvatureButtonClicked()));
     
     emit addToolbox(tr("Plush"), toolBox);
@@ -221,10 +224,29 @@ void PlushPlugin::calcGeodesicButtonClicked() {
     connect(thread, SIGNAL(finished(QString)), this, SIGNAL(finishJob(QString)));
     connect(thread, SIGNAL(function(QString)), this, SLOT(calcGeodesicThread()), Qt::DirectConnection);
     
-    // Custom handler to set m_currentJobId to "" after finishing job. Also updating screen.
+    // Custom handler to set m_currentJobId to "" after finishing job.
     connect(thread, SIGNAL(finished(QString)), this, SLOT(finishedJobHandler()));
     
     emit startJob(m_currentJobId, "calculate geodesic of whole mesh", 0, 100, true);
+    thread->start();
+    thread->startProcessing();
+}
+
+void PlushPlugin::calcFlattenedGraphButtonClicked() {
+    if (m_patternGenerator->m_spanningTree.size() == 0) {
+        emit log(LOGERR, "No spanning tree calculated. Use show geodesic path.");
+        return;
+    }
+    
+    m_currentJobId = "calcFlattenedGraph";
+    OpenFlipperThread *thread = new OpenFlipperThread(m_currentJobId);
+    connect(thread, SIGNAL(finished(QString)), this, SIGNAL(finishJob(QString)));
+    connect(thread, SIGNAL(function(QString)), this, SLOT(calcFlattenedGraphThread()), Qt::DirectConnection);
+    
+    // Custom handler to set m_currentJobId to "" after finishing job.
+    connect(thread, SIGNAL(finished(QString)), this, SLOT(finishedJobHandler()));
+    
+    emit startJob(m_currentJobId, "Calculate flattened graph using spanning tree", 0, 100, true);
     thread->start();
     thread->startProcessing();
 }
@@ -263,6 +285,51 @@ void PlushPlugin::showGeodesicButtonClicked() {
     }
 }
 
+void PlushPlugin::showFlattenedGrpahButtonClicked() {
+    // Remove previous polyline
+    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::ALL_OBJECTS); o_it != PluginFunctions::objectsEnd();
+         ++o_it) {
+        int objId = o_it->id();
+        
+        if (o_it->dataType(DATA_POLY_LINE)) {
+            emit deleteObject(objId);
+        }
+    }
+    
+    // 1 means right viewer
+    int viewerId = 1;
+    // We don't want to show both models and polylines at same the time.
+    // So we place polylines to a very far place so that it will not be shown on original viewer
+    OpenMesh::Vec3d eye(100, 0, 1);
+    OpenMesh::Vec3d far(100, 0, 0);
+    OpenMesh::Vec3d right(0, 1, 0);
+    
+    RPC::callFunction ("core", "multiViewMode", 1);
+    PluginFunctions::setActiveExaminer(viewerId);
+    PluginFunctions::setFixedView(PluginFunctions::VIEW_FRONT, viewerId);
+    PluginFunctions::allowRotation(false, viewerId);
+    PluginFunctions::orthographicProjection(viewerId);
+    // Set this viewer to a far place
+//    PluginFunctions::setSceneCenter(far, viewerId);
+    PluginFunctions::lookAt(eye, far, right);
+    
+    for (size_t i = 0; i < m_patternGenerator->m_flattenedGraph.size(); i++) {
+        int objId;
+        emit addEmptyObject(DATA_POLY_LINE, objId);
+        
+        // Get the newly created object
+        PolyLineObject *object = 0;
+        PluginFunctions::getObject(objId, object);
+        PolyLine *polyLine = object->line();
+        
+        for (size_t j = 0; j < m_patternGenerator->m_flattenedGraph[i].n_vertices(); j++) {
+            PolyLine::Point p = m_patternGenerator->m_flattenedGraph[i].point(j);
+            polyLine->add_point(p + far);
+        }
+    }
+    emit updateView();
+}
+
 void PlushPlugin::saveSelectionButtonClicked() {
     if (!checkIfGeneratorExist()) {
         return;
@@ -289,52 +356,6 @@ void PlushPlugin::clearSelectionButtonClicked() {
     }
     
     clearSelection(m_triMeshObj->mesh());
-}
-
-void PlushPlugin::flattenButtonClicked() {
-    if (m_patternGenerator->m_spanningTree.size() == 0) {
-        emit log(LOGERR, "No spanning tree calculated. Use show geodesic path.");
-        return;
-    }
-    
-    // Remove previous polyline
-    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::ALL_OBJECTS); o_it != PluginFunctions::objectsEnd();
-         ++o_it) {
-        int objId = o_it->id();
-        
-        if (o_it->dataType(DATA_POLY_LINE)) {
-            emit deleteObject(objId);
-        }
-    }
-    
-    TriMesh *mesh = m_patternGenerator->m_mesh;
-
-    std::vector<int> selectedVerticesId;
-    selectedVerticesId = MeshSelection::getVertexSelection(mesh);
-    
-    std::vector<VertexHandle> selectedVertices;
-    for (size_t i = 0; i < selectedVerticesId.size(); i++) {
-        selectedVertices.push_back(mesh->vertex_handle(selectedVerticesId[i]));
-    }
-
-    std::vector< std::vector<HalfedgeHandle> > loops;
-    m_patternGenerator->getLoops(loops, selectedVertices);
-    
-    for (size_t i = 0; i < loops.size(); i++) {
-        int objId;
-        emit addEmptyObject(DATA_POLY_LINE, objId);
-        
-        // Get the newly created object
-        PolyLineObject *object = 0;
-        PluginFunctions::getObject(objId, object);
-        PolyLine *polyLine = object->line();
-
-        polyLine->add_point(mesh->point(mesh->from_vertex_handle(loops[i][0])));
-        for (size_t j = 0; j < loops[i].size(); j++) {
-            HalfedgeHandle heh = loops[i][j];
-            polyLine->add_point(mesh->point(mesh->to_vertex_handle(heh)));
-        }
-    }
 }
 
 void PlushPlugin::calcCurvatureThread() {
@@ -365,6 +386,23 @@ void PlushPlugin::calcGeodesicThread() {
     m_patternGenerator->saveGeodesic(selectedVertices);
 
     emit log(LOGINFO, "Geodesic calculation done.");
+}
+
+void PlushPlugin::calcFlattenedGraphThread() {
+    TriMesh *mesh = m_patternGenerator->m_mesh;
+    
+    std::vector<int> selectedVerticesId;
+    selectedVerticesId = MeshSelection::getVertexSelection(mesh);
+    
+    std::vector<VertexHandle> selectedVertices;
+    for (size_t i = 0; i < selectedVerticesId.size(); i++) {
+        selectedVertices.push_back(mesh->vertex_handle(selectedVerticesId[i]));
+    }
+    
+    std::vector< std::vector<HalfedgeHandle> > loops;
+    m_patternGenerator->getLoops(loops, selectedVertices);
+    m_patternGenerator->calcFlattenedGraph(loops);
+    m_patternGenerator->packFlattenedGraph();
 }
 
 void PlushPlugin::canceledJob(QString _job) {
