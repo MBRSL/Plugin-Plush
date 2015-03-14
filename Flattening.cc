@@ -70,29 +70,31 @@ public:
     /// Cost function
     int operator()(const Eigen::VectorXd &x, Eigen::VectorXd &fvec) const
     {
-        double sumAngleDiff = 0;
-        for (int i = 0; i < n; i++) {
-            double theta_i = x[i];
-            double angleDiff = theta_i - innerAngle3D[i];
-            sumAngleDiff += 0.5 * angleDiff * angleDiff;
-        }
+        // Our cost function consist of only 4 terms. Set others to 0.
+        fvec.setZero();
         
+        double sumAngleDiff = 0;
+
         double loopAngleConstrain = (n - 2) * M_PI;
-        for (int k = 0; k < n; k++) {
-            double theta_k = x[k];
-            loopAngleConstrain -= theta_k;
-        }
-        loopAngleConstrain *= lambdaTheta;
         
         double loopPositionConstrainsX = 0;
         double loopPositionConstrainsY = 0;
         double phi_i = 0;
         for (int i = 0; i < n; i++) {
-            phi_i += M_PI - x[i];
+            double theta_i = x[i];
             
-            loopPositionConstrainsX += lambdaTheta_0x * edgeLengths[i] * cos(phi_i);
-            loopPositionConstrainsY += lambdaTheta_0y * edgeLengths[i] * sin(phi_i);
+            double angleDiff = theta_i - innerAngle3D[i];
+            sumAngleDiff += 0.5 * angleDiff * angleDiff;
+            
+            loopAngleConstrain -= theta_i;
+            
+            phi_i += M_PI - theta_i;
+            loopPositionConstrainsX += edgeLengths[i] * cos(phi_i);
+            loopPositionConstrainsY += edgeLengths[i] * sin(phi_i);
         }
+        loopAngleConstrain *= lambdaTheta;
+        loopPositionConstrainsX *= lambdaTheta_0x;
+        loopPositionConstrainsY *= lambdaTheta_0y;
         
         fvec[0] = sumAngleDiff;
         fvec[1] = loopAngleConstrain;
@@ -100,39 +102,37 @@ public:
         fvec[3] = loopPositionConstrainsY;
         
 //        printf("%.3lf, %.3lf, %.3lf, %.3lf\n", fvec[0], fvec[1], fvec[2], fvec[3]);
-
-        // Our cost function consist of only 4 terms. Set others to 0.
-        for (int i = 4; i < n; i++) {
-            fvec[i] = 0;
-        }
         return 0;
     }
 
-    // Currently buggy
-//    int df(const Eigen::VectorXd &x, Eigen::MatrixXd &fjac) const
-//    {
-//        for (int i = 0; i < n; i++) {
-//            fjac(0, i) = x[i] - innerAngle3D[i];
-//            fjac(1, i) = -lambdaTheta;
-//            
-//            double sumPosX = 0;
-//            double sumPosY = 0;
-//            double phi_k = 0;
-//            for (int k = 0; k < n; k++) {
-//                phi_k += M_PI - x[k];
-//                
-//                if (k >= i) {
-//                    double differentiatedPosX = edgeLengths[k] * sin(phi_k);
-//                    double differentiatedPosY = edgeLengths[k] * -cos(phi_k);
-//                    sumPosX += differentiatedPosX;
-//                    sumPosY += differentiatedPosY;
-//                }
-//            }
-//            fjac(2, i) = lambdaTheta_0x * sumPosX;
-//            fjac(3, i) = lambdaTheta_0y * sumPosY;
-//        }
-//        return 0;
-//    }
+    int df(const Eigen::VectorXd &x, Eigen::MatrixXd &fjac) const
+    {
+        fjac.setZero();
+        double *phi_k = new double[n];
+        double *sumPosX = new double[n];
+        double *sumPosY = new double[n];
+        
+        phi_k[0] = M_PI - x[0];
+        for (int k = 1; k < n; k++) {
+            phi_k[k] = phi_k[k-1] + M_PI - x[k];
+        }
+        double sumPosXTmp = 0, sumPosYTmp = 0;
+        for (int k = n-1; k >= 0; k--) {
+            sumPosXTmp += edgeLengths[k] * sin(phi_k[k]);
+            sumPosYTmp += edgeLengths[k] * -cos(phi_k[k]);
+            sumPosX[k] = sumPosXTmp;
+            sumPosY[k] = sumPosYTmp;
+        }
+        
+        for (int i = 0; i < n; i++) {
+            fjac(0, i) = x[i] - innerAngle3D[i];
+            fjac(1, i) = -lambdaTheta;
+            fjac(2, i) = lambdaTheta_0x * sumPosX[i];
+            fjac(3, i) = lambdaTheta_0y * sumPosY[i];
+        }
+        delete[] phi_k;
+        return 0;
+    }
 };
 
 bool PlushPatternGenerator::calcFlattenedGraph(std::vector< std::vector<HalfedgeHandle> > &loops)
@@ -165,12 +165,12 @@ bool PlushPatternGenerator::calcFlattenedGraph(std::vector< std::vector<Halfedge
             theta[j] = sumInnerAngle;
         }
         
-        Eigen::NumericalDiff<lmder_functor> functor(n, edgeLengths, innerAngle3D);
-        Eigen::LevenbergMarquardt<Eigen::NumericalDiff<lmder_functor> > lm(functor);
-//        lmder_functor functor(n, edgeLengths, innerAngle3D);
-//        Eigen::LevenbergMarquardt<lmder_functor> lm(functor);
-        lm.parameters.maxfev = 5000;
-        lm.parameters.epsfcn = 1e-6;
+        lmder_functor functor(n, edgeLengths, innerAngle3D);
+        Eigen::LevenbergMarquardt<lmder_functor> lm(functor);
+//        Eigen::NumericalDiff<lmder_functor> functor(n, edgeLengths, innerAngle3D);
+//        Eigen::LevenbergMarquardt<Eigen::NumericalDiff<lmder_functor> > lm(functor);
+        lm.parameters.maxfev = 400;
+        lm.parameters.epsfcn = 1e-2;
         lm.minimize(theta);
         
         // Reconstruct flattened loop using optimized angles
