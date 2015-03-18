@@ -175,7 +175,7 @@ bool PlushPatternGenerator::calcSpanningTree(std::vector<VertexHandle> selectedV
     
     // insert edges into spanning tree
     int count = 0;
-    m_spanningTree.clear();
+    m_boundary.clear();
     for (std::vector<std::pair<double, std::vector<VertexHandle> > >::iterator it = result.begin(); it != result.end(); it++, count++) {
         // Break if we reach limitNum
         if (count >= limitNum && limitNum != 0) {
@@ -193,7 +193,7 @@ bool PlushPatternGenerator::calcSpanningTree(std::vector<VertexHandle> selectedV
         for (size_t i = 1; i < path.size(); i++) {
             EdgeHandle eh;
             assert(getEdge(m_mesh, eh, path[i-1], path[i]));
-            m_spanningTree.push_back(eh);
+            m_boundary.push_back(eh);
         }
         
         QString msg = QString("Weight of path #%1 from %2 to %3: %4").arg(count+1).arg((path.begin())->idx()).arg((path.end()-1)->idx()).arg(it->first);

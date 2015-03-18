@@ -31,8 +31,8 @@ signals:
 public:
     TriMesh *m_mesh;
     QString m_meshName;
-    std::vector<EdgeHandle> m_spanningTree;
-    std::vector<PolyLine> m_flattenedGraph;
+    std::vector<EdgeHandle> m_boundary;
+    std::vector<TriMesh> m_flattenedGraph;
     
     /// Used for log
     ///@{
@@ -66,6 +66,14 @@ public:
     static OpenMesh::VPropHandleT<double*> bonesWeightHandle;
     ///@}
     
+    /// @name Flattening distortion visualizing handle
+    ///@{
+    /// Distortion indicator
+    static OpenMesh::VPropHandleT<double> distortionHandle;
+    /// Mapping back to original vertex handle before flattening
+    static OpenMesh::VPropHandleT<VertexHandle> inverseMapping;
+    ///@}
+    
     static bool getHalfedge(TriMesh *mesh, HalfedgeHandle &heh, int fromNo, int toNo);
     static bool getHalfedge(TriMesh *mesh, HalfedgeHandle &heh, VertexHandle from, VertexHandle to);
     static bool getEdge(TriMesh *mesh, EdgeHandle &eh, int v1No, int v2No);
@@ -75,6 +83,9 @@ public:
     
     /// Calculate the sum of inner (clockwise) angles by iterating from one halfedge to another.
     static double getSumInnerAngle(TriMesh *mesh, HalfedgeHandle heh1, HalfedgeHandle heh2);
+    
+    /// Get boundary for a given opened mesh
+    static bool getBoundaryOfOpenedMesh(std::vector<HalfedgeHandle> &boundary, TriMesh &mesh);
     
     PlushPatternGenerator(TriMesh *mesh, QString meshName);
     ~PlushPatternGenerator();
@@ -95,9 +106,10 @@ public:
 
     bool calcSkeletonWeight();
     
-    void getLoops(std::vector< std::vector<HalfedgeHandle> > &loops, std::vector<VertexHandle> &selectedVertices);
     /// Flatten 3D loops into 2D loops using LPFB.
-    bool calcFlattenedGraph(std::vector< std::vector<HalfedgeHandle> > &loops);
+    bool calcFlattenedGraph();
+    bool calcLPFB(TriMesh &mesh);
+    bool calcInteriorPoints();
     /// Organize 2D loops to prevent overlapping while minimize bounding area.
     bool packFlattenedGraph();
 
@@ -110,6 +122,10 @@ private:
     bool isJobCanceled;
     
     bool isIntersected(std::vector<VertexHandle> path1, std::vector<VertexHandle> path2);
+    
+    bool splitWithBoundary(std::vector< std::vector<HalfedgeHandle> > &loops);
+
+    void getBoundariesByEdges(std::vector< std::vector<HalfedgeHandle> > &boundaries, std::vector<EdgeHandle> &separator);
     
     void initProperties();
     void uninitProperties();

@@ -233,8 +233,8 @@ void PlushPlugin::calcGeodesicButtonClicked() {
 }
 
 void PlushPlugin::calcFlattenedGraphButtonClicked() {
-    if (m_patternGenerator->m_spanningTree.size() == 0) {
-        emit log(LOGERR, "No spanning tree calculated. Use show geodesic path.");
+    if (m_patternGenerator->m_boundary.size() == 0) {
+        emit log(LOGERR, "No boundary. Use show geodesic path.");
         return;
     }
     
@@ -275,8 +275,8 @@ void PlushPlugin::showGeodesicButtonClicked() {
     
     if (m_patternGenerator->calcSpanningTree(selectedVertices, geodesicNumPaths->value(), geodesicElimination->isChecked(), showAllPath)) {
         std::vector<int> edgeList;
-        for (size_t i = 0; i < m_patternGenerator->m_spanningTree.size(); i++) {
-            edgeList.push_back(m_patternGenerator->m_spanningTree[i].idx());
+        for (size_t i = 0; i < m_patternGenerator->m_boundary.size(); i++) {
+            edgeList.push_back(m_patternGenerator->m_boundary[i].idx());
         }
         
         MeshSelection::clearEdgeSelection(mesh);
@@ -286,15 +286,6 @@ void PlushPlugin::showGeodesicButtonClicked() {
 }
 
 void PlushPlugin::showFlattenedGrpahButtonClicked() {
-    // Remove previous polyline
-    for (PluginFunctions::ObjectIterator o_it(PluginFunctions::ALL_OBJECTS); o_it != PluginFunctions::objectsEnd();
-         ++o_it) {
-        int objId = o_it->id();
-        
-        if (o_it->dataType(DATA_POLY_LINE)) {
-            emit deleteObject(objId);
-        }
-    }
     
     // 1 means right viewer
     int viewerId = 1;
@@ -310,24 +301,79 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
     PluginFunctions::allowRotation(false, viewerId);
     PluginFunctions::orthographicProjection(viewerId);
     // Set this viewer to a far place
-//    PluginFunctions::setSceneCenter(far, viewerId);
     PluginFunctions::lookAt(eye, far, right);
+
+
+    // Add new object and copy m_flattenedGraph into it
+    int n = m_patternGenerator->m_flattenedGraph.size();
+    int *newTriMeshIds = new int[n];
     
-    for (size_t i = 0; i < m_patternGenerator->m_flattenedGraph.size(); i++) {
-        int objId;
-        emit addEmptyObject(DATA_POLY_LINE, objId);
-        
+    for (int i = 0; i < n; i++) {
+        emit addEmptyObject(DATA_TRIANGLE_MESH, newTriMeshIds[i]);
+
         // Get the newly created object
-        PolyLineObject *object = 0;
-        PluginFunctions::getObject(objId, object);
-        PolyLine *polyLine = object->line();
+        TriMeshObject *object = 0;
+        PluginFunctions::getObject(newTriMeshIds[i], object);
+        TriMesh *mesh = object->mesh();
+
+        std::map<VertexHandle, VertexHandle> oldToNewMapping;
         
-        for (size_t j = 0; j < m_patternGenerator->m_flattenedGraph[i].n_vertices(); j++) {
-            PolyLine::Point p = m_patternGenerator->m_flattenedGraph[i].point(j);
-            polyLine->add_point(p + far);
+        TriMesh &oldMesh = m_patternGenerator->m_flattenedGraph[i];
+        for (VertexIter v_it = oldMesh.vertices_begin(); v_it != oldMesh.vertices_end(); v_it++) {
+            TriMesh::Point p = oldMesh.point(*v_it);
+            VertexHandle newV = mesh->add_vertex(p + far);
+            oldToNewMapping.emplace(*v_it, newV);
+            
+            // Update inverse map
+            mesh->property(PlushPatternGenerator::inverseMapping, newV) = oldMesh.property(PlushPatternGenerator::inverseMapping, *v_it);
+        }
+        for (FaceIter f_it = oldMesh.faces_begin(); f_it != oldMesh.faces_end(); f_it++) {
+            HalfedgeHandle heh = oldMesh.halfedge_handle(*f_it);
+            VertexHandle v1 = oldMesh.from_vertex_handle(heh);
+            VertexHandle v2 = oldMesh.to_vertex_handle(heh);
+            VertexHandle v3 = oldMesh.to_vertex_handle(oldMesh.next_halfedge_handle(heh));
+            
+            std::vector<VertexHandle> face_vhs;
+            face_vhs.push_back(oldToNewMapping[v1]);
+            face_vhs.push_back(oldToNewMapping[v2]);
+            face_vhs.push_back(oldToNewMapping[v3]);
+            FaceHandle newF = mesh->add_face(face_vhs);
+            mesh->set_color(newF, oldMesh.color(*f_it));
+        }
+        mesh->request_face_normals();
+        mesh->update_face_normals();
+    }
+    
+    // Clear old meshes
+    m_patternGenerator->m_flattenedGraph.clear();
+    
+    TriMesh *originalMesh = m_patternGenerator->m_mesh;
+    // Assign new sub meshes to m_flattenedGraph
+    for (int i = 0; i < n; i++) {
+        TriMeshObject *object = 0;
+        PluginFunctions::getObject(newTriMeshIds[i], object);
+        TriMesh *mesh = object->mesh();
+        m_patternGenerator->m_flattenedGraph.push_back(*mesh);
+        
+        MeshSelection::selectBoundaryEdges(mesh);
+        
+        // Calculate flattening distortion
+        mesh->add_property(PlushPatternGenerator::distortionHandle, "Flattening distortion");
+        for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
+            VertexHandle v = *v_it;
+            if (mesh->is_boundary(v)) {
+                mesh->property(PlushPatternGenerator::distortionHandle, v) = 2 * M_PI;
+            } else {
+                double sum = 0;
+                VertexHandle originalV = mesh->property(PlushPatternGenerator::inverseMapping, v);
+                for (TriMesh::VertexIHalfedgeIter vih_it = originalMesh->vih_begin(originalV); vih_it; vih_it++) {
+                    HalfedgeHandle heh = *vih_it;
+                    sum += originalMesh->calc_sector_angle(heh);
+                }
+                mesh->property(PlushPatternGenerator::distortionHandle, v) = sum;
+            }
         }
     }
-    emit updateView();
 }
 
 void PlushPlugin::saveSelectionButtonClicked() {
@@ -389,20 +435,7 @@ void PlushPlugin::calcGeodesicThread() {
 }
 
 void PlushPlugin::calcFlattenedGraphThread() {
-    TriMesh *mesh = m_patternGenerator->m_mesh;
-    
-    std::vector<int> selectedVerticesId;
-    selectedVerticesId = MeshSelection::getVertexSelection(mesh);
-    
-    std::vector<VertexHandle> selectedVertices;
-    for (size_t i = 0; i < selectedVerticesId.size(); i++) {
-        selectedVertices.push_back(mesh->vertex_handle(selectedVerticesId[i]));
-    }
-    
-    std::vector< std::vector<HalfedgeHandle> > loops;
-    m_patternGenerator->getLoops(loops, selectedVertices);
-    m_patternGenerator->calcFlattenedGraph(loops);
-    m_patternGenerator->packFlattenedGraph();
+    m_patternGenerator->calcFlattenedGraph();
 }
 
 void PlushPlugin::canceledJob(QString _job) {

@@ -12,6 +12,10 @@ OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, std::vec
 OpenMesh::MPropHandleT<Skeleton*> PlushPatternGenerator::skeletonHandle;
 OpenMesh::VPropHandleT<double*> PlushPatternGenerator::bonesWeightHandle;
 
+OpenMesh::VPropHandleT<double> PlushPatternGenerator::distortionHandle;
+
+OpenMesh::VPropHandleT<VertexHandle> PlushPatternGenerator::inverseMapping;
+
 PlushPatternGenerator::PlushPatternGenerator(TriMesh *mesh, QString meshName) : m_mesh(mesh), m_meshName(meshName) {
     // convert m_mesh from OpenFlipper to CGAL
     CGAL_Polyhedron_helper::convert_OpenMesh_to_CGAL(m_mesh, m_polyhedron, m_verticesMapping);
@@ -45,8 +49,8 @@ void PlushPatternGenerator::initProperties() {
     m_mesh->add_property(skeletonHandle, "Skeleton");
     m_mesh->add_property(bonesWeightHandle, "Bone weights for each vertex");
     
-    //    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
-    //    }
+    m_mesh->add_property(distortionHandle, "Flattening distortion");
+    
     for (EdgeIter e_it = m_mesh->edges_begin(); e_it != m_mesh->edges_end(); e_it++) {
         m_mesh->property(edgeWeightHandle, *e_it) = -1;
     }
@@ -123,6 +127,11 @@ OpenMesh::Vec3d PlushPatternGenerator::getVector(TriMesh *mesh, HalfedgeHandle &
 double PlushPatternGenerator::getSumInnerAngle(TriMesh *mesh, HalfedgeHandle heh1, HalfedgeHandle heh2) {
     double sumInnerAngle = 0;
 
+    if (mesh->is_boundary(heh1) || mesh->is_boundary(heh2)) {
+        HalfedgeHandle tmp = heh1;
+        heh1 = mesh->opposite_halfedge_handle(heh2);
+        heh2 = mesh->opposite_halfedge_handle(tmp);
+    }
     // Loop through inner edges and sum up inner angles
     HalfedgeHandle current_heh = heh1;
     while (mesh->edge_handle(current_heh) != mesh->edge_handle(heh2)) {
@@ -135,4 +144,90 @@ double PlushPatternGenerator::getSumInnerAngle(TriMesh *mesh, HalfedgeHandle heh
         current_heh = next_heh;
     }
     return sumInnerAngle;
+}
+
+/**
+ @brief Return a ring of boundary halfedges.
+ It will randomly return one ring if mesh contains more than one boundary rings.
+ @param boundary Result will be stored here, Ordered halfedges forms a ring.
+ @retval false if it contains no boundaries.
+ */
+bool PlushPatternGenerator::getBoundaryOfOpenedMesh(std::vector<HalfedgeHandle> &boundary, TriMesh &mesh) {
+    HalfedgeHandle heh;
+    for (HalfedgeIter he_it = mesh.halfedges_begin(); he_it != mesh.halfedges_end(); he_it++) {
+        if (mesh.is_boundary(*he_it)) {
+            heh = *he_it;
+            break;
+        }
+    }
+    
+    if (!mesh.is_valid_handle(heh)) {
+        return false;
+    }
+    
+    HalfedgeHandle current_heh = heh;
+    do {
+        boundary.push_back(current_heh);
+        current_heh = mesh.next_halfedge_handle(current_heh);
+    } while (current_heh != heh);
+    
+    return true;
+}
+
+/**
+ * @brief This function returns a set of rings of halfedges. These rings are separated by given edges.
+ * @param loops Result loops will be stored here.
+ * @param jointVertices (This parameter should be compute internally) The set of intersection point of m_spanningTree.
+ */
+void PlushPatternGenerator::getBoundariesByEdges(std::vector< std::vector<HalfedgeHandle> > &boundaries, std::vector<EdgeHandle> &separator) {
+    std::set<HalfedgeHandle> isVisited;
+    for (size_t i = 0; i < separator.size(); i++) {
+        HalfedgeHandle heh = m_mesh->halfedge_handle(separator[i], 0);
+        VertexHandle startV = m_mesh->from_vertex_handle(heh);
+        
+        for (TriMesh::VertexOHalfedgeIter voh_it = m_mesh->voh_iter(startV); voh_it; voh_it++) {
+            // Skip visited edges and non-spanning-tree edges
+            if (std::find(isVisited.begin(), isVisited.end(), *voh_it) != isVisited.end()
+            ||  std::find(separator.begin(), separator.end(), m_mesh->edge_handle(*voh_it)) == separator.end()) {
+                continue;
+            }
+            
+            // We got a non-visited edge, lets start searching from this edge
+            HalfedgeHandle start_heh = *voh_it;
+            HalfedgeHandle current_heh = start_heh;
+            isVisited.insert(start_heh);
+            
+            std::vector<HalfedgeHandle> boundary;
+            boundary.push_back(current_heh);
+            do {
+                assert(!m_mesh->is_boundary(current_heh));
+                
+                HalfedgeHandle next_heh = current_heh;
+                // Find next edge which is in spanning tree
+                do {
+                    // While there are possibly many adjacent edges to choose, we use next->opposite to iterator through them
+                    // so that we will visit them all clockwise without missing any one.
+                    next_heh = m_mesh->opposite_halfedge_handle(
+                                                                m_mesh->next_halfedge_handle(next_heh));
+                    
+                    // This means there are no other edges except current_heh (which is where you came from)
+                    // In this case, just go back and treat this path as a dart
+                    if (next_heh == current_heh) {
+                        // Do nothing, it will be flipped later.
+                    }
+                } while (std::find(separator.begin(), separator.end(), m_mesh->edge_handle(next_heh)) == separator.end());
+                
+                // Flip it to point to the next vertex
+                current_heh = m_mesh->opposite_halfedge_handle(next_heh);
+                isVisited.insert(current_heh);
+                
+                boundary.push_back(current_heh);
+            } while (current_heh != start_heh);
+            
+            // Delete last duplicated halfedge
+            boundary.pop_back();
+            
+            boundaries.push_back(boundary);
+        }
+    }
 }
