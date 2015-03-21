@@ -111,7 +111,7 @@ public:
     bool calcLPFB(TriMesh &mesh);
     bool calcInteriorPoints();
     /// Organize 2D loops to prevent overlapping while minimize bounding area.
-    bool packFlattenedGraph();
+    bool packFlattenedGraph(const int nColumns=4);
 
 private:
     Polyhedron m_polyhedron;

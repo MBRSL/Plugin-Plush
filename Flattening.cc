@@ -309,7 +309,7 @@ bool PlushPatternGenerator::calcInteriorPoints()
         /**     v3
          *     /  \
          *    /    \
-         *  v1 ---> v2
+         *  v1⥫---⥬v2
          *    \    /
          *     \  /
          *      v4
@@ -318,46 +318,43 @@ bool PlushPatternGenerator::calcInteriorPoints()
             HalfedgeHandle heh12 = mesh.halfedge_handle(*e_it, 0);
             HalfedgeHandle heh21 = mesh.halfedge_handle(*e_it, 1);
             
-            HalfedgeHandle heh23 = mesh.next_halfedge_handle(heh12);
-            HalfedgeHandle heh14 = mesh.next_halfedge_handle(heh21);
-
-            HalfedgeHandle heh31 = mesh.next_halfedge_handle(heh23);
-            HalfedgeHandle heh41 = mesh.opposite_halfedge_handle(heh14);
-
             VertexHandle v1 = mesh.from_vertex_handle(heh12);
             VertexHandle v2 = mesh.to_vertex_handle(heh12);
-            
             if (mesh.is_boundary(v1) && mesh.is_boundary(v2)) {
                 continue;
             }
-            
-            double angle231 = mesh.calc_sector_angle(heh23);
-            double angle142 = mesh.calc_sector_angle(heh14);
-            
+
+            HalfedgeHandle heh31 = mesh.prev_halfedge_handle(heh12);
+            HalfedgeHandle heh42 = mesh.prev_halfedge_handle(heh21);
+
             double angle312 = mesh.calc_sector_angle(heh31);
-            double angle412 = mesh.calc_sector_angle(heh41);
+            double angle214 = mesh.calc_sector_angle(heh21);
+        
+            double angle123 = mesh.calc_sector_angle(heh12);
+            double angle421 = mesh.calc_sector_angle(heh42);
 
-            if (angle312 < 0) {
-                angle312 *= -1;
-            }
-            if (angle412 < 0) {
-                angle412 *= -1;
-            }
 
+//            // Conformal mapping
 //            double cotR231 = tan(M_PI_2 - angle231);
 //            double cotR142 = tan(M_PI_2 - angle142);
-//            double cotSum = cotR231;
-//            double cotSum = 1;
-            double cotSum = (tan(angle312/2) + tan(angle412/2)) / mesh.calc_edge_length(heh12);
-            assert(cotSum >= 0);
+//            double weight12 = cotR231 + cotR142;
+//            double weight21 = weight12;
             
+//            // Barycentrical mapping
+//            double weight12 = 1;
+//            double weight21 = 1;
+            
+            // Mean value mapping
+            double wegith12 = (tan(angle312/2) + tan(angle214/2)) / mesh.calc_edge_length(heh12);
+            double wegith21 = (tan(angle123/2) + tan(angle421/2)) / mesh.calc_edge_length(heh21);
+        
             if (!mesh.is_boundary(v1)) {
-                tripletList.push_back(Eigen::Triplet<double>(v1.idx(), v2.idx(), cotSum));
-                rowSum[v1.idx()] += cotSum;
+                tripletList.push_back(Eigen::Triplet<double>(v1.idx(), v2.idx(), wegith12));
+                rowSum[v1.idx()] += wegith12;
             }
             if (!mesh.is_boundary(v2)) {
-                tripletList.push_back(Eigen::Triplet<double>(v2.idx(), v1.idx(), cotSum));
-                rowSum[v2.idx()] += cotSum;
+                tripletList.push_back(Eigen::Triplet<double>(v2.idx(), v1.idx(), wegith21));
+                rowSum[v2.idx()] += wegith21;
             }
         }
         
@@ -369,13 +366,12 @@ bool PlushPatternGenerator::calcInteriorPoints()
                 tripletList.push_back(Eigen::Triplet<double>(v.idx(), v.idx(), -rowSum[v.idx()]));
             }
         }
-        
         // Filling matrix
         Eigen::SparseMatrix<double> M(n, n);
         M.setFromTriplets(tripletList.begin(), tripletList.end());
+        M.makeCompressed();
         
         Eigen::SparseLU< Eigen::SparseMatrix<double> > solver;
-        M.makeCompressed();
         solver.compute(M);
         if (solver.info() != Eigen::Success)
         {
@@ -471,7 +467,7 @@ bool PlushPatternGenerator::calcLPFB(TriMesh &mesh) {
     return true;
 }
 
-bool PlushPatternGenerator::packFlattenedGraph() {
+bool PlushPatternGenerator::packFlattenedGraph(const int nColumns) {
     size_t n = m_flattenedGraph.size();
     
     double *minX = new double[n];
@@ -501,26 +497,29 @@ bool PlushPatternGenerator::packFlattenedGraph() {
             maxZ[i] = max(maxZ[i], p[2]);
         }
         width = max(width, maxX[i] - minX[i]);
+        height = max(height, maxY[i] - minY[i]);
         depth = max(depth, maxZ[i] - minZ[i]);
-        height += maxY[i] - minY[i];
     }
     
-    double spacing = height / (5 * n);
-    height += spacing * n -1;
+    double spacing = max(height, width)/5;
     double offsetX = 0, offsetY = 0, offsetZ = 0;
     for (size_t i = 0; i < n; i++) {
         TriMesh &mesh = m_flattenedGraph[i];
 
-        // Align to the right bound of previous loop
-        if (i > 0) {
-            offsetY += maxY[i-1] - minY[i-1] + spacing;
+        // For a new row, calculate row offset
+        if (i > 1 && i % nColumns == 0) {
+            double rowOffset = maxY[i-1];
+            for (int j = 2; j <= nColumns; j++) {
+                rowOffset = max(rowOffset, maxY[i-j] - minY[i-j]);
+            }
+            offsetY += rowOffset + spacing;
         }
 
         for (VertexIter v_it = mesh.vertices_begin(); v_it != mesh.vertices_end(); v_it++) {
             VertexHandle v = *v_it;
             TriMesh::Point &p = mesh.point(v);
 
-            p[0] += -minX[i] - width/2;
+            p[0] += -minX[i] + width * (-0.5 + (i % nColumns) * spacing);
             p[1] += -minY[i] + offsetY - height/2;
             p[2] += -minZ[i] - depth/2;
         }
