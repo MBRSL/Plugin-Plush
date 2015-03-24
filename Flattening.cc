@@ -4,167 +4,59 @@
 #include <IpIpoptApplication.hpp>
 #include <LPFB.hh>
 
-#include <queue>
-
 bool PlushPatternGenerator::calcFlattenedGraph()
 {
+    std::vector<EdgeHandle> *seams = getSeams();
+    if (!seams) {
+        emit log(LOGERR, "Seams not ready. Call calcSeams() first.");
+        return false;
+    }
+    
+    // Prepare for properties
+    if (!boundariesHandle.is_valid()) {
+        m_mesh->add_property(boundariesHandle, "boundary halfedges");
+    }
+    if (!flattenedMeshesHandle.is_valid()) {
+        m_mesh->add_property(flattenedMeshesHandle, "flattened meshes");
+    }
+
     // Clear previous result
-    m_flattenedGraph.clear();
+    std::vector< std::vector<HalfedgeHandle> > *boundaries = &m_mesh->property(boundariesHandle);
+    boundaries->clear();
+    std::vector<TriMesh> *flattenedMeshes = &m_mesh->property(flattenedMeshesHandle);
+    flattenedMeshes->clear();
 
-    std::vector< std::vector<HalfedgeHandle> > boundaries;
-    getBoundariesByEdges(boundaries, m_boundary);
-
-    splitWithBoundary(boundaries);
+    // Store boundary into property
+    getBoundariesByEdges(boundaries, seams);
+    
+    // Create sub meshes using boundaries
+    splitWithBoundary(flattenedMeshes, boundaries);
 
     isJobCanceled = false;
-    for (size_t i = 0; i < m_flattenedGraph.size(); i++) {
+    for (size_t i = 0; i < flattenedMeshes->size(); i++) {
         if (isJobCanceled) {
             emit log(LOGINFO, "Flattening calculation canceled.");
             return false;
         }
-        calcLPFB(m_flattenedGraph[i]);
-        setJobState((double)(i+1) / m_flattenedGraph.size() * 100);
+        calcLPFB(&flattenedMeshes->at(i));
+        setJobState((double)(i+1) / flattenedMeshes->size() * 100);
     }
 
-    calcInteriorPoints();
+    calcInteriorPoints(flattenedMeshes);
 
-    packFlattenedGraph();
+    packFlattenedGraph(flattenedMeshes);
     return true;
 }
 
-/// Split existing mesh into (new) connected components with boundary as separator
-bool PlushPatternGenerator::splitWithBoundary(std::vector< std::vector<HalfedgeHandle> > &loops)
+/**
+ This function flattens non-boundary vertices using intrinsic parameterization (mean value coordinates.)
+ @param flattenedMeshes Input mesh, its non-boundary vertices will be modified.
+ @retval True on success. False if failed to solve linear system during intrinsic parameterization.
+ */
+bool PlushPatternGenerator::calcInteriorPoints(std::vector<TriMesh> *flattenedMeshes)
 {
-    for (size_t i = 0; i < loops.size(); i++) {
-        TriMesh newMesh;
-        newMesh.add_property(inverseMapping);
-        
-        std::vector<HalfedgeHandle> loop = loops[i];
-        
-        std::set<VertexHandle> isVisited;
-
-        // Starting BFS from boundary halfedges
-        std::set<FaceHandle> connectedFaces;
-        std::queue<HalfedgeHandle> queue;
-        
-        // Old vertex to new vertex mapping function
-        std::map<VertexHandle, VertexHandle> vertexToVertexMapping;
-        
-        // Because there will be more than one corresponding (new) vertex for a vertex on loop,
-        // vertex-to-vertex is not a one-to-one function. We need a halfedge-to-vertices mapping for boundary halfedge.
-        std::map< HalfedgeHandle, std::pair<VertexHandle, VertexHandle> > halfedgeToVerticesMapping;
-        
-        for (size_t j = 0; j < loop.size(); j++) {
-            HalfedgeHandle boundary_heh = loop[j];
-            queue.push(boundary_heh);
-
-            VertexHandle v1 = m_mesh->from_vertex_handle(boundary_heh);
-            VertexHandle v2 = m_mesh->to_vertex_handle(boundary_heh);
-            VertexHandle newV1;
-            if (j == 0) {
-                newV1 = newMesh.add_vertex(m_mesh->point(v1));
-                newMesh.property(inverseMapping, newV1) = v1;
-            } else {
-                newV1 = halfedgeToVerticesMapping[loop[j-1]].second;
-            }
-            
-            VertexHandle newV2;
-            if (j == loop.size()-1) {
-                newV2 = halfedgeToVerticesMapping[loop[0]].first;
-            } else {
-                newV2 = newMesh.add_vertex(m_mesh->point(v2));
-                newMesh.property(inverseMapping, newV2) = v2;
-            }
-            
-            isVisited.insert(v1);
-            
-            halfedgeToVerticesMapping.emplace(boundary_heh, std::make_pair(newV1, newV2));
-        }
-
-        while (!queue.empty()) {
-            HalfedgeHandle starting_heh = queue.front();
-            queue.pop();
-
-            VertexHandle v = m_mesh->to_vertex_handle(starting_heh);
-            
-            // Add new vertex only if starting_heh is not a boundary halfedge
-            bool isBoundary = false;
-            if (std::find(loop.begin(), loop.end(), starting_heh) == loop.end()) {
-                VertexHandle newV = newMesh.add_vertex(m_mesh->point(v));
-                vertexToVertexMapping.emplace(v, newV);
-                newMesh.property(inverseMapping, newV) = v;
-            } else {
-                isBoundary = true;
-            }
-
-            // Loop until we meets boundary halfedge or starting halfedge
-            HalfedgeHandle vih = m_mesh->opposite_halfedge_handle(m_mesh->next_halfedge_handle(starting_heh));
-            while (vih != starting_heh && std::find(loop.begin(), loop.end(), m_mesh->opposite_halfedge_handle(vih)) == loop.end()) {
-                connectedFaces.insert(m_mesh->face_handle(vih));
-            
-                VertexHandle nextV = m_mesh->from_vertex_handle(vih);
-            
-                if (isVisited.find(nextV) == isVisited.end()) {
-                    isVisited.insert(nextV);
-                    queue.push(m_mesh->opposite_halfedge_handle(vih));
-                }
-                
-                if (isBoundary) {
-                    // We don't care about the source, just use the dest vertex.
-                    VertexHandle newV = halfedgeToVerticesMapping[starting_heh].second;
-                    halfedgeToVerticesMapping.emplace(vih, std::make_pair(VertexHandle(), newV));
-                }
-                
-                vih = m_mesh->opposite_halfedge_handle(m_mesh->next_halfedge_handle(vih));
-            }
-        }
-        
-        newMesh.request_face_colors();
-        
-        /**
-         *          v3
-         *         /  \
-         *        /    \
-         *      v1 ---- v2
-         *          heh
-         */
-        for (std::set<FaceHandle>::iterator f_it = connectedFaces.begin(); f_it != connectedFaces.end(); f_it++) {
-            HalfedgeHandle heh12 = m_mesh->halfedge_handle(*f_it);
-            HalfedgeHandle heh23 = m_mesh->next_halfedge_handle(heh12);
-            HalfedgeHandle heh31 = m_mesh->next_halfedge_handle(heh23);
-            VertexHandle v1 = m_mesh->from_vertex_handle(heh12);
-            VertexHandle v2 = m_mesh->to_vertex_handle(heh12);
-            VertexHandle v3 = m_mesh->to_vertex_handle(heh23);
-
-            std::vector<VertexHandle> face_vhs;
-            VertexHandle newV1 = vertexToVertexMapping[v1];
-            VertexHandle newV2 = vertexToVertexMapping[v2];
-            VertexHandle newV3 = vertexToVertexMapping[v3];
-            // Invalid vertex means they are on the boundary, we should use halfedgeToVerticesMapping to find correct vertex
-            if (!newMesh.is_valid_handle(newV1)) {
-                newV1 = halfedgeToVerticesMapping[heh31].second;
-            }
-            if (!newMesh.is_valid_handle(newV2)) {
-                newV2 = halfedgeToVerticesMapping[heh12].second;
-            }
-            if (!newMesh.is_valid_handle(newV3)) {
-                newV3 = halfedgeToVerticesMapping[heh23].second;
-            }
-            face_vhs.push_back(newV1);
-            face_vhs.push_back(newV2);
-            face_vhs.push_back(newV3);
-            FaceHandle newF = newMesh.add_face(face_vhs);
-            newMesh.set_color(newF, m_mesh->color(*f_it));
-        }
-        m_flattenedGraph.push_back(newMesh);
-    }
-    return true;
-}
-
-bool PlushPatternGenerator::calcInteriorPoints()
-{
-    for (size_t i = 0; i < m_flattenedGraph.size(); i++) {
-        TriMesh &mesh = m_flattenedGraph[i];
+    for (size_t i = 0; i < flattenedMeshes->size(); i++) {
+        TriMesh &mesh = flattenedMeshes->at(i);
         int n = mesh.n_vertices();
         
         std::vector<HalfedgeHandle> boundary;
@@ -282,8 +174,8 @@ bool PlushPatternGenerator::calcInteriorPoints()
  @return <#retval#>
  @retval <#meaning#>
  */
-bool PlushPatternGenerator::calcLPFB(TriMesh &mesh) {
-    Ipopt::SmartPtr<Ipopt::TNLP> mynlp = new LPFB_NLP(&mesh);
+bool PlushPatternGenerator::calcLPFB(TriMesh *mesh) {
+    Ipopt::SmartPtr<Ipopt::TNLP> mynlp = new LPFB_NLP(mesh);
     Ipopt::SmartPtr<Ipopt::IpoptApplication> app = IpoptApplicationFactory();
     
     app->Options()->SetNumericValue("tol", 1e-10);
@@ -317,8 +209,8 @@ bool PlushPatternGenerator::calcLPFB(TriMesh &mesh) {
     // be deleted.
 }
 
-bool PlushPatternGenerator::packFlattenedGraph(const int nColumns) {
-    size_t n = m_flattenedGraph.size();
+bool PlushPatternGenerator::packFlattenedGraph(std::vector<TriMesh> *flattenedMeshes, const int nColumns) {
+    size_t n = flattenedMeshes->size();
     
     double *minX = new double[n];
     double *maxX = new double[n];
@@ -336,7 +228,7 @@ bool PlushPatternGenerator::packFlattenedGraph(const int nColumns) {
         maxY[i] = -1e9;
         maxZ[i] = -1e9;
         
-        TriMesh &mesh = m_flattenedGraph[i];
+        TriMesh &mesh = flattenedMeshes->at(i);
         for (VertexIter v_it = mesh.vertices_begin(); v_it != mesh.vertices_end(); v_it++) {
             TriMesh::Point p = mesh.point(*v_it);
             minX[i] = min(minX[i], p[0]);
@@ -354,7 +246,7 @@ bool PlushPatternGenerator::packFlattenedGraph(const int nColumns) {
     double spacing = max(height, width)/5;
     double offsetX = 0, offsetY = 0, offsetZ = 0;
     for (size_t i = 0; i < n; i++) {
-        TriMesh &mesh = m_flattenedGraph[i];
+        TriMesh &mesh = flattenedMeshes->at(i);
 
         // For a new row, calculate row offset
         if (i > 1 && i % nColumns == 0) {

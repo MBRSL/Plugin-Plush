@@ -102,22 +102,21 @@ bool PlushPatternGenerator::isIntersected(std::vector<VertexHandle> pathA, std::
 }
 
 /**
- *  @brief Generate spanning tree (steiner tree indeed) from given vertices.
+ *  @brief Generate seams by connecting given vertices. Seams are actually steiner tree.
  *  This function will calculate shortest paths between all vertex pairs and then
  *  tries to connect them to form a minimal spanning tree.
  *  This function requires geodesicDistance & geodesicPath of given vertices. They should be calculated before calling this function.
  *
- *  @param spanningTree Vector of paths with cost in this spanning tree. Path are composed with vertex ids.
  *  @param selectedVertices Resulting tree will span through these vertices.
- *  @param elimination (Debugging) If set to true, it will to remove paths which intersected with lower-cost paths.
  *  @param limitNum (Debugging) If set to postive number, only first num paths are used for spanningTree. 0 means no limitation.
+ *  @param elimination (Debugging) If set to true, it will to remove paths which intersected with lower-cost paths.
  *  @param allPath (Debugging) If false, only used (limitNum)-th path for spanningTree.
  *  @return False if error occured.
  */
-bool PlushPatternGenerator::calcSpanningTree(std::vector<VertexHandle> selectedVertices,
-                                             int limitNum = 0,
-                                             bool elimination = false,
-                                             bool allPath = true) {
+bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices,
+                                             int limitNum,
+                                             bool elimination,
+                                             bool allPath) {
     std::map<std::pair<VertexHandle, VertexHandle>, double> &geodesicDistance = m_mesh->property(geodesicDistanceHandle);
     std::map<std::pair<VertexHandle, VertexHandle>, std::vector<VertexHandle> > &geodesicPath = m_mesh->property(geodesicPathHandle);
     
@@ -173,9 +172,14 @@ bool PlushPatternGenerator::calcSpanningTree(std::vector<VertexHandle> selectedV
         result = pathCandidates;
     }
     
-    // insert edges into spanning tree
+    // insert edges into seams
+    if (!seamsHandle.is_valid()) {
+        m_mesh->add_property(seamsHandle);
+    }
+    std::vector<EdgeHandle> &seams = m_mesh->property(seamsHandle);
+    seams.clear();
+
     int count = 0;
-    m_boundary.clear();
     for (std::vector<std::pair<double, std::vector<VertexHandle> > >::iterator it = result.begin(); it != result.end(); it++, count++) {
         // Break if we reach limitNum
         if (count >= limitNum && limitNum != 0) {
@@ -193,7 +197,7 @@ bool PlushPatternGenerator::calcSpanningTree(std::vector<VertexHandle> selectedV
         for (size_t i = 1; i < path.size(); i++) {
             EdgeHandle eh;
             assert(getEdge(m_mesh, eh, path[i-1], path[i]));
-            m_boundary.push_back(eh);
+            seams.push_back(eh);
         }
         
         QString msg = QString("Weight of path #%1 from %2 to %3: %4").arg(count+1).arg((path.begin())->idx()).arg((path.end()-1)->idx()).arg(it->first);

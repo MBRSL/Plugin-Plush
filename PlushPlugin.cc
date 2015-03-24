@@ -233,8 +233,9 @@ void PlushPlugin::calcGeodesicButtonClicked() {
 }
 
 void PlushPlugin::calcFlattenedGraphButtonClicked() {
-    if (m_patternGenerator->m_boundary.size() == 0) {
-        emit log(LOGERR, "No boundary. Use show geodesic path.");
+    std::vector<EdgeHandle> *seams = m_patternGenerator->getSeams();
+    if (!seams) {
+        emit log(LOGERR, "No seams. Use show geodesic path.");
         return;
     }
     
@@ -273,10 +274,12 @@ void PlushPlugin::showGeodesicButtonClicked() {
         selectedVertices.push_back(mesh->vertex_handle(selectedVerticesId[i]));
     }
     
-    if (m_patternGenerator->calcSpanningTree(selectedVertices, geodesicNumPaths->value(), geodesicElimination->isChecked(), showAllPath)) {
+    if (m_patternGenerator->calcSeams(selectedVertices, geodesicNumPaths->value(), geodesicElimination->isChecked(), showAllPath)) {
+        std::vector<EdgeHandle> *seams = m_patternGenerator->getSeams();
+        
         std::vector<int> edgeList;
-        for (size_t i = 0; i < m_patternGenerator->m_boundary.size(); i++) {
-            edgeList.push_back(m_patternGenerator->m_boundary[i].idx());
+        for (size_t i = 0; i < seams->size(); i++) {
+            edgeList.push_back(seams->at(i).idx());
         }
         
         MeshSelection::clearEdgeSelection(mesh);
@@ -286,6 +289,11 @@ void PlushPlugin::showGeodesicButtonClicked() {
 }
 
 void PlushPlugin::showFlattenedGrpahButtonClicked() {
+    std::vector<TriMesh> *flattenedMeshes = m_patternGenerator->getFlattenedMeshes();
+    if (!flattenedMeshes) {
+        emit log(LOGERR, "Calculate flattened meshes first.");
+        return;
+    }
     
     // 1 means right viewer
     int viewerId = 1;
@@ -305,7 +313,7 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
 
 
     // Add new object and copy m_flattenedGraph into it
-    int n = m_patternGenerator->m_flattenedGraph.size();
+    int n = flattenedMeshes->size();
     int *newTriMeshIds = new int[n];
     
     for (int i = 0; i < n; i++) {
@@ -318,7 +326,7 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
 
         std::map<VertexHandle, VertexHandle> oldToNewMapping;
         
-        TriMesh &oldMesh = m_patternGenerator->m_flattenedGraph[i];
+        TriMesh &oldMesh = flattenedMeshes->at(i);
         for (VertexIter v_it = oldMesh.vertices_begin(); v_it != oldMesh.vertices_end(); v_it++) {
             TriMesh::Point p = oldMesh.point(*v_it);
             VertexHandle newV = mesh->add_vertex(p + far);
@@ -345,7 +353,7 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
     }
     
     // Clear old meshes
-    m_patternGenerator->m_flattenedGraph.clear();
+    flattenedMeshes->clear();
     
     TriMesh *originalMesh = m_patternGenerator->m_mesh;
     // Assign new sub meshes to m_flattenedGraph
@@ -353,7 +361,7 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
         TriMeshObject *object = 0;
         PluginFunctions::getObject(newTriMeshIds[i], object);
         TriMesh *mesh = object->mesh();
-        m_patternGenerator->m_flattenedGraph.push_back(*mesh);
+        flattenedMeshes->push_back(*mesh);
         
         MeshSelection::selectBoundaryEdges(mesh);
         
