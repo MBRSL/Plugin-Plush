@@ -1,137 +1,10 @@
 #include "PlushPatternGenerator.hh"
-#include <unsupported/Eigen/NonLinearOptimization>
 #include <Eigen/Sparse>
 
+#include <IpIpoptApplication.hpp>
+#include <LPFB.hh>
+
 #include <queue>
-
-// Generic functor
-template<typename _Scalar, int NX=Eigen::Dynamic, int NY=Eigen::Dynamic>
-struct Functor
-{
-    typedef _Scalar Scalar;
-    enum {
-        InputsAtCompileTime = NX,
-        ValuesAtCompileTime = NY
-    };
-    typedef Eigen::Matrix<Scalar,InputsAtCompileTime,1> InputType;
-    typedef Eigen::Matrix<Scalar,ValuesAtCompileTime,1> ValueType;
-    typedef Eigen::Matrix<Scalar,ValuesAtCompileTime,InputsAtCompileTime> JacobianType;
-    
-    const int m_inputs, m_values;
-    
-    Functor() : m_inputs(InputsAtCompileTime), m_values(ValuesAtCompileTime) {}
-    Functor(int inputs, int values) : m_inputs(inputs), m_values(values) {}
-    
-    int inputs() const { return m_inputs; }
-    int values() const { return m_values; }
-    
-    // you should define that in the subclass :
-    //  void operator() (const InputType& x, ValueType* v, JacobianType* _j=0) const;
-};
-
-class lmder_functor : public Functor<double>
-{
-private:
-    /// Number of vertices. It's the same number of edges
-    int n;
-
-    std::vector<double> edgeLengths;
-    
-    /**
-     *              inner edges
-     *                \  |  /
-     *     loop[i-1]   \ | /    loop[i]
-     *  -------------->  v -------------->
-     *
-     * For loop[i], it records the sum of inner angles between loop[i-1] and loop[i]
-     */
-    std::vector<double> innerAngle3D;
-    
-    double lambdaTheta = 1;
-    double lambdaTheta_0x = 1;
-    double lambdaTheta_0y = 1;
-    
-public:
-    /**
-     Constructor of cost function object for a given loop.
-     Some internal parameters can be adjust. They are:
-     lambdaTheta The value of Lagrange multiplier lambda theta.
-     lambdaTheta_0x The value of Lagrange multiplier lambda theta 0x.
-     lambdaTheta_0y The value of Lagrange multiplier lambda theta 0y.
-
-     @param n Number of vertices(edges) in loop.
-     @param edgeLengths Length of edge (v1, v2), (v2, v3),...,(vn-1, vn).
-     @param innerAngle3D Inner angles for v1, v2,...,vn.
-     */
-    lmder_functor(const int n, const std::vector<double> &edgeLengths, const std::vector<double> &innerAngle3D)
-        : Functor<double>(n, n), n(n), edgeLengths(edgeLengths), innerAngle3D(innerAngle3D) {
-        lambdaTheta = 1;
-        lambdaTheta_0x = 1;
-        lambdaTheta_0y = 1;
-    }
-    
-    /// Cost function
-    int operator()(const Eigen::VectorXd &x, Eigen::VectorXd &fvec) const
-    {
-        // Our cost function consist of only 4 terms. Set others to 0.
-        fvec.setZero();
-        
-        double sumAngleDiff = 0;
-
-        double loopAngleConstrain = (n - 2) * M_PI;
-        
-        double loopPositionConstrainsX = 0;
-        double loopPositionConstrainsY = 0;
-        double phi_i = 0;
-        for (int i = 0; i < n; i++) {
-            double theta_i = x[i];
-            
-            double angleDiff = theta_i - innerAngle3D[i];
-            sumAngleDiff += 0.5 * angleDiff * angleDiff;
-            
-            loopAngleConstrain -= theta_i;
-            
-            phi_i += M_PI - theta_i;
-            loopPositionConstrainsX += edgeLengths[i] * cos(phi_i);
-            loopPositionConstrainsY += edgeLengths[i] * sin(phi_i);
-        }
-        loopAngleConstrain *= lambdaTheta;
-        loopPositionConstrainsX *= lambdaTheta_0x;
-        loopPositionConstrainsY *= lambdaTheta_0y;
-        
-        fvec[0] = sumAngleDiff;
-        fvec[1] = loopAngleConstrain;
-        fvec[2] = loopPositionConstrainsX;
-        fvec[3] = loopPositionConstrainsY;
-        
-        return 0;
-    }
-
-    int df(const Eigen::VectorXd &x, Eigen::MatrixXd &fjac) const
-    {
-        fjac.setZero();
-        double *dPosX = new double[n+1];
-        double *dPosY = new double[n+1];
-        
-        double phi_k = 0;
-        dPosX[0] = dPosY[0] = 0;
-        for (int k = 0; k < n; k++) {
-            phi_k += M_PI - x[k];
-            dPosX[k+1] = dPosX[k] + edgeLengths[k] * sin(phi_k);
-            dPosY[k+1] = dPosY[k] + edgeLengths[k] * -cos(phi_k);
-        }
-        
-        for (int i = 0; i < n; i++) {
-            fjac(0, i) = x[i] - innerAngle3D[i];
-            fjac(1, i) = -lambdaTheta;
-            fjac(2, i) = lambdaTheta_0x * dPosX[n] - dPosX[i];
-            fjac(3, i) = lambdaTheta_0y * dPosY[n] - dPosY[i];
-        }
-        delete[] dPosX;
-        delete[] dPosY;
-        return 0;
-    }
-};
 
 bool PlushPatternGenerator::calcFlattenedGraph()
 {
@@ -410,57 +283,38 @@ bool PlushPatternGenerator::calcInteriorPoints()
  @retval <#meaning#>
  */
 bool PlushPatternGenerator::calcLPFB(TriMesh &mesh) {
+    Ipopt::SmartPtr<Ipopt::TNLP> mynlp = new LPFB_NLP(&mesh);
+    Ipopt::SmartPtr<Ipopt::IpoptApplication> app = IpoptApplicationFactory();
     
-    std::vector<HalfedgeHandle> boundary3D;
-    getBoundaryOfOpenedMesh(boundary3D, mesh);
-    int n = boundary3D.size();
-    // Calculate inner angles for later use.
-    Eigen::VectorXd theta(n);
-    std::vector<double> innerAngle3D;
-    std::vector<double> edgeLengths;
-    for (int j = 0; j < n; j++) {
-        double sumInnerAngle = PlushPatternGenerator::getSumInnerAngle(&mesh, boundary3D[(j-1+n) % n], boundary3D[j]);
-        innerAngle3D.push_back(sumInnerAngle);
-
-        TriMesh::Point v1 = mesh.point(mesh.from_vertex_handle(boundary3D[j]));
-        TriMesh::Point v2 = mesh.point(mesh.to_vertex_handle(boundary3D[j]));
-        double length = (v1-v2).norm();
-        edgeLengths.push_back(length);
-
-        // Initialize parameters
-        theta[j] = sumInnerAngle;
+    app->Options()->SetNumericValue("tol", 1e-10);
+    app->Options()->SetStringValue("mu_strategy", "adaptive");
+    app->Options()->SetStringValue("linear_solver", "ma57");
+    // This let us not implementing eval_h()
+    app->Options()->SetStringValue("hessian_approximation","limited-memory");
+    
+    // Intialize the IpoptApplication and process the options
+    Ipopt::ApplicationReturnStatus status;
+    status = app->Initialize();
+    if (status != Ipopt::Solve_Succeeded) {
+        printf("\n\n*** Error during initialization!\n");
+        return false;
     }
     
-//    lmder_functor functor(n, edgeLengths, innerAngle3D);
-//    Eigen::LevenbergMarquardt<lmder_functor> lm(functor);
-        Eigen::NumericalDiff<lmder_functor> functor(n, edgeLengths, innerAngle3D);
-        Eigen::LevenbergMarquardt<Eigen::NumericalDiff<lmder_functor> > lm(functor);
-    lm.parameters.maxfev = 2000;
-    lm.parameters.epsfcn = 1e-3;
-    lm.minimize(theta);
-
-    // Reconstruct flattened loop using optimized angles
-    double phi_k = 0;
-    double posX = 0, posY = 0;
-    for (int k = 0; k <= n; k++) {
-        if (k > 0) {
-            phi_k += M_PI - theta[k-1];
-
-            double lk = edgeLengths[k-1];
-
-            posX += lk * cos(phi_k);
-            posY += lk * sin(phi_k);
-
-//            printf("%d | v: %d | theta: %.3lf | phi: %.3lf\n", k, m_mesh->from_vertex_handle(loop[k-1]).idx(), theta[k-1], phi_k);
-        }
-        // If k == 0, it will be placed at (0,0,0)
-        VertexHandle v = mesh.from_vertex_handle(boundary3D[k % n]);
-        TriMesh::Point &p = mesh.point(v);
-        p[0] = posX;
-        p[1] = posY;
-        p[2] = 0;
+    // Ask Ipopt to solve the problem
+    status = app->OptimizeTNLP(mynlp);
+    
+    if (status == Ipopt::Solve_Succeeded) {
+        printf("\n\n*** The problem solved!\n");
+        return true;
     }
-    return true;
+    else {
+        printf("\n\n*** Some problem occured! See messages above\n");
+        return false;
+    }
+    
+    // As the SmartPtrs go out of scope, the reference count
+    // will be decremented and the objects will automatically
+    // be deleted.
 }
 
 bool PlushPatternGenerator::packFlattenedGraph(const int nColumns) {
