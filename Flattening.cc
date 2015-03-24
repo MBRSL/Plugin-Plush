@@ -110,29 +110,25 @@ public:
     int df(const Eigen::VectorXd &x, Eigen::MatrixXd &fjac) const
     {
         fjac.setZero();
-        double *phi_k = new double[n];
-        double *sumPosX = new double[n];
-        double *sumPosY = new double[n];
+        double *dPosX = new double[n+1];
+        double *dPosY = new double[n+1];
         
-        phi_k[0] = M_PI - x[0];
-        for (int k = 1; k < n; k++) {
-            phi_k[k] = phi_k[k-1] + M_PI - x[k];
-        }
-        double sumPosXTmp = 0, sumPosYTmp = 0;
-        for (int k = n-1; k >= 0; k--) {
-            sumPosXTmp += edgeLengths[k] * sin(phi_k[k]);
-            sumPosYTmp += edgeLengths[k] * -cos(phi_k[k]);
-            sumPosX[k] = sumPosXTmp;
-            sumPosY[k] = sumPosYTmp;
+        double phi_k = 0;
+        dPosX[0] = dPosY[0] = 0;
+        for (int k = 0; k < n; k++) {
+            phi_k += M_PI - x[k];
+            dPosX[k+1] = dPosX[k] + edgeLengths[k] * sin(phi_k);
+            dPosY[k+1] = dPosY[k] + edgeLengths[k] * -cos(phi_k);
         }
         
         for (int i = 0; i < n; i++) {
             fjac(0, i) = x[i] - innerAngle3D[i];
             fjac(1, i) = -lambdaTheta;
-            fjac(2, i) = lambdaTheta_0x * sumPosX[i];
-            fjac(3, i) = lambdaTheta_0y * sumPosY[i];
+            fjac(2, i) = lambdaTheta_0x * dPosX[n] - dPosX[i];
+            fjac(3, i) = lambdaTheta_0y * dPosY[n] - dPosY[i];
         }
-        delete[] phi_k;
+        delete[] dPosX;
+        delete[] dPosY;
         return 0;
     }
 };
@@ -445,23 +441,23 @@ bool PlushPatternGenerator::calcLPFB(TriMesh &mesh) {
 
     // Reconstruct flattened loop using optimized angles
     double phi_k = 0;
-    double sumX = 0, sumY = 0;
+    double posX = 0, posY = 0;
     for (int k = 0; k <= n; k++) {
         if (k > 0) {
             phi_k += M_PI - theta[k-1];
 
             double lk = edgeLengths[k-1];
-            
-            sumX += lk * cos(phi_k);
-            sumY += lk * sin(phi_k);
-            
+
+            posX += lk * cos(phi_k);
+            posY += lk * sin(phi_k);
+
 //            printf("%d | v: %d | theta: %.3lf | phi: %.3lf\n", k, m_mesh->from_vertex_handle(loop[k-1]).idx(), theta[k-1], phi_k);
         }
         // If k == 0, it will be placed at (0,0,0)
         VertexHandle v = mesh.from_vertex_handle(boundary3D[k % n]);
         TriMesh::Point &p = mesh.point(v);
-        p[0] = sumX;
-        p[1] = sumY;
+        p[0] = posX;
+        p[1] = posY;
         p[2] = 0;
     }
     return true;
