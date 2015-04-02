@@ -30,6 +30,8 @@ bool PlushPatternGenerator::calcFlattenedGraph()
     }
 
     calcInteriorPoints(flattenedMeshes);
+    
+    calcDistortion(flattenedMeshes);
 
     packFlattenedGraph(flattenedMeshes);
     return true;
@@ -72,14 +74,11 @@ bool PlushPatternGenerator::calcInteriorPoints(std::vector<TriMesh> *flattenedMe
             HalfedgeHandle heh31 = mesh.prev_halfedge_handle(heh12);
             HalfedgeHandle heh42 = mesh.prev_halfedge_handle(heh21);
 
-            double angle312 = mesh.calc_sector_angle(heh31);
-            double angle214 = mesh.calc_sector_angle(heh21);
-        
-            double angle123 = mesh.calc_sector_angle(heh12);
-            double angle421 = mesh.calc_sector_angle(heh42);
 
 
 //            // Conformal mapping
+//            double angle231 = mesh.calc_sector_angle(mesh.next_halfedge_handle(heh12));
+//            double angle142 = mesh.calc_sector_angle(mesh.next_halfedge_handle(heh21));
 //            double cotR231 = tan(M_PI_2 - angle231);
 //            double cotR142 = tan(M_PI_2 - angle142);
 //            double weight12 = cotR231 + cotR142;
@@ -90,16 +89,20 @@ bool PlushPatternGenerator::calcInteriorPoints(std::vector<TriMesh> *flattenedMe
 //            double weight21 = 1;
             
             // Mean value mapping
-            double wegith12 = (tan(angle312/2) + tan(angle214/2)) / mesh.calc_edge_length(heh12);
-            double wegith21 = (tan(angle123/2) + tan(angle421/2)) / mesh.calc_edge_length(heh21);
+            double angle312 = mesh.calc_sector_angle(heh31);
+            double angle214 = mesh.calc_sector_angle(heh21);
+            double angle123 = mesh.calc_sector_angle(heh12);
+            double angle421 = mesh.calc_sector_angle(heh42);
+            double weight12 = (tan(angle312/2) + tan(angle214/2)) / mesh.calc_edge_length(heh12);
+            double weight21 = (tan(angle123/2) + tan(angle421/2)) / mesh.calc_edge_length(heh21);
         
             if (!mesh.is_boundary(v1)) {
-                tripletList.push_back(Eigen::Triplet<double>(v1.idx(), v2.idx(), wegith12));
-                rowSum[v1.idx()] += wegith12;
+                tripletList.push_back(Eigen::Triplet<double>(v1.idx(), v2.idx(), weight12));
+                rowSum[v1.idx()] += weight12;
             }
             if (!mesh.is_boundary(v2)) {
-                tripletList.push_back(Eigen::Triplet<double>(v2.idx(), v1.idx(), wegith21));
-                rowSum[v2.idx()] += wegith21;
+                tripletList.push_back(Eigen::Triplet<double>(v2.idx(), v1.idx(), weight21));
+                rowSum[v2.idx()] += weight21;
             }
         }
         
@@ -197,6 +200,44 @@ bool PlushPatternGenerator::calcLPFB(TriMesh *mesh) {
     // As the SmartPtrs go out of scope, the reference count
     // will be decremented and the objects will automatically
     // be deleted.
+}
+
+/**
+ This function calculate the distortion between flattened meshes and original mesh.
+ The result is stored at distortionHandle of m_mesh.
+ @param <#parameter#>
+ */
+void PlushPatternGenerator::calcDistortion(std::vector<TriMesh> *flattenedMeshes) {
+    for (size_t i = 0; i < flattenedMeshes->size(); i++) {
+        TriMesh &flattenedMesh = flattenedMeshes->at(i);
+        
+        // For each face, calculate area difference
+        // For each vertex, calculate averaged neighboring area difference
+        OpenMesh::VPropHandleT<VertexHandle> inverseMapping = getInverseMappingHandle(&flattenedMesh);
+        for (VertexIter v_it = flattenedMesh.vertices_begin(); v_it != flattenedMesh.vertices_end(); v_it++) {
+            VertexHandle originalV = flattenedMesh.property(inverseMapping, *v_it);
+            double sumAreaDiff = 0;
+            
+            for (TriMesh::VertexFaceIter vf_it = flattenedMesh.vf_iter(*v_it); vf_it; vf_it++) {
+                HalfedgeHandle heh = flattenedMesh.halfedge_handle(*vf_it);
+                double area = flattenedMesh.calc_sector_area(heh);
+                VertexHandle originalFV1 = flattenedMesh.property(inverseMapping, flattenedMesh.from_vertex_handle(heh));
+                VertexHandle originalFV2 = flattenedMesh.property(inverseMapping, flattenedMesh.to_vertex_handle(heh));
+                VertexHandle originalFV3 = flattenedMesh.property(inverseMapping, flattenedMesh.to_vertex_handle(flattenedMesh.next_halfedge_handle(heh)));
+
+                FaceHandle originalF;
+                assert(getFace(m_mesh, originalF, originalFV1, originalFV2, originalFV3));
+                HalfedgeHandle original_heh = m_mesh->halfedge_handle(originalF);
+                double originalArea = m_mesh->calc_sector_area(original_heh);
+
+                double areaDiff = min(1.0, pow((area-originalArea) / originalArea, 3));
+                m_mesh->property(distortionFHandle, originalF) = areaDiff;
+                sumAreaDiff += areaDiff;
+            }
+            sumAreaDiff /= flattenedMesh.valence(*v_it)-1;
+            m_mesh->property(distortionVHandle, originalV) = sumAreaDiff;
+        }
+    }
 }
 
 bool PlushPatternGenerator::packFlattenedGraph(std::vector<TriMesh> *flattenedMeshes, const int nColumns) {

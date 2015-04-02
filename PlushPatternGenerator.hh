@@ -132,7 +132,7 @@ private:
     bool calcLPFB(TriMesh *mesh);
     bool calcInteriorPoints(std::vector<TriMesh> *flattenedMeshes);
     /// Calculate the distortion between original 3D mesh and flattened graph, the result is stored in distortionHandle
-    void calcDistortion();
+    void calcDistortion(std::vector<TriMesh> *flattenedMeshes);
     /// Organize 2D loops to prevent overlapping while minimize bounding area.
     bool packFlattenedGraph(std::vector<TriMesh> *flattenedMeshes, const int nColumns=4);
     ///@}
