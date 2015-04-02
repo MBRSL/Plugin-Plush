@@ -8,6 +8,9 @@
 
 #include "PlushPatternGenerator.hh"
 
+#include <MeshTools/MeshSelectionT.hh>
+#include <queue>
+
 /**
  @brief Detect if there are any intersections between two paths.
  This function returns true if
@@ -102,10 +105,147 @@ bool PlushPatternGenerator::isIntersected(std::vector<VertexHandle> pathA, std::
 }
 
 /**
+ @brief Generate circular seams that are not possible to get with calcSeams.
+ This function find vertices with high curvature and try to form rings of seams.
+ The result is append to seamsHandle property of m_mesh.
+ @param <#parameter#>
+ @return <#retval#>
+ @retval <#meaning#>
+ */
+bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
+    // Find the most distorted vertex, also calculate mean & std
+    double minAreaDiff = 1e9;
+    double sumCurvature = 0;
+    double sumCurvatureSqr = 0;
+    VertexHandle minV;
+    OpenMesh::VPropHandleT<VertexHandle> inverseMapping = getInverseMappingHandle(mesh);
+    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
+        VertexHandle originalV = mesh->property(inverseMapping, *v_it);
+        double avgAreaDiff = m_mesh->property(distortionVHandle, originalV);
+        
+        if (avgAreaDiff < minAreaDiff) {
+            minAreaDiff = avgAreaDiff;
+            minV = *v_it;
+        }
+        
+        double curvature = m_mesh->property(maxCurvatureHandle, originalV);
+        sumCurvature += curvature;
+        sumCurvatureSqr += curvature * curvature;
+    }
+    double mean = sumCurvature/mesh->n_vertices();
+    double std = sqrt(sumCurvatureSqr/mesh->n_vertices() - mean*mean);
+
+    minV = *mesh->vertices_begin();
+    // Try to search boundary with high curvature from minV
+    std::set<VertexHandle> visited;
+    std::queue<VertexHandle> queue;
+    queue.push(minV);
+    
+    while (queue.size() > 0) {
+        VertexHandle v = queue.front();
+        queue.pop();
+        visited.insert(v);
+        
+        for (TriMesh::VertexOHalfedgeIter voh_it = mesh->voh_iter(v); voh_it; voh_it++) {
+            VertexHandle neighborV = mesh->to_vertex_handle(*voh_it);
+            VertexHandle originalNeighborV = mesh->property(inverseMapping, neighborV);
+            
+            // outward expanding
+            if (visited.find(neighborV) == visited.end()) {
+                visited.insert(neighborV);
+                
+                double curvature = m_mesh->property(maxCurvatureHandle, originalNeighborV);
+                // Only continue exploring from low curvature vertex
+                if (curvature < mean + 1.5*std) {
+                    queue.push(neighborV);
+                }
+            }
+        }
+    }
+
+    // visualize vertices beyond threshold
+//    std::vector<int> verticesId;
+//    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
+//        VertexHandle originalV = mesh->property(inverseMapping, *v_it);
+//        if (m_mesh->property(maxCurvatureHandle, originalV) >= mean + std) {
+//            verticesId.push_back(originalV.idx());
+//        }
+//    }
+//    MeshSelection::selectVertices(m_mesh, verticesId);
+    
+    // Now visited vector should contains some part of the mesh and stopped at high curvature area
+    // Extract boundary vertices from visited vector
+    std::set<VertexHandle> finalBorderVertices;
+    for (auto v_it = visited.begin(); v_it != visited.end(); v_it++) {
+        // If this vertex has a non-visited neighbor, it's boundary vertex
+        for (TriMesh::VertexVertexIter vv_it = mesh->vv_iter(*v_it); vv_it; vv_it++) {
+            if (visited.find(*vv_it) == visited.end()) {
+                finalBorderVertices.insert(*v_it);
+                break;
+            }
+        }
+    }
+    
+    // Form edges from vertices
+    visited.clear();
+    OpenMesh::MPropHandleT< std::vector<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
+    std::vector<EdgeHandle> &seams = m_mesh->property(seamsHandle);
+    for (auto v_it = finalBorderVertices.begin(); v_it != finalBorderVertices.end(); v_it++) {
+        VertexHandle startingV = *v_it;
+        if (visited.find(startingV) != visited.end()) {
+            continue;
+        }
+        queue.push(startingV);
+        visited.insert(startingV);
+        
+        std::vector<HalfedgeHandle> subBorderEdges;
+        while (queue.size() > 0) {
+            VertexHandle v = queue.front();
+            queue.pop();
+            
+            for (TriMesh::VertexOHalfedgeIter voh_it = mesh->voh_iter(v); voh_it; voh_it++) {
+                VertexHandle neighborV = mesh->to_vertex_handle(*voh_it);
+                
+                if (finalBorderVertices.find(neighborV) != finalBorderVertices.end()) {
+                    if (visited.find(neighborV) == visited.end()) {
+                        visited.insert(neighborV);
+                        queue.push(neighborV);
+                        
+                        subBorderEdges.push_back(*voh_it);
+                        break;
+                    } else if (neighborV == startingV
+                           && std::find(subBorderEdges.begin(), subBorderEdges.end(),
+                                        mesh->opposite_halfedge_handle(*voh_it)) == subBorderEdges.end()) {
+                       subBorderEdges.push_back(*voh_it);
+                       break;
+                    }
+                }
+            }
+        }
+        
+        if (subBorderEdges.size() > 1) {
+            VertexHandle endingV = mesh->to_vertex_handle(subBorderEdges[subBorderEdges.size()-1]);
+            // Test if this is a ring using last halfedge
+            if (startingV == endingV) {
+                for (auto he_it = subBorderEdges.begin(); he_it != subBorderEdges.end(); he_it++) {
+                    VertexHandle originalV1 = mesh->property(inverseMapping, mesh->from_vertex_handle(*he_it));
+                    VertexHandle originalV2 = mesh->property(inverseMapping, mesh->to_vertex_handle(*he_it));
+                    EdgeHandle originalEh;
+                    assert(getEdge(m_mesh, originalEh, originalV1, originalV2));
+                    seams.push_back(originalEh);
+                }
+            }
+        }
+    }
+    return true;
+}
+
+/**
  *  @brief Generate seams by connecting given vertices. Seams are actually steiner tree.
  *  This function will calculate shortest paths between all vertex pairs and then
  *  tries to connect them to form a minimal spanning tree.
  *  This function requires geodesicDistance & geodesicPath of given vertices. They should be calculated before calling this function.
+ *  The result is stored in seamsHandle property of m_mesh.
  *
  *  @param selectedVertices Resulting tree will span through these vertices.
  *  @param limitNum (Debugging) If set to postive number, only first num paths are used for spanningTree. 0 means no limitation.

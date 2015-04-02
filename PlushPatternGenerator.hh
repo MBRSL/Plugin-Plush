@@ -106,7 +106,8 @@ public:
     bool saveGeodesic(std::vector<VertexHandle> selectedVertices);
     
     bool calcSeams(std::vector<VertexHandle> selectedVertices, int limitNum = 0, bool elimination = false, bool allPaths = true);
-
+    bool calcCircularSeams(TriMesh *mesh);
+    
     bool calcSkeletonWeight();
     
     /// Flatten 3D loops into 2D loops using LPFB.

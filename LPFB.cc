@@ -4,6 +4,8 @@
 #include <cassert>
 #include <iostream>
 
+#include <queue>
+
 using namespace Ipopt;
 
 // constructor
@@ -11,18 +13,108 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh) : m_mesh(mesh)
 {
     std::vector< std::vector<HalfedgeHandle> > boundaries;
     PlushPatternGenerator::getBoundaryOfOpenedMesh(boundaries, m_mesh, true);
-    m_boundary3D = boundaries[0];
-    int n = m_boundary3D.size();
+    
+    assert(!boundaries.empty() && "No cut is found on given sub mesh.");
 
+    // We use the 1st boundary as base boundary. Other boundaries are treated as inner boundaries.
+    // The target set. Virtual cut searching will stop when reaching target set.
+    std::vector<HalfedgeHandle> &baseBoundary = boundaries[0];
+    std::set<VertexHandle> targetBoudarySet;
+    for (size_t j = 0; j < baseBoundary.size(); j++) {
+        VertexHandle v = mesh->to_vertex_handle(baseBoundary[j]);
+        targetBoudarySet.insert(v);
+    }
+
+    m_boundary3D.insert(m_boundary3D.begin(), baseBoundary.begin(), baseBoundary.end());
+
+    // For inner boundaries, calculate virtual cut and insert them into appropriate position of m_boundary3D
+    for (size_t i = 1; i < boundaries.size(); i++) {
+        std::vector<HalfedgeHandle> &sourceBoundary = boundaries[i];
+
+        // Calculate the virtual cut using BFS
+        // Randomly choose one vertex as starting point
+        std::set<VertexHandle> sourceBoundarySet;
+        for (size_t j = 0; j < sourceBoundary.size(); j++) {
+            VertexHandle v = mesh->to_vertex_handle(sourceBoundary[j]);
+            sourceBoundarySet.insert(v);
+        }
+        
+        std::queue<VertexHandle> queue;
+        std::set<VertexHandle> visited;
+        std::map<VertexHandle, VertexHandle> predecessor;
+        
+        VertexHandle currentV = mesh->from_vertex_handle(sourceBoundary[0]);
+        queue.push(currentV);
+        visited.insert(currentV);
+        
+        while (!queue.empty() && targetBoudarySet.find(currentV) == targetBoudarySet.end()) {
+            for (TriMesh::VertexVertexIter vv_it = mesh->vv_iter(currentV); vv_it; vv_it++) {
+                if (visited.find(*vv_it) == visited.end()
+                    // Don't go through sourceBoundary itself
+                &&  sourceBoundarySet.find(*vv_it) == sourceBoundarySet.end()) {
+                    queue.push(*vv_it);
+                    visited.insert(*vv_it);
+                    
+                    predecessor.emplace(*vv_it, currentV);
+                }
+            }
+            currentV = queue.front();
+            queue.pop();
+        }
+        visited.clear();
+
+        // We got to one of the targets
+        std::vector<HalfedgeHandle> virtualCut;
+        std::vector<HalfedgeHandle> virtualCutReverse;
+        while (predecessor.find(currentV) != predecessor.end()) {
+            VertexHandle nextV = predecessor[currentV];
+            HalfedgeHandle heh;
+            PlushPatternGenerator::getHalfedge(mesh, heh, currentV, nextV);
+            virtualCut.push_back(heh);
+            virtualCutReverse.push_back(mesh->opposite_halfedge_handle(heh));
+            currentV = nextV;
+        }
+        std::reverse(virtualCutReverse.begin(), virtualCutReverse.end());
+        
+        // Insert this boundary and virtual cut into overall boundary
+        for (auto he_it = m_boundary3D.begin(); he_it != m_boundary3D.end(); he_it++) {
+            HalfedgeHandle heh = *he_it;
+            // Find the insertion position
+            if (mesh->from_vertex_handle(heh) == mesh->from_vertex_handle(virtualCut[0])) {
+                he_it = m_boundary3D.insert(he_it, virtualCut.begin(), virtualCut.end());
+                he_it = m_boundary3D.insert(he_it+virtualCut.size(), sourceBoundary.begin(), sourceBoundary.end());
+                he_it = m_boundary3D.insert(he_it+sourceBoundary.size(), virtualCutReverse.begin(), virtualCutReverse.end());
+                break;
+            }
+        }
+    }
+    
+    // Calculating coincide pairs
+    // At least the base boundary should be connected
+    m_coincidePair.push_back(std::make_pair(0, m_boundary3D.size()));
+    // Other inner boundaries
+    std::map<VertexHandle, int> vertexPosition;
+    for (size_t position = 0; position < m_boundary3D.size(); position++) {
+        VertexHandle v = mesh->from_vertex_handle(m_boundary3D[position]);
+        
+        // If this vertex is visited before, there is a loop. And we need to add it to coincide pairs
+        if (vertexPosition.find(v) != vertexPosition.end()) {
+            int prevPosition = vertexPosition[v];
+            m_coincidePair.push_back(std::make_pair(prevPosition, position));
+            
+            // We need to delete it first before update it.
+            vertexPosition.erase(v);
+        }
+        vertexPosition.emplace(v, position);
+    }
+    
     // Calculate inner angles & edges length for later use.
+    int n = m_boundary3D.size();
     for (int j = 0; j < n; j++) {
         double sumInnerAngle = PlushPatternGenerator::getSumInnerAngle(m_mesh, m_boundary3D[(j-1+n) % n], m_boundary3D[j]);
         m_innerAngle3D.push_back(sumInnerAngle);
         
-        TriMesh::Point v1 = m_mesh->point(m_mesh->from_vertex_handle(m_boundary3D[j]));
-        TriMesh::Point v2 = m_mesh->point(m_mesh->to_vertex_handle(m_boundary3D[j]));
-        double length = (v1-v2).norm();
-        m_edgeLengths.push_back(length);
+        m_edgeLengths.push_back(m_mesh->calc_edge_length(m_boundary3D[j]));
     }
 }
 
@@ -38,13 +130,18 @@ bool LPFB_NLP::get_nlp_info(Index& n, Index& m, Index& nnz_jac_g,
     n = m_boundary3D.size();
     
     // constraints
-    m = 3;
+    m = 1 + m_coincidePair.size() * 2;
     
-    // jacobian is dense
-    nnz_jac_g = 3 * n;
+    // jacobian
+    nnz_jac_g = n;
+    for (size_t pairNo = 0; pairNo < m_coincidePair.size(); pairNo++) {
+        int endingIdx = m_coincidePair[pairNo].second;
+
+        nnz_jac_g += 2*endingIdx;
+    }
     
     // the hessian is dense
-    nnz_h_lag = n*n;
+//    nnz_h_lag = n*n;
     
     // use the C style indexing (0-based)
     index_style = TNLP::C_STYLE;
@@ -56,8 +153,6 @@ bool LPFB_NLP::get_nlp_info(Index& n, Index& m, Index& nnz_jac_g,
 bool LPFB_NLP::get_bounds_info(Index n, Number* x_l, Number* x_u,
                                 Index m, Number* g_l, Number* g_u)
 {
-    assert(m == 3);
-    
     // lower/upper bounds
     // We set the range little wider than [0, 2*M_PI]
     for (Index i = 0; i < n; i++) {
@@ -66,7 +161,9 @@ bool LPFB_NLP::get_bounds_info(Index n, Number* x_l, Number* x_u,
     }
     
     // All constraints should be 0
-    g_l[0] = g_u[0] = g_l[1] = g_u[1] = g_l[2] = g_u[2] = 0;
+    for (Index i = 0; i < m; i++) {
+        g_l[i] = g_u[i] = 0;
+    }
     
     return true;
 }
@@ -79,7 +176,7 @@ bool LPFB_NLP::get_starting_point(Index n, bool init_x, Number* x,
 {
     // initialize to the given starting point
     for (int i = 0; i < n; i++) {
-        x[i] = min(2 * M_PI, m_innerAngle3D[i]);
+        x[i] = m_innerAngle3D[i];
     }
     
     return true;
@@ -110,26 +207,32 @@ bool LPFB_NLP::eval_grad_f(Index n, const Number* x, bool new_x, Number* grad_f)
 // return the value of the constraints: g(x)
 bool LPFB_NLP::eval_g(Index n, const Number* x, bool new_x, Index m, Number* g)
 {
-    assert(m == 3);
+    double sumAngle = (n - 2) * M_PI;
     
-    double loopAngleConstrain = (n - 2) * M_PI;
+    double *posX = new double[n+1];
+    double *posY = new double[n+1];
     
-    double loopPositionConstrainsX = 0;
-    double loopPositionConstrainsY = 0;
-    double phi_i = 0;
-    for (int i = 0; i < n; i++) {
-        double angleDiff = x[i] - m_innerAngle3D[i];
-        
-        loopAngleConstrain -= x[i];
-        
-        phi_i += M_PI - x[i];
-        loopPositionConstrainsX += m_edgeLengths[i] * cos(phi_i);
-        loopPositionConstrainsY += m_edgeLengths[i] * sin(phi_i);
+    double phi_k = 0;
+    posX[0] = posY[0] = 0;
+    for (Index k = 0; k < n; k++) {
+        sumAngle -= x[k];
+        phi_k += M_PI - x[k];
+        posX[k+1] = posX[k] + m_edgeLengths[k] * cos(phi_k);
+        posY[k+1] = posY[k] + m_edgeLengths[k] * sin(phi_k);
     }
-    
-    g[0] = loopAngleConstrain;
-    g[1] = loopPositionConstrainsX;
-    g[2] = loopPositionConstrainsY;
+    g[0] = sumAngle;
+
+    for (size_t pairNo = 0; pairNo < m_coincidePair.size(); pairNo++) {
+        int startingIdx = m_coincidePair[pairNo].first;
+        int endingIdx = m_coincidePair[pairNo].second;
+        
+        double v1 = posX[endingIdx];
+        double v2 = posX[startingIdx];
+        g[1 + 2*pairNo] = posX[endingIdx] - posX[startingIdx];
+        g[2 + 2*pairNo] = posY[endingIdx] - posY[startingIdx];
+    }
+    delete[] posX;
+    delete[] posY;
     
     return true;
 }
@@ -143,16 +246,30 @@ bool LPFB_NLP::eval_jac_g(Index n, const Number* x, bool new_x,
         // return the structure of the jacobian
         // this particular jacobian is dense
         
-        // M constraints
+        // First constraints
+        // N variables
         Index idx = 0;
-        for (Index i = 0; i < m; i++) {
-            // N variables
-            for (Index j = 0; j < n; j++) {
-                iRow[idx] = i;
+        for (Index j = 0; j < n; j++) {
+            iRow[idx] = 0;
+            jCol[idx] = j;
+            idx++;
+        }
+        
+        for (size_t pairNo = 0; pairNo < m_coincidePair.size(); pairNo++) {
+            Index endingIdx = m_coincidePair[pairNo].second;
+            for (Index j = 0; j < endingIdx; j++) {
+                iRow[idx] = 1 + 2*pairNo;
+                jCol[idx] = j;
+                idx++;
+            }
+            for (Index j = 0; j < endingIdx; j++) {
+                iRow[idx] = 2 + 2*pairNo;
                 jCol[idx] = j;
                 idx++;
             }
         }
+        
+        assert(idx == nele_jac);
     }
     else {
         // return the values of the jacobian of the constraints
@@ -167,13 +284,31 @@ bool LPFB_NLP::eval_jac_g(Index n, const Number* x, bool new_x,
             dPosY[k+1] = dPosY[k] + m_edgeLengths[k] * -cos(phi_k);
         }
 
-        for (Index j = 0; j < n; j++) {
-            // First constaints, inner turning angle sums up to 2PI
-            values[j] = -1;
+        // First constaints, inner turning angle sums up to 2PI
+        for (Index k = 0; k < n; k++) {
+            values[k] = -1;
+        }
+        Index idx = n;
 
-            // 2nd & 3rd constraints, closed loop position
-            values[n + j] = dPosX[n] - dPosX[j];
-            values[2*n + j] = dPosY[n] - dPosY[j];
+        // 2nd & 3rd constraints, closed loop position
+        for (size_t pairNo = 0; pairNo < m_coincidePair.size(); pairNo++) {
+            Index startingIdx = m_coincidePair[pairNo].first;
+            Index endingIdx = m_coincidePair[pairNo].second;
+
+            for (Index k = 0; k < endingIdx; k++, idx++) {
+                if (k < startingIdx) {
+                    values[idx] = dPosX[endingIdx] - dPosX[startingIdx];
+                } else {
+                    values[idx] = dPosX[endingIdx] - dPosX[k];
+                }
+            }
+            for (Index k = 0; k < endingIdx; k++, idx++) {
+                if (k < startingIdx) {
+                    values[idx] = dPosY[endingIdx] - dPosY[startingIdx];
+                } else {
+                    values[idx] = dPosY[endingIdx] - dPosY[k];
+                }
+            }
         }
         delete[] dPosX;
         delete[] dPosY;
@@ -185,6 +320,7 @@ bool LPFB_NLP::eval_jac_g(Index n, const Number* x, bool new_x,
 //return the structure or values of the hessian
 /*
  There are some problem for this function. I do calculate the answer correctly, but the values seems to be modified after this function and became incorrect. I now use built-in hessian_approximation to replace this function.
+ This function is NOT updated for inner virtual cut.
  */
 //bool LPFB_NLP::eval_h(Index n, const Number* x, bool new_x,
 //                       Number obj_factor, Index m, const Number* lambda,
@@ -257,19 +393,6 @@ void LPFB_NLP::finalize_solution(SolverReturn status,
                                   const IpoptData* ip_data,
                                   IpoptCalculatedQuantities* ip_cq)
 {
-//    std::cout << std::endl << std::endl << "Solution of the primal variables, x" << std::endl;
-//    for (Index i=0; i<n; i++) {
-//        std::cout << "x[" << i << "] = " << x[i] << std::endl;
-//    }
-//    
-//    std::cout << std::endl << std::endl << "Solution of the bound multipliers, z_L and z_U" << std::endl;
-//    for (Index i=0; i<n; i++) {
-//        std::cout << "z_L[" << i << "] = " << z_L[i] << std::endl;
-//    }
-//    for (Index i=0; i<n; i++) {
-//        std::cout << "z_U[" << i << "] = " << z_U[i] << std::endl;
-//    }
-//    
     std::cout << std::endl << std::endl << "Objective value" << std::endl;
     std::cout << "f(x*) = " << obj_value << std::endl;
     
@@ -278,22 +401,28 @@ void LPFB_NLP::finalize_solution(SolverReturn status,
         std::cout << "g(" << i << ") = " << g[i] << std::endl;
     }
     
-    double phi_k = 0;
-    double posX = 0, posY = 0;
-    for (int k = 0; k <= n; k++) {
-        if (k > 0) {
-            phi_k += M_PI - x[k-1];
-            
-            double lk = m_edgeLengths[k-1];
-            
-            posX += lk * cos(phi_k);
-            posY += lk * sin(phi_k);
+    double *phi_k = new double[n];
+    double *posX = new double[n+1];
+    double *posY = new double[n+1];
+    posX[0] = posY[0] = 0;
+    for (Index k = 0; k < n; k++) {
+        if (k == 0) {
+            phi_k[k] = M_PI - x[k];
+        } else {
+            phi_k[k] = phi_k[k-1] + M_PI - x[k];
         }
+        posX[k+1] = posX[k] + m_edgeLengths[k] * cos(phi_k[k]);
+        posY[k+1] = posY[k] + m_edgeLengths[k] * sin(phi_k[k]);
+        
+        printf("%d : %d | %.3lf\n", k, m_mesh->from_vertex_handle(m_boundary3D[k]).idx(), x[k]);
+    }
+    
+    for (Index k = 0; k < n; k++) {
         // If k == 0, it will be placed at (0,0,0)
         VertexHandle v = m_mesh->from_vertex_handle(m_boundary3D[k % n]);
         TriMesh::Point &p = m_mesh->point(v);
-        p[0] = posX;
-        p[1] = posY;
+        p[0] = posX[k];
+        p[1] = posY[k];
         p[2] = 0;
     }
 }

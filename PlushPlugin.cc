@@ -275,16 +275,23 @@ void PlushPlugin::showGeodesicButtonClicked() {
     }
     
     if (m_patternGenerator->calcSeams(selectedVertices, geodesicNumPaths->value(), geodesicElimination->isChecked(), showAllPath)) {
-        std::vector<EdgeHandle> *seams = m_patternGenerator->getSeams();
-        
-        std::vector<int> edgeList;
-        for (size_t i = 0; i < seams->size(); i++) {
-            edgeList.push_back(seams->at(i).idx());
+        std::vector<TriMesh> *subMeshes = m_patternGenerator->getFlattenedMeshes();
+        if (subMeshes) {
+            for (size_t i = 0; i < subMeshes->size(); i++) {
+                m_patternGenerator->calcCircularSeams(&subMeshes->at(i));
+            }
         }
-        
-        MeshSelection::clearEdgeSelection(mesh);
-        MeshSelection::selectEdges(mesh, edgeList);
-        emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION_EDGES);
+        std::vector<EdgeHandle> *seams = m_patternGenerator->getSeams();
+        if (seams) {
+            std::vector<int> edgeList;
+            for (size_t i = 0; i < seams->size(); i++) {
+                edgeList.push_back(seams->at(i).idx());
+            }
+            
+            MeshSelection::clearEdgeSelection(mesh);
+            MeshSelection::selectEdges(mesh, edgeList);
+            emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION_EDGES);
+        }
     }
 }
 
@@ -316,59 +323,84 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
     int n = flattenedMeshes->size();
     int *newTriMeshIds = new int[n];
     
+    std::vector<int> seamsId;
     for (int i = 0; i < n; i++) {
         emit addEmptyObject(DATA_TRIANGLE_MESH, newTriMeshIds[i]);
 
         // Get the newly created object
         TriMeshObject *object = 0;
         PluginFunctions::getObject(newTriMeshIds[i], object);
-        TriMesh *mesh = object->mesh();
-
-        std::map<VertexHandle, VertexHandle> oldToNewMapping;
+        TriMesh *subMesh = object->mesh();
+        OpenMesh::VPropHandleT<VertexHandle> inverseMappingHandle = PlushPatternGenerator::getInverseMappingHandle(subMesh);
+        OpenMesh::MPropHandleT< std::vector<EdgeHandle> > seamsHandle = PlushPatternGenerator::getSeamsHandle(subMesh);
         
-        TriMesh &oldMesh = flattenedMeshes->at(i);
+        TriMesh &oldSubMesh = flattenedMeshes->at(i);
+        OpenMesh::VPropHandleT<VertexHandle> oldInverseMappingHandle = PlushPatternGenerator::getInverseMappingHandle(&oldSubMesh);
+        OpenMesh::MPropHandleT< std::vector<EdgeHandle> > oldSeamsHandle = PlushPatternGenerator::getSeamsHandle(&oldSubMesh);
+        std::map<VertexHandle, VertexHandle> oldToNewMapping;
 
-        OpenMesh::VPropHandleT<VertexHandle> inverseMapping = PlushPatternGenerator::getInverseMappingHandle(mesh);
-        OpenMesh::VPropHandleT<VertexHandle> oldInverseMapping = PlushPatternGenerator::getInverseMappingHandle(&oldMesh);
-
-        for (VertexIter v_it = oldMesh.vertices_begin(); v_it != oldMesh.vertices_end(); v_it++) {
-            TriMesh::Point p = oldMesh.point(*v_it);
-            VertexHandle newV = mesh->add_vertex(p + far);
+        for (VertexIter v_it = oldSubMesh.vertices_begin(); v_it != oldSubMesh.vertices_end(); v_it++) {
+            TriMesh::Point p = oldSubMesh.point(*v_it);
+            VertexHandle newV = subMesh->add_vertex(p + far);
             oldToNewMapping.emplace(*v_it, newV);
             
             // Update inverse map
-            mesh->property(inverseMapping, newV) = oldMesh.property(oldInverseMapping, *v_it);
+            subMesh->property(inverseMappingHandle, newV) = oldSubMesh.property(oldInverseMappingHandle, *v_it);
         }
-        for (FaceIter f_it = oldMesh.faces_begin(); f_it != oldMesh.faces_end(); f_it++) {
-            HalfedgeHandle heh = oldMesh.halfedge_handle(*f_it);
-            VertexHandle v1 = oldMesh.from_vertex_handle(heh);
-            VertexHandle v2 = oldMesh.to_vertex_handle(heh);
-            VertexHandle v3 = oldMesh.to_vertex_handle(oldMesh.next_halfedge_handle(heh));
+
+        for (FaceIter f_it = oldSubMesh.faces_begin(); f_it != oldSubMesh.faces_end(); f_it++) {
+            HalfedgeHandle heh = oldSubMesh.halfedge_handle(*f_it);
+            VertexHandle v1 = oldSubMesh.from_vertex_handle(heh);
+            VertexHandle v2 = oldSubMesh.to_vertex_handle(heh);
+            VertexHandle v3 = oldSubMesh.to_vertex_handle(oldSubMesh.next_halfedge_handle(heh));
             
             std::vector<VertexHandle> face_vhs;
             face_vhs.push_back(oldToNewMapping[v1]);
             face_vhs.push_back(oldToNewMapping[v2]);
             face_vhs.push_back(oldToNewMapping[v3]);
-            FaceHandle newF = mesh->add_face(face_vhs);
-            mesh->set_color(newF, oldMesh.color(*f_it));
+            FaceHandle newF = subMesh->add_face(face_vhs);
+            
+            // Set properties
+            subMesh->set_color(newF, oldSubMesh.color(*f_it));
         }
-        mesh->request_face_normals();
-        mesh->update_face_normals();
-    }
+        
+        // Update seams
+        std::vector<int> subSeamsId;
+
+        std::vector<EdgeHandle> &seams = subMesh->property(seamsHandle);
+        std::vector<EdgeHandle> &oldSeams = oldSubMesh.property(oldSeamsHandle);
+        for (size_t j = 0; j < oldSeams.size(); j++) {
+            HalfedgeHandle old_heh = oldSubMesh.halfedge_handle(oldSeams[j], 0);
+            VertexHandle oldV1 = oldSubMesh.from_vertex_handle(old_heh);
+            VertexHandle oldV2 = oldSubMesh.to_vertex_handle(old_heh);
+            EdgeHandle he;
+            assert(PlushPatternGenerator::getEdge(subMesh, he, oldToNewMapping[oldV1], oldToNewMapping[oldV2]));
+            EdgeHandle original_he;
+            assert(PlushPatternGenerator::getEdge(m_patternGenerator->m_mesh,
+                                                  original_he,
+                                                  oldSubMesh.property(oldInverseMappingHandle, oldV1),
+                                                  oldSubMesh.property(oldInverseMappingHandle, oldV2)));
+            
+            // Update inverse map
+            seams.push_back(he);
+            subSeamsId.push_back(he.idx());
+            seamsId.push_back(original_he.idx());
+        }
+        MeshSelection::selectEdges(subMesh, subSeamsId);
+
+        MeshSelection::selectBoundaryEdges(subMesh);
+
+        subMesh->request_face_normals();
+        subMesh->update_face_normals();
     
+        // Assign new sub meshes to m_flattenedGraph
+        flattenedMeshes->push_back(*subMesh);
+    }
     // Clear old meshes
     flattenedMeshes->clear();
     
-    TriMesh *originalMesh = m_patternGenerator->m_mesh;
-    // Assign new sub meshes to m_flattenedGraph
-    for (int i = 0; i < n; i++) {
-        TriMeshObject *object = 0;
-        PluginFunctions::getObject(newTriMeshIds[i], object);
-        TriMesh *mesh = object->mesh();
-        flattenedMeshes->push_back(*mesh);
-        
-        MeshSelection::selectBoundaryEdges(mesh);
-    }
+    MeshSelection::selectEdges(m_patternGenerator->m_mesh, seamsId);
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION_VERTICES);
 }
 
 void PlushPlugin::saveSelectionButtonClicked() {
@@ -439,6 +471,7 @@ void PlushPlugin::canceledJob(QString _job) {
 
 void PlushPlugin::finishedJobHandler() {
     m_currentJobId = "";
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
 }
 void PlushPlugin::receiveJobState(int state) {
     if (m_currentJobId != "") {
