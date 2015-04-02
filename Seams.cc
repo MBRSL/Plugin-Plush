@@ -173,9 +173,7 @@ bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices
     }
     
     // insert edges into seams
-    if (!seamsHandle.is_valid()) {
-        m_mesh->add_property(seamsHandle);
-    }
+    OpenMesh::MPropHandleT< std::vector<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
     std::vector<EdgeHandle> &seams = m_mesh->property(seamsHandle);
     seams.clear();
 

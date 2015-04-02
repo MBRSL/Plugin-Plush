@@ -327,13 +327,17 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
         std::map<VertexHandle, VertexHandle> oldToNewMapping;
         
         TriMesh &oldMesh = flattenedMeshes->at(i);
+
+        OpenMesh::VPropHandleT<VertexHandle> inverseMapping = PlushPatternGenerator::getInverseMappingHandle(mesh);
+        OpenMesh::VPropHandleT<VertexHandle> oldInverseMapping = PlushPatternGenerator::getInverseMappingHandle(&oldMesh);
+
         for (VertexIter v_it = oldMesh.vertices_begin(); v_it != oldMesh.vertices_end(); v_it++) {
             TriMesh::Point p = oldMesh.point(*v_it);
             VertexHandle newV = mesh->add_vertex(p + far);
             oldToNewMapping.emplace(*v_it, newV);
             
             // Update inverse map
-            mesh->property(PlushPatternGenerator::inverseMapping, newV) = oldMesh.property(PlushPatternGenerator::inverseMapping, *v_it);
+            mesh->property(inverseMapping, newV) = oldMesh.property(oldInverseMapping, *v_it);
         }
         for (FaceIter f_it = oldMesh.faces_begin(); f_it != oldMesh.faces_end(); f_it++) {
             HalfedgeHandle heh = oldMesh.halfedge_handle(*f_it);
@@ -364,23 +368,6 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
         flattenedMeshes->push_back(*mesh);
         
         MeshSelection::selectBoundaryEdges(mesh);
-        
-        // Calculate flattening distortion
-        mesh->add_property(PlushPatternGenerator::distortionHandle, "Flattening distortion");
-        for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
-            VertexHandle v = *v_it;
-            if (mesh->is_boundary(v)) {
-                mesh->property(PlushPatternGenerator::distortionHandle, v) = 2 * M_PI;
-            } else {
-                double sum = 0;
-                VertexHandle originalV = mesh->property(PlushPatternGenerator::inverseMapping, v);
-                for (TriMesh::VertexIHalfedgeIter vih_it = originalMesh->vih_begin(originalV); vih_it; vih_it++) {
-                    HalfedgeHandle heh = *vih_it;
-                    sum += originalMesh->calc_sector_angle(heh);
-                }
-                mesh->property(PlushPatternGenerator::distortionHandle, v) = sum;
-            }
-        }
     }
 }
 
