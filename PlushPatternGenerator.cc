@@ -13,7 +13,7 @@ OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, std::vec
 
 OpenMesh::MPropHandleT<Skeleton*> PlushPatternGenerator::skeletonHandle;
 OpenMesh::VPropHandleT<double*> PlushPatternGenerator::bonesWeightHandle;
-OpenMesh::MPropHandleT< std::vector< std::vector<HalfedgeHandle> > > PlushPatternGenerator::boundariesHandle;
+
 OpenMesh::MPropHandleT< std::vector<TriMesh> > PlushPatternGenerator::flattenedMeshesHandle;
 OpenMesh::FPropHandleT<double> PlushPatternGenerator::distortionFHandle;
 OpenMesh::VPropHandleT<double> PlushPatternGenerator::distortionVHandle;
@@ -67,6 +67,8 @@ void PlushPatternGenerator::initProperties() {
     m_mesh->add_property(skeletonHandle, "Skeleton");
     m_mesh->add_property(bonesWeightHandle, "Bone weights for each vertex");
     
+    m_mesh->add_property(flattenedMeshesHandle, "flattened meshes");
+
     m_mesh->add_property(distortionVHandle, "Flattening distortion of vertices");
     m_mesh->add_property(distortionFHandle, "Flattening distortion of faces");
     
@@ -100,6 +102,7 @@ void PlushPatternGenerator::uninitProperties() {
     if(!m_mesh->get_property_handle(seamsHandle, "seams")) {
         m_mesh->remove_property(seamsHandle);
     }
+    m_mesh->remove_property(flattenedMeshesHandle);
 
     m_mesh->remove_property(distortionVHandle);
     m_mesh->remove_property(distortionFHandle);
@@ -221,31 +224,56 @@ double PlushPatternGenerator::getSumInnerAngle(TriMesh *mesh, HalfedgeHandle heh
 }
 
 /**
- @brief Return a ring of boundary halfedges.
- It will randomly return one ring if mesh contains more than one boundary rings.
+ @brief Return rings of boundary halfedges. May contains multiple rings
  @param boundary Result will be stored here, Ordered halfedges forms a ring.
+ @param getInteriorHalfedge If true, return the opposite halfedge of boundary halfedge. These halfedge are not boundary halfedge.
  @retval false if it contains no boundaries.
  */
-bool PlushPatternGenerator::getBoundaryOfOpenedMesh(std::vector<HalfedgeHandle> &boundary, TriMesh &mesh) {
-    HalfedgeHandle heh;
-    for (HalfedgeIter he_it = mesh.halfedges_begin(); he_it != mesh.halfedges_end(); he_it++) {
-        if (mesh.is_boundary(*he_it)) {
-            heh = *he_it;
-            break;
+bool PlushPatternGenerator::getBoundaryOfOpenedMesh(std::vector< std::vector<HalfedgeHandle> > &boundaries, TriMesh *mesh, bool getInteriorHalfedge) {
+    std::set<HalfedgeHandle> visited;
+    for (HalfedgeIter he_it = mesh->halfedges_begin(); he_it != mesh->halfedges_end(); he_it++) {
+        if (!mesh->is_boundary(*he_it)
+            ||  visited.find(*he_it) != visited.end()) {
+            continue;
         }
+        
+    std:vector<HalfedgeHandle> boundary;
+        std::queue<HalfedgeHandle> queue;
+        queue.push(*he_it);
+        visited.insert(*he_it);
+        
+        while (queue.size() > 0) {
+            HalfedgeHandle current_heh = queue.front();
+            queue.pop();
+            
+            boundary.push_back(current_heh);
+            
+            HalfedgeHandle next_heh = mesh->next_halfedge_handle(current_heh);
+            if (visited.find(next_heh) == visited.end()) {
+                queue.push(next_heh);
+                visited.insert(next_heh);
+            }
+        }
+        
+        assert(boundary.size() > 0);
+        if (mesh->from_vertex_handle(*he_it) != mesh->to_vertex_handle(boundary[boundary.size()-1])) {
+            // Not a loop
+            continue;
+        }
+        
+        // The lopp of opposite halfedges is in reversed direction
+        if (getInteriorHalfedge) {
+            std::reverse(boundary.begin(), boundary.end());
+            for (size_t i = 0; i < boundary.size(); i++) {
+                boundary[i] = mesh->opposite_halfedge_handle(boundary[i]);
+            }
+        }
+        
+        boundaries.push_back(boundary);
     }
     
-    if (!mesh.is_valid_handle(heh)) {
-        return false;
-    }
     
-    HalfedgeHandle current_heh = heh;
-    do {
-        boundary.push_back(current_heh);
-        current_heh = mesh.next_halfedge_handle(current_heh);
-    } while (current_heh != heh);
-    
-    return true;
+    return boundaries.empty();
 }
 
 /**
@@ -253,153 +281,136 @@ bool PlushPatternGenerator::getBoundaryOfOpenedMesh(std::vector<HalfedgeHandle> 
  * @param loops Result loops will be stored here.
  * @param jointVertices (This parameter should be compute internally) The set of intersection point of m_spanningTree.
  */
-void PlushPatternGenerator::getBoundariesByEdges(std::vector< std::vector<HalfedgeHandle> > *boundaries, std::vector<EdgeHandle> *separator) {
-    std::set<HalfedgeHandle> isVisited;
-    for (size_t i = 0; i < separator->size(); i++) {
-        HalfedgeHandle heh = m_mesh->halfedge_handle(separator->at(i), 0);
-        VertexHandle startV = m_mesh->from_vertex_handle(heh);
-        
-        for (TriMesh::VertexOHalfedgeIter voh_it = m_mesh->voh_iter(startV); voh_it; voh_it++) {
-            // Skip visited edges and non-spanning-tree edges
-            if (std::find(isVisited.begin(), isVisited.end(), *voh_it) != isVisited.end()
-            ||  std::find(separator->begin(), separator->end(), m_mesh->edge_handle(*voh_it)) == separator->end()) {
-                continue;
-            }
-            
-            // We got a non-visited edge, lets start searching from this edge
-            HalfedgeHandle start_heh = *voh_it;
-            HalfedgeHandle current_heh = start_heh;
-            isVisited.insert(start_heh);
-            
-            std::vector<HalfedgeHandle> boundary;
-            boundary.push_back(current_heh);
-            do {
-                assert(!m_mesh->is_boundary(current_heh));
-                
-                HalfedgeHandle next_heh = current_heh;
-                // Find next edge which is in spanning tree
-                do {
-                    // While there are possibly many adjacent edges to choose, we use next->opposite to iterator through them
-                    // so that we will visit them all clockwise without missing any one.
-                    next_heh = m_mesh->opposite_halfedge_handle(
-                                                                m_mesh->next_halfedge_handle(next_heh));
-                    
-                    // This means there are no other edges except current_heh (which is where you came from)
-                    // In this case, just go back and treat this path as a dart
-                    if (next_heh == current_heh) {
-                        // Do nothing, it will be flipped later.
-                    }
-                } while (std::find(separator->begin(), separator->end(), m_mesh->edge_handle(next_heh)) == separator->end());
-                
-                // Flip it to point to the next vertex
-                current_heh = m_mesh->opposite_halfedge_handle(next_heh);
-                isVisited.insert(current_heh);
-                
-                boundary.push_back(current_heh);
-            } while (current_heh != start_heh);
-            
-            // Delete last duplicated halfedge
-            boundary.pop_back();
-            
-            boundaries->push_back(boundary);
-        }
-    }
-}
+//void PlushPatternGenerator::getBoundariesByEdges(std::vector< std::vector<HalfedgeHandle> > *boundaries, std::vector<EdgeHandle> *separator) {
+//    std::set<HalfedgeHandle> isVisited;
+//    for (size_t i = 0; i < separator->size(); i++) {
+//        HalfedgeHandle heh = m_mesh->halfedge_handle(separator->at(i), 0);
+//        VertexHandle startV = m_mesh->from_vertex_handle(heh);
+//        
+//        for (TriMesh::VertexOHalfedgeIter voh_it = m_mesh->voh_iter(startV); voh_it; voh_it++) {
+//            // Skip visited edges and non-spanning-tree edges
+//            if (std::find(isVisited.begin(), isVisited.end(), *voh_it) != isVisited.end()
+//            ||  std::find(separator->begin(), separator->end(), m_mesh->edge_handle(*voh_it)) == separator->end()) {
+//                continue;
+//            }
+//            
+//            // We got a non-visited edge, lets start searching from this edge
+//            HalfedgeHandle start_heh = *voh_it;
+//            HalfedgeHandle current_heh = start_heh;
+//            isVisited.insert(start_heh);
+//            
+//            std::vector<HalfedgeHandle> boundary;
+//            boundary.push_back(current_heh);
+//            do {
+//                assert(!m_mesh->is_boundary(current_heh));
+//                
+//                HalfedgeHandle next_heh = current_heh;
+//                // Find next edge which is in spanning tree
+//                do {
+//                    // While there are possibly many adjacent edges to choose, we use next->opposite to iterator through them
+//                    // so that we will visit them all clockwise without missing any one.
+//                    next_heh = m_mesh->opposite_halfedge_handle(
+//                                                                m_mesh->next_halfedge_handle(next_heh));
+//                    
+//                    // This means there are no other edges except current_heh (which is where you came from)
+//                    // In this case, just go back and treat this path as a dart
+//                    if (next_heh == current_heh) {
+//                        // Do nothing, it will be flipped later.
+//                    }
+//                } while (std::find(separator->begin(), separator->end(), m_mesh->edge_handle(next_heh)) == separator->end());
+//                
+//                // Flip it to point to the next vertex
+//                current_heh = m_mesh->opposite_halfedge_handle(next_heh);
+//                isVisited.insert(current_heh);
+//                
+//                boundary.push_back(current_heh);
+//            } while (current_heh != start_heh);
+//            
+//            // Delete last duplicated halfedge
+//            boundary.pop_back();
+//            
+//            boundaries->push_back(boundary);
+//        }
+//    }
+//}
 
 /**
  Split existing m_mesh into sub meshes with boundary as separator.
  @param loops The given set of boundaries. Each boundary should be a loop.
  @param subMeshes Resulting sub meshes will be stored here.
  */
-bool PlushPatternGenerator::splitWithBoundary(std::vector<TriMesh> *subMeshes, std::vector< std::vector<HalfedgeHandle> > *loops)
+bool PlushPatternGenerator::splitWithBoundary(std::vector<TriMesh> *subMeshes)
 {
-    for (size_t i = 0; i < loops->size(); i++) {
-        TriMesh newMesh;
+    std::set<FaceHandle> visitedF;
+    
+    OpenMesh::MPropHandleT< std::vector<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
+    std::set<EdgeHandle> seams(m_mesh->property(seamsHandle).begin(), m_mesh->property(seamsHandle).end());
+    assert(seams.size() > 0);
+
+    for (FaceIter f_it = m_mesh->faces_begin(); f_it != m_mesh->faces_end(); f_it++) {
+        if (visitedF.find(*f_it) != visitedF.end()) {
+            continue;
+        }
         
+        TriMesh newMesh;
+        newMesh.request_face_colors();
         OpenMesh::VPropHandleT<VertexHandle> inverseMapping = getInverseMappingHandle(&newMesh);
 
-        std::vector<HalfedgeHandle> loop = loops->at(i);
-        
-        std::set<VertexHandle> isVisited;
-        
-        // Starting BFS from boundary halfedges
+        std::queue<FaceHandle> queue;
         std::set<FaceHandle> connectedFaces;
-        std::queue<HalfedgeHandle> queue;
+        std::set<VertexHandle> connectedVertices;
         
-        // Old vertex to new vertex mapping function
-        std::map<VertexHandle, VertexHandle> vertexToVertexMapping;
-        
-        // Because there will be more than one corresponding (new) vertex for a vertex on loop,
-        // vertex-to-vertex is not a one-to-one function. We need a halfedge-to-vertices mapping for boundary halfedge.
-        std::map< HalfedgeHandle, std::pair<VertexHandle, VertexHandle> > halfedgeToVerticesMapping;
-        
-        for (size_t j = 0; j < loop.size(); j++) {
-            HalfedgeHandle boundary_heh = loop[j];
-            queue.push(boundary_heh);
-            
-            VertexHandle v1 = m_mesh->from_vertex_handle(boundary_heh);
-            VertexHandle v2 = m_mesh->to_vertex_handle(boundary_heh);
-            VertexHandle newV1;
-            if (j == 0) {
-                newV1 = newMesh.add_vertex(m_mesh->point(v1));
-                newMesh.property(inverseMapping, newV1) = v1;
-            } else {
-                newV1 = halfedgeToVerticesMapping[loop[j-1]].second;
-            }
-            
-            VertexHandle newV2;
-            if (j == loop.size()-1) {
-                newV2 = halfedgeToVerticesMapping[loop[0]].first;
-            } else {
-                newV2 = newMesh.add_vertex(m_mesh->point(v2));
-                newMesh.property(inverseMapping, newV2) = v2;
-            }
-            
-            isVisited.insert(v1);
-            
-            halfedgeToVerticesMapping.emplace(boundary_heh, std::make_pair(newV1, newV2));
-        }
+        queue.push(*f_it);
+        visitedF.insert(*f_it);
+        connectedFaces.insert(*f_it);
         
         while (!queue.empty()) {
-            HalfedgeHandle starting_heh = queue.front();
+            FaceHandle f = queue.front();
             queue.pop();
+            connectedFaces.insert(f);
             
-            VertexHandle v = m_mesh->to_vertex_handle(starting_heh);
+            HalfedgeHandle heh2 = m_mesh->halfedge_handle(f);
+            HalfedgeHandle heh3 = m_mesh->next_halfedge_handle(heh2);
+            HalfedgeHandle heh1 = m_mesh->prev_halfedge_handle(heh2);
             
-            // Add new vertex only if starting_heh is not a boundary halfedge
-            bool isBoundary = false;
-            if (std::find(loop.begin(), loop.end(), starting_heh) == loop.end()) {
-                VertexHandle newV = newMesh.add_vertex(m_mesh->point(v));
-                vertexToVertexMapping.emplace(v, newV);
-                newMesh.property(inverseMapping, newV) = v;
-            } else {
-                isBoundary = true;
+            FaceHandle neighborF1 = m_mesh->opposite_face_handle(heh1);
+            FaceHandle neighborF2 = m_mesh->opposite_face_handle(heh2);
+            FaceHandle neighborF3 = m_mesh->opposite_face_handle(heh3);
+            
+            VertexHandle v1 = m_mesh->to_vertex_handle(heh1);
+            VertexHandle v2 = m_mesh->to_vertex_handle(heh2);
+            VertexHandle v3 = m_mesh->to_vertex_handle(heh3);
+            
+            connectedVertices.insert(v1);
+            connectedVertices.insert(v2);
+            connectedVertices.insert(v3);
+            
+            if (seams.find(m_mesh->edge_handle(heh1)) == seams.end()
+            &&  visitedF.find(neighborF1) == visitedF.end()) {
+                queue.push(neighborF1);
+                visitedF.insert(neighborF1);
             }
-            
-            // Loop until we meets boundary halfedge or starting halfedge
-            HalfedgeHandle vih = m_mesh->opposite_halfedge_handle(m_mesh->next_halfedge_handle(starting_heh));
-            while (vih != starting_heh && std::find(loop.begin(), loop.end(), m_mesh->opposite_halfedge_handle(vih)) == loop.end()) {
-                connectedFaces.insert(m_mesh->face_handle(vih));
-                
-                VertexHandle nextV = m_mesh->from_vertex_handle(vih);
-                
-                if (isVisited.find(nextV) == isVisited.end()) {
-                    isVisited.insert(nextV);
-                    queue.push(m_mesh->opposite_halfedge_handle(vih));
-                }
-                
-                if (isBoundary) {
-                    // We don't care about the source, just use the dest vertex.
-                    VertexHandle newV = halfedgeToVerticesMapping[starting_heh].second;
-                    halfedgeToVerticesMapping.emplace(vih, std::make_pair(VertexHandle(), newV));
-                }
-                
-                vih = m_mesh->opposite_halfedge_handle(m_mesh->next_halfedge_handle(vih));
+            if (seams.find(m_mesh->edge_handle(heh2)) == seams.end()
+                &&  visitedF.find(neighborF2) == visitedF.end()) {
+                queue.push(neighborF2);
+                visitedF.insert(neighborF2);
+            }
+            if (seams.find(m_mesh->edge_handle(heh3)) == seams.end()
+                &&  visitedF.find(neighborF3) == visitedF.end()) {
+                queue.push(neighborF3);
+                visitedF.insert(neighborF3);
             }
         }
         
-        newMesh.request_face_colors();
+        // Insert vertices into new mesh
+        std::map<VertexHandle, VertexHandle> vertexToVertexMapping; // Old vertex to new vertex mapping function
+        for (auto v_it = connectedVertices.begin(); v_it != connectedVertices.end(); v_it++) {
+            VertexHandle newV = newMesh.add_vertex(m_mesh->point(*v_it));
+            newMesh.property(inverseMapping, newV) = *v_it;
+            vertexToVertexMapping.emplace(*v_it, newV);
+        }
         
+        // Insert other faces into new mesh
         /**
          *          v3
          *         /  \
@@ -415,20 +426,40 @@ bool PlushPatternGenerator::splitWithBoundary(std::vector<TriMesh> *subMeshes, s
             VertexHandle v2 = m_mesh->to_vertex_handle(heh12);
             VertexHandle v3 = m_mesh->to_vertex_handle(heh23);
             
-            std::vector<VertexHandle> face_vhs;
             VertexHandle newV1 = vertexToVertexMapping[v1];
             VertexHandle newV2 = vertexToVertexMapping[v2];
             VertexHandle newV3 = vertexToVertexMapping[v3];
-            // Invalid vertex means they are on the boundary, we should use halfedgeToVerticesMapping to find correct vertex
-            if (!newMesh.is_valid_handle(newV1)) {
-                newV1 = halfedgeToVerticesMapping[heh31].second;
+            
+            /* Duplicate boundary vertices
+             * For any seam edges, it has two faces beside it.
+             * If both two faces ARE visited, this edge should be split.
+             */
+            if (seams.find(m_mesh->edge_handle(heh12)) != seams.end()
+            &&  connectedFaces.find(m_mesh->opposite_face_handle(heh12)) != connectedFaces.end()) {
+                if (m_mesh->halfedge_handle(m_mesh->edge_handle(heh12), 0) == heh12) {
+                    newV1 = newMesh.add_vertex(m_mesh->point(v1));
+                    newV2 = newMesh.add_vertex(m_mesh->point(v2));
+                    newMesh.property(inverseMapping, newV1) = v1;
+                    newMesh.property(inverseMapping, newV2) = v2;
+                }
+            } else if (seams.find(m_mesh->edge_handle(heh23)) != seams.end()
+                   &&  connectedFaces.find(m_mesh->opposite_face_handle(heh23)) != connectedFaces.end()) {
+                if (m_mesh->halfedge_handle(m_mesh->edge_handle(heh23), 0) == heh23) {
+                    newV2 = newMesh.add_vertex(m_mesh->point(v2));
+                    newV3 = newMesh.add_vertex(m_mesh->point(v3));
+                    newMesh.property(inverseMapping, newV2) = v2;
+                    newMesh.property(inverseMapping, newV3) = v3;
+                }
+            } else if (seams.find(m_mesh->edge_handle(heh31)) != seams.end()
+                    && connectedFaces.find(m_mesh->opposite_face_handle(heh31)) != connectedFaces.end()) {
+                if (m_mesh->halfedge_handle(m_mesh->edge_handle(heh31), 0) == heh31) {
+                    newV1 = newMesh.add_vertex(m_mesh->point(v1));
+                    newV3 = newMesh.add_vertex(m_mesh->point(v3));
+                    newMesh.property(inverseMapping, newV1) = v1;
+                    newMesh.property(inverseMapping, newV3) = v3;
+                }
             }
-            if (!newMesh.is_valid_handle(newV2)) {
-                newV2 = halfedgeToVerticesMapping[heh12].second;
-            }
-            if (!newMesh.is_valid_handle(newV3)) {
-                newV3 = halfedgeToVerticesMapping[heh23].second;
-            }
+            std::vector<VertexHandle> face_vhs;
             face_vhs.push_back(newV1);
             face_vhs.push_back(newV2);
             face_vhs.push_back(newV3);

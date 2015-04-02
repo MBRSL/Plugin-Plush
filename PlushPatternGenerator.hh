@@ -66,7 +66,6 @@ public:
     
     /// @name Flattening-related handle
     ///@{
-    static OpenMesh::MPropHandleT< std::vector< std::vector<HalfedgeHandle> > > boundariesHandle;
     /// This stores flattened meshes.
     static OpenMesh::MPropHandleT< std::vector<TriMesh> > flattenedMeshesHandle;
     /// Distortion indicator for visualization
@@ -89,7 +88,7 @@ public:
     static double getSumInnerAngle(TriMesh *mesh, HalfedgeHandle heh1, HalfedgeHandle heh2);
     
     /// Get boundary for a given opened mesh
-    static bool getBoundaryOfOpenedMesh(std::vector<HalfedgeHandle> &boundary, TriMesh &mesh);
+    static bool getBoundaryOfOpenedMesh(std::vector< std::vector<HalfedgeHandle> > &boundaries, TriMesh *mesh, bool getInteriorHalfedge);
     
     PlushPatternGenerator(TriMesh *mesh, QString meshName);
     ~PlushPatternGenerator();
@@ -126,9 +125,7 @@ private:
     
     bool isIntersected(std::vector<VertexHandle> path1, std::vector<VertexHandle> path2);
     
-    bool splitWithBoundary(std::vector<TriMesh> *subMeshes, std::vector< std::vector<HalfedgeHandle> > *loops);
-
-    void getBoundariesByEdges(std::vector< std::vector<HalfedgeHandle> > *boundaries, std::vector<EdgeHandle> *separator);
+    bool splitWithBoundary(std::vector<TriMesh> *subMeshes);
 
     /// @name Flattening
     ///@{

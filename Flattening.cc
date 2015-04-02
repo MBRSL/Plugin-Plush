@@ -12,25 +12,12 @@ bool PlushPatternGenerator::calcFlattenedGraph()
         return false;
     }
     
-    // Prepare for properties
-    if (!boundariesHandle.is_valid()) {
-        m_mesh->add_property(boundariesHandle, "boundary halfedges");
-    }
-    if (!flattenedMeshesHandle.is_valid()) {
-        m_mesh->add_property(flattenedMeshesHandle, "flattened meshes");
-    }
-
     // Clear previous result
-    std::vector< std::vector<HalfedgeHandle> > *boundaries = &m_mesh->property(boundariesHandle);
-    boundaries->clear();
     std::vector<TriMesh> *flattenedMeshes = &m_mesh->property(flattenedMeshesHandle);
     flattenedMeshes->clear();
 
-    // Store boundary into property
-    getBoundariesByEdges(boundaries, seams);
-    
     // Create sub meshes using boundaries
-    splitWithBoundary(flattenedMeshes, boundaries);
+    splitWithBoundary(flattenedMeshes);
 
     isJobCanceled = false;
     for (size_t i = 0; i < flattenedMeshes->size(); i++) {
@@ -59,9 +46,6 @@ bool PlushPatternGenerator::calcInteriorPoints(std::vector<TriMesh> *flattenedMe
         TriMesh &mesh = flattenedMeshes->at(i);
         int n = mesh.n_vertices();
         
-        std::vector<HalfedgeHandle> boundary;
-        getBoundaryOfOpenedMesh(boundary, mesh);
-
         // Prepare for matrix
         std::vector< Eigen::Triplet<double> > tripletList;
         double *rowSum = new double[n];
@@ -141,14 +125,20 @@ bool PlushPatternGenerator::calcInteriorPoints(std::vector<TriMesh> *flattenedMe
         }
         
         // Filling boundary condition
+        std::vector< std::vector<HalfedgeHandle> > boundaries;
+        getBoundaryOfOpenedMesh(boundaries, &mesh, false);
+
         Eigen::VectorXd Vx(n), Vy(n);
         Vx.setZero();
         Vy.setZero();
-        for (size_t j = 0; j < boundary.size(); j++) {
-            VertexHandle v = mesh.from_vertex_handle(boundary[j]);
-            TriMesh::Point p = mesh.point(v);
-            Vx[v.idx()] = p[0];
-            Vy[v.idx()] = p[1];
+        for (size_t j = 0; j < boundaries.size(); j++) {
+            std::vector<HalfedgeHandle> &boundary = boundaries[j];
+            for (size_t k = 0; k < boundary.size(); k++) {
+                VertexHandle v = mesh.from_vertex_handle(boundary[k]);
+                TriMesh::Point p = mesh.point(v);
+                Vx[v.idx()] = p[0];
+                Vy[v.idx()] = p[1];
+            }
         }
 
         Eigen::VectorXd Ux(n), Uy(n);

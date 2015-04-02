@@ -9,7 +9,9 @@ using namespace Ipopt;
 // constructor
 LPFB_NLP::LPFB_NLP(TriMesh *mesh) : m_mesh(mesh)
 {
-    PlushPatternGenerator::getBoundaryOfOpenedMesh(m_boundary3D, *m_mesh);
+    std::vector< std::vector<HalfedgeHandle> > boundaries;
+    PlushPatternGenerator::getBoundaryOfOpenedMesh(boundaries, m_mesh, true);
+    m_boundary3D = boundaries[0];
     int n = m_boundary3D.size();
 
     // Calculate inner angles & edges length for later use.
@@ -33,9 +35,7 @@ bool LPFB_NLP::get_nlp_info(Index& n, Index& m, Index& nnz_jac_g,
                             Index& nnz_h_lag, TNLP::IndexStyleEnum& index_style)
 {
     // variables
-    std::vector<HalfedgeHandle> boundary3D;
-    PlushPatternGenerator::getBoundaryOfOpenedMesh(boundary3D, *m_mesh);
-    n = boundary3D.size();
+    n = m_boundary3D.size();
     
     // constraints
     m = 3;
