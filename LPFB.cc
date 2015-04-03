@@ -9,7 +9,7 @@
 using namespace Ipopt;
 
 // constructor
-LPFB_NLP::LPFB_NLP(TriMesh *mesh) : m_mesh(mesh)
+LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition) : m_mesh(mesh), m_boundaryPosition(boundaryPosition)
 {
     std::vector< std::vector<HalfedgeHandle> > boundaries;
     PlushPatternGenerator::getBoundaryOfOpenedMesh(boundaries, m_mesh, true);
@@ -21,7 +21,7 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh) : m_mesh(mesh)
     std::vector<HalfedgeHandle> &baseBoundary = boundaries[0];
     std::set<VertexHandle> targetBoudarySet;
     for (size_t j = 0; j < baseBoundary.size(); j++) {
-        VertexHandle v = mesh->to_vertex_handle(baseBoundary[j]);
+        VertexHandle v = m_mesh->to_vertex_handle(baseBoundary[j]);
         targetBoudarySet.insert(v);
     }
 
@@ -35,7 +35,7 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh) : m_mesh(mesh)
         // Randomly choose one vertex as starting point
         std::set<VertexHandle> sourceBoundarySet;
         for (size_t j = 0; j < sourceBoundary.size(); j++) {
-            VertexHandle v = mesh->to_vertex_handle(sourceBoundary[j]);
+            VertexHandle v = m_mesh->to_vertex_handle(sourceBoundary[j]);
             sourceBoundarySet.insert(v);
         }
         
@@ -43,12 +43,12 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh) : m_mesh(mesh)
         std::set<VertexHandle> visited;
         std::map<VertexHandle, VertexHandle> predecessor;
         
-        VertexHandle currentV = mesh->from_vertex_handle(sourceBoundary[0]);
+        VertexHandle currentV = m_mesh->from_vertex_handle(sourceBoundary[0]);
         queue.push(currentV);
         visited.insert(currentV);
         
         while (!queue.empty() && targetBoudarySet.find(currentV) == targetBoudarySet.end()) {
-            for (TriMesh::VertexVertexIter vv_it = mesh->vv_iter(currentV); vv_it; vv_it++) {
+            for (TriMesh::VertexVertexIter vv_it = m_mesh->vv_iter(currentV); vv_it; vv_it++) {
                 if (visited.find(*vv_it) == visited.end()
                     // Don't go through sourceBoundary itself
                 &&  sourceBoundarySet.find(*vv_it) == sourceBoundarySet.end()) {
@@ -69,9 +69,9 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh) : m_mesh(mesh)
         while (predecessor.find(currentV) != predecessor.end()) {
             VertexHandle nextV = predecessor[currentV];
             HalfedgeHandle heh;
-            PlushPatternGenerator::getHalfedge(mesh, heh, currentV, nextV);
+            PlushPatternGenerator::getHalfedge(m_mesh, heh, currentV, nextV);
             virtualCut.push_back(heh);
-            virtualCutReverse.push_back(mesh->opposite_halfedge_handle(heh));
+            virtualCutReverse.push_back(m_mesh->opposite_halfedge_handle(heh));
             currentV = nextV;
         }
         std::reverse(virtualCutReverse.begin(), virtualCutReverse.end());
@@ -80,7 +80,7 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh) : m_mesh(mesh)
         for (auto he_it = m_boundary3D.begin(); he_it != m_boundary3D.end(); he_it++) {
             HalfedgeHandle heh = *he_it;
             // Find the insertion position
-            if (mesh->from_vertex_handle(heh) == mesh->from_vertex_handle(virtualCut[0])) {
+            if (m_mesh->from_vertex_handle(heh) == m_mesh->from_vertex_handle(virtualCut[0])) {
                 he_it = m_boundary3D.insert(he_it, virtualCut.begin(), virtualCut.end());
                 he_it = m_boundary3D.insert(he_it+virtualCut.size(), sourceBoundary.begin(), sourceBoundary.end());
                 he_it = m_boundary3D.insert(he_it+sourceBoundary.size(), virtualCutReverse.begin(), virtualCutReverse.end());
@@ -95,7 +95,7 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh) : m_mesh(mesh)
     // Other inner boundaries
     std::map<VertexHandle, int> vertexPosition;
     for (size_t position = 0; position < m_boundary3D.size(); position++) {
-        VertexHandle v = mesh->from_vertex_handle(m_boundary3D[position]);
+        VertexHandle v = m_mesh->from_vertex_handle(m_boundary3D[position]);
         
         // If this vertex is visited before, there is a loop. And we need to add it to coincide pairs
         if (vertexPosition.find(v) != vertexPosition.end()) {
@@ -419,10 +419,9 @@ void LPFB_NLP::finalize_solution(SolverReturn status,
     
     for (Index k = 0; k < n; k++) {
         // If k == 0, it will be placed at (0,0,0)
-        VertexHandle v = m_mesh->from_vertex_handle(m_boundary3D[k % n]);
-        TriMesh::Point &p = m_mesh->point(v);
-        p[0] = posX[k];
-        p[1] = posY[k];
-        p[2] = 0;
+        VertexHandle v = m_mesh->from_vertex_handle(m_boundary3D[k]);
+        if (m_mesh->is_boundary(v)) {
+            m_boundaryPosition->emplace(v, OpenMesh::Vec3d(posX[k], posY[k], 0));
+        }
     }
 }

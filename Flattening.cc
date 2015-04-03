@@ -25,11 +25,12 @@ bool PlushPatternGenerator::calcFlattenedGraph()
             emit log(LOGINFO, "Flattening calculation canceled.");
             return false;
         }
-        calcLPFB(&flattenedMeshes->at(i));
+        std::map<VertexHandle, OpenMesh::Vec3d> boundaryPosition;
+        calcLPFB(&flattenedMeshes->at(i), &boundaryPosition);
+        calcInteriorPoints(&flattenedMeshes->at(i), &boundaryPosition);
         setJobState((double)(i+1) / flattenedMeshes->size() * 100);
     }
 
-    calcInteriorPoints(flattenedMeshes);
     
     calcDistortion(flattenedMeshes);
 
@@ -42,133 +43,125 @@ bool PlushPatternGenerator::calcFlattenedGraph()
  @param flattenedMeshes Input mesh, its non-boundary vertices will be modified.
  @retval True on success. False if failed to solve linear system during intrinsic parameterization.
  */
-bool PlushPatternGenerator::calcInteriorPoints(std::vector<TriMesh> *flattenedMeshes)
+bool PlushPatternGenerator::calcInteriorPoints(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition)
 {
-    for (size_t i = 0; i < flattenedMeshes->size(); i++) {
-        TriMesh &mesh = flattenedMeshes->at(i);
-        int n = mesh.n_vertices();
+    int n = mesh->n_vertices();
+    
+    // Prepare for matrix
+    std::vector< Eigen::Triplet<double> > tripletList;
+    double *rowSum = new double[n];
+    memset(rowSum, 0, sizeof(double)*n);
+
+    /**     v3
+     *     /  \
+     *    /    \
+     *  v1⥫---⥬v2
+     *    \    /
+     *     \  /
+     *      v4
+     */
+    for (EdgeIter e_it = mesh->edges_begin(); e_it != mesh->edges_end(); e_it++) {
+        HalfedgeHandle heh12 = mesh->halfedge_handle(*e_it, 0);
+        HalfedgeHandle heh21 = mesh->halfedge_handle(*e_it, 1);
         
-        // Prepare for matrix
-        std::vector< Eigen::Triplet<double> > tripletList;
-        double *rowSum = new double[n];
-        memset(rowSum, 0, sizeof(double)*n);
+        VertexHandle v1 = mesh->from_vertex_handle(heh12);
+        VertexHandle v2 = mesh->to_vertex_handle(heh12);
+        if (mesh->is_boundary(v1) && mesh->is_boundary(v2)) {
+            continue;
+        }
 
-        /**     v3
-         *     /  \
-         *    /    \
-         *  v1⥫---⥬v2
-         *    \    /
-         *     \  /
-         *      v4
-         */
-        for (EdgeIter e_it = mesh.edges_begin(); e_it != mesh.edges_end(); e_it++) {
-            HalfedgeHandle heh12 = mesh.halfedge_handle(*e_it, 0);
-            HalfedgeHandle heh21 = mesh.halfedge_handle(*e_it, 1);
-            
-            VertexHandle v1 = mesh.from_vertex_handle(heh12);
-            VertexHandle v2 = mesh.to_vertex_handle(heh12);
-            if (mesh.is_boundary(v1) && mesh.is_boundary(v2)) {
-                continue;
-            }
-
-            HalfedgeHandle heh31 = mesh.prev_halfedge_handle(heh12);
-            HalfedgeHandle heh42 = mesh.prev_halfedge_handle(heh21);
+        HalfedgeHandle heh31 = mesh->prev_halfedge_handle(heh12);
+        HalfedgeHandle heh42 = mesh->prev_halfedge_handle(heh21);
 
 
 
 //            // Conformal mapping
-//            double angle231 = mesh.calc_sector_angle(mesh.next_halfedge_handle(heh12));
-//            double angle142 = mesh.calc_sector_angle(mesh.next_halfedge_handle(heh21));
+//            double angle231 = mesh->calc_sector_angle(mesh->next_halfedge_handle(heh12));
+//            double angle142 = mesh->calc_sector_angle(mesh->next_halfedge_handle(heh21));
 //            double cotR231 = tan(M_PI_2 - angle231);
 //            double cotR142 = tan(M_PI_2 - angle142);
 //            double weight12 = cotR231 + cotR142;
 //            double weight21 = weight12;
-            
+        
 //            // Barycentrical mapping
 //            double weight12 = 1;
 //            double weight21 = 1;
-            
-            // Mean value mapping
-            double angle312 = mesh.calc_sector_angle(heh31);
-            double angle214 = mesh.calc_sector_angle(heh21);
-            double angle123 = mesh.calc_sector_angle(heh12);
-            double angle421 = mesh.calc_sector_angle(heh42);
-            double weight12 = (tan(angle312/2) + tan(angle214/2)) / mesh.calc_edge_length(heh12);
-            double weight21 = (tan(angle123/2) + tan(angle421/2)) / mesh.calc_edge_length(heh21);
         
-            if (!mesh.is_boundary(v1)) {
-                tripletList.push_back(Eigen::Triplet<double>(v1.idx(), v2.idx(), weight12));
-                rowSum[v1.idx()] += weight12;
-            }
-            if (!mesh.is_boundary(v2)) {
-                tripletList.push_back(Eigen::Triplet<double>(v2.idx(), v1.idx(), weight21));
-                rowSum[v2.idx()] += weight21;
-            }
+        // Mean value mapping
+        double angle312 = mesh->calc_sector_angle(heh31);
+        double angle214 = mesh->calc_sector_angle(heh21);
+        double angle123 = mesh->calc_sector_angle(heh12);
+        double angle421 = mesh->calc_sector_angle(heh42);
+        double weight12 = (tan(angle312/2) + tan(angle214/2)) / mesh->calc_edge_length(heh12);
+        double weight21 = (tan(angle123/2) + tan(angle421/2)) / mesh->calc_edge_length(heh21);
+    
+        if (!mesh->is_boundary(v1)) {
+            tripletList.push_back(Eigen::Triplet<double>(v1.idx(), v2.idx(), weight12));
+            rowSum[v1.idx()] += weight12;
         }
-        
-        for (VertexIter v_it = mesh.vertices_begin(); v_it != mesh.vertices_end(); v_it++) {
-            VertexHandle v = *v_it;
-            if (mesh.is_boundary(v)) {
-                tripletList.push_back(Eigen::Triplet<double>(v.idx(), v.idx(), 1));
-            } else {
-                tripletList.push_back(Eigen::Triplet<double>(v.idx(), v.idx(), -rowSum[v.idx()]));
-            }
+        if (!mesh->is_boundary(v2)) {
+            tripletList.push_back(Eigen::Triplet<double>(v2.idx(), v1.idx(), weight21));
+            rowSum[v2.idx()] += weight21;
         }
-        // Filling matrix
-        Eigen::SparseMatrix<double> M(n, n);
-        M.setFromTriplets(tripletList.begin(), tripletList.end());
-        M.makeCompressed();
-        
-        Eigen::SparseLU< Eigen::SparseMatrix<double> > solver;
-        solver.compute(M);
-        if (solver.info() != Eigen::Success)
-        {
-            std::cout << "Failed to decompose matrix " << std::endl;
-            return false;
+    }
+    
+    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
+        VertexHandle v = *v_it;
+        if (mesh->is_boundary(v)) {
+            tripletList.push_back(Eigen::Triplet<double>(v.idx(), v.idx(), 1));
+        } else {
+            tripletList.push_back(Eigen::Triplet<double>(v.idx(), v.idx(), -rowSum[v.idx()]));
         }
-        
-        // Filling boundary condition
-        std::vector< std::vector<HalfedgeHandle> > boundaries;
-        getBoundaryOfOpenedMesh(boundaries, &mesh, false);
+    }
+    // Filling matrix
+    Eigen::SparseMatrix<double> M(n, n);
+    M.setFromTriplets(tripletList.begin(), tripletList.end());
+    M.makeCompressed();
+    
+    Eigen::SparseLU< Eigen::SparseMatrix<double> > solver;
+    solver.compute(M);
+    if (solver.info() != Eigen::Success)
+    {
+        std::cout << "Failed to decompose matrix " << std::endl;
+        return false;
+    }
+    
+    // Filling boundary condition
+    Eigen::VectorXd Vx(n), Vy(n);
+    Vx.setZero();
+    Vy.setZero();
+    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
+        if (mesh->is_boundary(*v_it)) {
+            OpenMesh::Vec3d p = boundaryPosition->at(*v_it);
+            Vx[v_it->idx()] = p[0];
+            Vy[v_it->idx()] = p[1];
+        }
+    }
 
-        Eigen::VectorXd Vx(n), Vy(n);
-        Vx.setZero();
-        Vy.setZero();
-        for (size_t j = 0; j < boundaries.size(); j++) {
-            std::vector<HalfedgeHandle> &boundary = boundaries[j];
-            for (size_t k = 0; k < boundary.size(); k++) {
-                VertexHandle v = mesh.from_vertex_handle(boundary[k]);
-                TriMesh::Point p = mesh.point(v);
-                Vx[v.idx()] = p[0];
-                Vy[v.idx()] = p[1];
-            }
-        }
-
-        Eigen::VectorXd Ux(n), Uy(n);
-        Ux = solver.solve(Vx);
-        Uy = solver.solve(Vy);
-        
-        // Assign planar coordinates to vertices
-        for (VertexIter v_it = mesh.vertices_begin(); v_it != mesh.vertices_end(); v_it++) {
-            VertexHandle v = *v_it;
-            TriMesh::Point &p = mesh.point(v);
-            p[0] = Ux[v.idx()];
-            p[1] = Uy[v.idx()];
-            p[2] = 0;
-        }
+    Eigen::VectorXd Ux(n), Uy(n);
+    Ux = solver.solve(Vx);
+    Uy = solver.solve(Vy);
+    
+    // Assign planar coordinates to vertices
+    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
+        VertexHandle v = *v_it;
+        TriMesh::Point &p = mesh->point(v);
+        p[0] = Ux[v.idx()];
+        p[1] = Uy[v.idx()];
+        p[2] = 0;
     }
     return true;
 }
 
 /**
  This function will calculate LPFB of given mesh with loops as boundary.
- The result is stored in planarCoordHandle property in boundary vertices.
- @param <#parameter#>
+ @param mesh The input mesh.
+ @param boundaryPosition The result of boundary position will be stored here.
  @return <#retval#>
  @retval <#meaning#>
  */
-bool PlushPatternGenerator::calcLPFB(TriMesh *mesh) {
-    Ipopt::SmartPtr<Ipopt::TNLP> mynlp = new LPFB_NLP(mesh);
+bool PlushPatternGenerator::calcLPFB(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition) {
+    Ipopt::SmartPtr<Ipopt::TNLP> mynlp = new LPFB_NLP(mesh, boundaryPosition);
     Ipopt::SmartPtr<Ipopt::IpoptApplication> app = IpoptApplicationFactory();
     
     app->Options()->SetNumericValue("tol", 1e-10);

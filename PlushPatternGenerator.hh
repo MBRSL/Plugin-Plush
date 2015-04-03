@@ -130,8 +130,8 @@ private:
 
     /// @name Flattening
     ///@{
-    bool calcLPFB(TriMesh *mesh);
-    bool calcInteriorPoints(std::vector<TriMesh> *flattenedMeshes);
+    bool calcLPFB(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition);
+    bool calcInteriorPoints(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition);
     /// Calculate the distortion between original 3D mesh and flattened graph, the result is stored in distortionHandle
     void calcDistortion(std::vector<TriMesh> *flattenedMeshes);
     /// Organize 2D loops to prevent overlapping while minimize bounding area.
