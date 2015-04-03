@@ -9,7 +9,7 @@
 using namespace Ipopt;
 
 // constructor
-LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition) : m_mesh(mesh), m_boundaryPosition(boundaryPosition)
+LPFB_NLP::LPFB_NLP(const TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition) : m_mesh(mesh), m_boundaryPosition(boundaryPosition)
 {
     std::vector< std::vector<HalfedgeHandle> > boundaries;
     PlushPatternGenerator::getBoundaryOfOpenedMesh(boundaries, m_mesh, true);
@@ -48,14 +48,14 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *bound
         visited.insert(currentV);
         
         while (!queue.empty() && targetBoudarySet.find(currentV) == targetBoudarySet.end()) {
-            for (TriMesh::VertexVertexIter vv_it = m_mesh->vv_iter(currentV); vv_it; vv_it++) {
-                if (visited.find(*vv_it) == visited.end()
+            for (TriMesh::ConstVertexVertexIter cvv_it = m_mesh->cvv_iter(currentV); cvv_it; cvv_it++) {
+                if (visited.find(*cvv_it) == visited.end()
                     // Don't go through sourceBoundary itself
-                &&  sourceBoundarySet.find(*vv_it) == sourceBoundarySet.end()) {
-                    queue.push(*vv_it);
-                    visited.insert(*vv_it);
+                &&  sourceBoundarySet.find(*cvv_it) == sourceBoundarySet.end()) {
+                    queue.push(*cvv_it);
+                    visited.insert(*cvv_it);
                     
-                    predecessor.emplace(*vv_it, currentV);
+                    predecessor.emplace(*cvv_it, currentV);
                 }
             }
             currentV = queue.front();

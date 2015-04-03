@@ -160,7 +160,7 @@ bool PlushPatternGenerator::calcInteriorPoints(TriMesh *mesh, std::map<VertexHan
  @return <#retval#>
  @retval <#meaning#>
  */
-bool PlushPatternGenerator::calcLPFB(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition) {
+bool PlushPatternGenerator::calcLPFB(const TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition) {
     Ipopt::SmartPtr<Ipopt::TNLP> mynlp = new LPFB_NLP(mesh, boundaryPosition);
     Ipopt::SmartPtr<Ipopt::IpoptApplication> app = IpoptApplicationFactory();
     

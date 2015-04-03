@@ -113,11 +113,11 @@ void PlushPatternGenerator::cancelJob() {
     isJobCanceled = true;
 }
 
-bool PlushPatternGenerator::getHalfedge(TriMesh *mesh, HalfedgeHandle &heh, VertexHandle from, VertexHandle to) {
-    for (TriMesh::VertexEdgeIter ve_it = mesh->ve_iter(from); ve_it; ve_it++)
+bool PlushPatternGenerator::getHalfedge(const TriMesh *mesh, HalfedgeHandle &heh, VertexHandle from, VertexHandle to) {
+    for (TriMesh::ConstVertexEdgeIter cve_it = mesh->cve_iter(from); cve_it; cve_it++)
     {
         // Return halfedge with correct direction
-        HalfedgeHandle _heh = mesh->halfedge_handle(*ve_it, 0);
+        HalfedgeHandle _heh = mesh->halfedge_handle(*cve_it, 0);
         if (mesh->from_vertex_handle(_heh) == from
             &&  mesh->to_vertex_handle(_heh) == to)
         {
@@ -125,20 +125,20 @@ bool PlushPatternGenerator::getHalfedge(TriMesh *mesh, HalfedgeHandle &heh, Vert
             return true;
         } else if (mesh->from_vertex_handle(_heh) == to
                    &&  mesh->to_vertex_handle(_heh) == from) {
-            heh = mesh->halfedge_handle(*ve_it, 1);
+            heh = mesh->halfedge_handle(*cve_it, 1);
             return true;
         }
     }
     return false;
 }
 
-bool PlushPatternGenerator::getHalfedge(TriMesh *mesh, HalfedgeHandle &heh, int fromNo, int toNo) {
+bool PlushPatternGenerator::getHalfedge(const TriMesh *mesh, HalfedgeHandle &heh, int fromNo, int toNo) {
     VertexHandle from = mesh->vertex_handle(fromNo);
     VertexHandle to = mesh->vertex_handle(toNo);
     return getHalfedge(mesh, heh, from, to);
 }
 
-bool PlushPatternGenerator::getEdge(TriMesh *mesh, EdgeHandle &eh, VertexHandle v1, VertexHandle v2) {
+bool PlushPatternGenerator::getEdge(const TriMesh *mesh, EdgeHandle &eh, VertexHandle v1, VertexHandle v2) {
     HalfedgeHandle _heh;
     bool result = getHalfedge(mesh, _heh, v1, v2);
     if (result) {
@@ -149,15 +149,15 @@ bool PlushPatternGenerator::getEdge(TriMesh *mesh, EdgeHandle &eh, VertexHandle 
     }
 }
 
-bool PlushPatternGenerator::getEdge(TriMesh *mesh, EdgeHandle &eh, int v1No, int v2No) {
+bool PlushPatternGenerator::getEdge(const TriMesh *mesh, EdgeHandle &eh, int v1No, int v2No) {
     VertexHandle v1 = mesh->vertex_handle(v1No);
     VertexHandle v2 = mesh->vertex_handle(v2No);
     return getEdge(mesh, eh, v1, v2);
 }
 
-bool PlushPatternGenerator::getFace(TriMesh *mesh, FaceHandle &fh, VertexHandle v1, VertexHandle v2, VertexHandle v3) {
-    for (TriMesh::VertexFaceIter vf_it = mesh->vf_begin(v1); vf_it; vf_it++) {
-        HalfedgeHandle heh = mesh->halfedge_handle(*vf_it);
+bool PlushPatternGenerator::getFace(const TriMesh *mesh, FaceHandle &fh, VertexHandle v1, VertexHandle v2, VertexHandle v3) {
+    for (TriMesh::ConstVertexFaceIter cvf_it = mesh->cvf_begin(v1); cvf_it; cvf_it++) {
+        HalfedgeHandle heh = mesh->halfedge_handle(*cvf_it);
         VertexHandle _v1 = mesh->from_vertex_handle(heh);
         VertexHandle _v2 = mesh->to_vertex_handle(heh);
         VertexHandle _v3 = mesh->to_vertex_handle(mesh->next_halfedge_handle(heh));
@@ -168,24 +168,13 @@ bool PlushPatternGenerator::getFace(TriMesh *mesh, FaceHandle &fh, VertexHandle 
         ||  (_v1 == v2 && _v2 == v3 && _v3 == v1)
         ||  (_v1 == v3 && _v2 == v1 && _v3 == v2)
         ||  (_v1 == v3 && _v2 == v2 && _v3 == v1)) {
-            fh = *vf_it;
+            fh = *cvf_it;
             return true;
         }
     }
     
     // Not found
     return false;
-}
-
-OpenMesh::Vec3d PlushPatternGenerator::getVector(TriMesh *mesh, EdgeHandle &_eh) {
-    HalfedgeHandle heh = mesh->halfedge_handle(_eh, 0);
-    return getVector(mesh, heh);
-}
-
-OpenMesh::Vec3d PlushPatternGenerator::getVector(TriMesh *mesh, HalfedgeHandle &_heh) {
-    TriMesh::Point p1 = mesh->point(mesh->from_vertex_handle(_heh));
-    TriMesh::Point p2 = mesh->point(mesh->to_vertex_handle(_heh));
-    return p2-p1;
 }
 
 std::vector<TriMesh>* PlushPatternGenerator::getFlattenedMeshes() {
@@ -205,7 +194,7 @@ std::vector<EdgeHandle>* PlushPatternGenerator::getSeams() {
     }
 }
 
-double PlushPatternGenerator::getSumInnerAngle(TriMesh *mesh, HalfedgeHandle heh1, HalfedgeHandle heh2) {
+double PlushPatternGenerator::getSumInnerAngle(const TriMesh *mesh, HalfedgeHandle heh1, HalfedgeHandle heh2) {
     assert(mesh->to_vertex_handle(heh1) == mesh->from_vertex_handle(heh2));
     assert(!mesh->is_boundary(heh1) && !mesh->is_boundary(heh2));
 
@@ -229,7 +218,7 @@ double PlushPatternGenerator::getSumInnerAngle(TriMesh *mesh, HalfedgeHandle heh
  @param getInteriorHalfedge If true, return the opposite halfedge of boundary halfedge. These halfedge are not boundary halfedge.
  @retval false if it contains no boundaries.
  */
-bool PlushPatternGenerator::getBoundaryOfOpenedMesh(std::vector< std::vector<HalfedgeHandle> > &boundaries, TriMesh *mesh, bool getInteriorHalfedge) {
+bool PlushPatternGenerator::getBoundaryOfOpenedMesh(std::vector< std::vector<HalfedgeHandle> > &boundaries, const TriMesh *mesh, bool getInteriorHalfedge) {
     std::set<HalfedgeHandle> visited;
     for (HalfedgeIter he_it = mesh->halfedges_begin(); he_it != mesh->halfedges_end(); he_it++) {
         if (!mesh->is_boundary(*he_it)

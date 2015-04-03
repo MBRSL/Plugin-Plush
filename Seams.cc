@@ -146,8 +146,8 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
         queue.pop();
         visited.insert(v);
         
-        for (TriMesh::VertexOHalfedgeIter voh_it = mesh->voh_iter(v); voh_it; voh_it++) {
-            VertexHandle neighborV = mesh->to_vertex_handle(*voh_it);
+        for (TriMesh::ConstVertexOHalfedgeIter cvoh_it = mesh->cvoh_iter(v); cvoh_it; cvoh_it++) {
+            VertexHandle neighborV = mesh->to_vertex_handle(*cvoh_it);
             VertexHandle originalNeighborV = mesh->property(inverseMapping, neighborV);
             
             // outward expanding
@@ -178,8 +178,8 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
     std::set<VertexHandle> finalBorderVertices;
     for (auto v_it = visited.begin(); v_it != visited.end(); v_it++) {
         // If this vertex has a non-visited neighbor, it's boundary vertex
-        for (TriMesh::VertexVertexIter vv_it = mesh->vv_iter(*v_it); vv_it; vv_it++) {
-            if (visited.find(*vv_it) == visited.end()) {
+        for (TriMesh::ConstVertexVertexIter cvv_it = mesh->cvv_iter(*v_it); cvv_it; cvv_it++) {
+            if (visited.find(*cvv_it) == visited.end()) {
                 finalBorderVertices.insert(*v_it);
                 break;
             }
@@ -203,20 +203,20 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
             VertexHandle v = queue.front();
             queue.pop();
             
-            for (TriMesh::VertexOHalfedgeIter voh_it = mesh->voh_iter(v); voh_it; voh_it++) {
-                VertexHandle neighborV = mesh->to_vertex_handle(*voh_it);
+            for (TriMesh::ConstVertexOHalfedgeIter cvoh_it = mesh->cvoh_iter(v); cvoh_it; cvoh_it++) {
+                VertexHandle neighborV = mesh->to_vertex_handle(*cvoh_it);
                 
                 if (finalBorderVertices.find(neighborV) != finalBorderVertices.end()) {
                     if (visited.find(neighborV) == visited.end()) {
                         visited.insert(neighborV);
                         queue.push(neighborV);
                         
-                        subBorderEdges.push_back(*voh_it);
+                        subBorderEdges.push_back(*cvoh_it);
                         break;
                     } else if (neighborV == startingV
                            && std::find(subBorderEdges.begin(), subBorderEdges.end(),
-                                        mesh->opposite_halfedge_handle(*voh_it)) == subBorderEdges.end()) {
-                       subBorderEdges.push_back(*voh_it);
+                                        mesh->opposite_halfedge_handle(*cvoh_it)) == subBorderEdges.end()) {
+                       subBorderEdges.push_back(*cvoh_it);
                        break;
                     }
                 }

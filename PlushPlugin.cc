@@ -323,7 +323,6 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
     int n = flattenedMeshes->size();
     int *newTriMeshIds = new int[n];
     
-    std::vector<int> seamsId;
     for (int i = 0; i < n; i++) {
         emit addEmptyObject(DATA_TRIANGLE_MESH, newTriMeshIds[i]);
 
@@ -375,16 +374,10 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
             VertexHandle oldV2 = oldSubMesh.to_vertex_handle(old_heh);
             EdgeHandle he;
             assert(PlushPatternGenerator::getEdge(subMesh, he, oldToNewMapping[oldV1], oldToNewMapping[oldV2]));
-            EdgeHandle original_he;
-            assert(PlushPatternGenerator::getEdge(m_patternGenerator->m_mesh,
-                                                  original_he,
-                                                  oldSubMesh.property(oldInverseMappingHandle, oldV1),
-                                                  oldSubMesh.property(oldInverseMappingHandle, oldV2)));
             
             // Update inverse map
             seams.push_back(he);
             subSeamsId.push_back(he.idx());
-            seamsId.push_back(original_he.idx());
         }
         MeshSelection::selectEdges(subMesh, subSeamsId);
 
@@ -399,7 +392,6 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
     // Clear old meshes
     flattenedMeshes->clear();
     
-    MeshSelection::selectEdges(m_patternGenerator->m_mesh, seamsId);
     emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION_VERTICES);
 }
 

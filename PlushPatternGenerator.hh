@@ -29,9 +29,6 @@ signals:
     void setJobState(int val);
     
 public:
-    TriMesh *m_mesh;
-    QString m_meshName;
-    
     /// Used for log
     ///@{
     static const int LOGERR = 0;
@@ -76,19 +73,17 @@ public:
     static OpenMesh::MPropHandleT< std::vector<EdgeHandle> > getSeamsHandle(TriMesh *mesh);
     ///@}
     
-    static bool getHalfedge(TriMesh *mesh, HalfedgeHandle &heh, int fromNo, int toNo);
-    static bool getHalfedge(TriMesh *mesh, HalfedgeHandle &heh, VertexHandle from, VertexHandle to);
-    static bool getEdge(TriMesh *mesh, EdgeHandle &eh, int v1No, int v2No);
-    static bool getEdge(TriMesh *mesh, EdgeHandle &eh, VertexHandle v1, VertexHandle v2);
-    static bool getFace(TriMesh *mesh, FaceHandle &fh, VertexHandle v1, VertexHandle v2, VertexHandle v3);
-    static OpenMesh::Vec3d getVector(TriMesh *mesh, EdgeHandle &_eh);
-    static OpenMesh::Vec3d getVector(TriMesh *mesh, HalfedgeHandle &_heh);
+    static bool getHalfedge(const TriMesh *mesh, HalfedgeHandle &heh, int fromNo, int toNo);
+    static bool getHalfedge(const TriMesh *mesh, HalfedgeHandle &heh, VertexHandle from, VertexHandle to);
+    static bool getEdge(const TriMesh *mesh, EdgeHandle &eh, int v1No, int v2No);
+    static bool getEdge(const TriMesh *mesh, EdgeHandle &eh, VertexHandle v1, VertexHandle v2);
+    static bool getFace(const TriMesh *mesh, FaceHandle &fh, VertexHandle v1, VertexHandle v2, VertexHandle v3);
     
     /// Calculate the sum of inner (clockwise) angles by iterating from one halfedge to another.
-    static double getSumInnerAngle(TriMesh *mesh, HalfedgeHandle heh1, HalfedgeHandle heh2);
+    static double getSumInnerAngle(const TriMesh *mesh, HalfedgeHandle heh1, HalfedgeHandle heh2);
     
     /// Get boundary for a given opened mesh
-    static bool getBoundaryOfOpenedMesh(std::vector< std::vector<HalfedgeHandle> > &boundaries, TriMesh *mesh, bool getInteriorHalfedge);
+    static bool getBoundaryOfOpenedMesh(std::vector< std::vector<HalfedgeHandle> > &boundaries, const TriMesh *mesh, bool getInteriorHalfedge);
     
     PlushPatternGenerator(TriMesh *mesh, QString meshName);
     ~PlushPatternGenerator();
@@ -117,6 +112,9 @@ public:
     std::vector<EdgeHandle>* getSeams();
     
 private:
+    TriMesh *m_mesh;
+    QString m_meshName;
+
     Polyhedron m_polyhedron;
     
     /// Mapping from TriMesh::VertexHandle::idx to boost_vertex_descriptor
@@ -130,7 +128,7 @@ private:
 
     /// @name Flattening
     ///@{
-    bool calcLPFB(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition);
+    bool calcLPFB(const TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition);
     bool calcInteriorPoints(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition);
     /// Calculate the distortion between original 3D mesh and flattened graph, the result is stored in distortionHandle
     void calcDistortion(std::vector<TriMesh> *flattenedMeshes);
