@@ -231,7 +231,8 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
                     VertexHandle originalV1 = mesh->property(inverseMapping, mesh->from_vertex_handle(*he_it));
                     VertexHandle originalV2 = mesh->property(inverseMapping, mesh->to_vertex_handle(*he_it));
                     EdgeHandle originalEh;
-                    assert(getEdge(m_mesh, originalEh, originalV1, originalV2));
+                    bool edgeExist = getEdge(m_mesh, originalEh, originalV1, originalV2);
+                    assert(edgeExist);
                     seams.push_back(originalEh);
                 }
             }
@@ -334,7 +335,8 @@ bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices
         
         for (size_t i = 1; i < path.size(); i++) {
             EdgeHandle eh;
-            assert(getEdge(m_mesh, eh, path[i-1], path[i]));
+            bool edgeExist = getEdge(m_mesh, eh, path[i-1], path[i]);
+            assert(edgeExist);
             seams.push_back(eh);
         }
         

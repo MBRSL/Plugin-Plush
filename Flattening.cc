@@ -219,7 +219,8 @@ void PlushPatternGenerator::calcDistortion(std::vector<TriMesh> *flattenedMeshes
                 VertexHandle originalFV3 = flattenedMesh.property(inverseMapping, flattenedMesh.to_vertex_handle(flattenedMesh.next_halfedge_handle(heh)));
 
                 FaceHandle originalF;
-                assert(getFace(m_mesh, originalF, originalFV1, originalFV2, originalFV3));
+                bool faceExist = getFace(m_mesh, originalF, originalFV1, originalFV2, originalFV3);
+                assert(faceExist);
                 HalfedgeHandle original_heh = m_mesh->halfedge_handle(originalF);
                 double originalArea = m_mesh->calc_sector_area(original_heh);
 

@@ -373,7 +373,8 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
             VertexHandle oldV1 = oldSubMesh.from_vertex_handle(old_heh);
             VertexHandle oldV2 = oldSubMesh.to_vertex_handle(old_heh);
             EdgeHandle he;
-            assert(PlushPatternGenerator::getEdge(subMesh, he, oldToNewMapping[oldV1], oldToNewMapping[oldV2]));
+            bool edgeExist = PlushPatternGenerator::getEdge(subMesh, he, oldToNewMapping[oldV1], oldToNewMapping[oldV2]);
+            assert(edgeExist);
             
             // Update inverse map
             seams.push_back(he);
