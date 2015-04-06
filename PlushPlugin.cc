@@ -25,7 +25,9 @@ void PlushPlugin::initializePlugin()
     QLabel *geodesicNumberLabel = new QLabel(tr("#"));
     geodesicNumPaths = new QSpinBox();
     geodesicNumPaths->setMinimum(0);
+    geodesicNumPaths->setValue(36);
     geodesicElimination = new QCheckBox(tr("Eliminate crossover paths"));
+    geodesicElimination->setChecked(true);
     geodesicShowSingleButton = new QPushButton(tr("Show single path"));
     geodesicShowAllButton = new QPushButton(tr("Show all path"));
     geodesicCalcButton = new QPushButton(tr("Calculate"));
@@ -290,7 +292,7 @@ void PlushPlugin::showGeodesicButtonClicked() {
             
             MeshSelection::clearEdgeSelection(mesh);
             MeshSelection::selectEdges(mesh, edgeList);
-            emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION_EDGES);
+            emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
         }
     }
 }

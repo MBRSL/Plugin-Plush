@@ -1,22 +1,19 @@
 #include "PlushPatternGenerator.hh"
-#include "SuperDeform/Skeleton.hh"
 
-#include <CGAL/boost/graph/dijkstra_shortest_paths.h>
-
-#include <boost/property_map/function_property_map.hpp>
+#include <boost/graph/dijkstra_shortest_paths.hpp>
 
 typedef boost::property_map<Polyhedron, boost::vertex_external_index_t>::type VertexIdPropertyMap;
 typedef boost::property_map<Polyhedron, boost::edge_external_index_t>::type EdgeIdPropertyMap;
 
 class WeightFunctor {
 private:
-    TriMesh *mesh;
-    const Polyhedron P;
+    TriMesh *m_mesh;
+    const Polyhedron m_polyhedron;
     const boost::iterator_property_map<std::vector<boost_vertex_descriptor>::iterator, VertexIdPropertyMap>
-    predecessor_pmap;
-    const EdgeIdPropertyMap edgeIndexMap;
-    boost_vertex_descriptor *currentV;
-    double avgEdgeLength;
+    m_predecessor_pmap;
+    const EdgeIdPropertyMap m_edgeIndexMap;
+    boost_vertex_descriptor *m_currentV;
+    double m_maxEdgeLength;
     
     double distanceWeight(TriMesh::Point p1, TriMesh::Point p2) const;
     double textureWeight(HalfedgeHandle he1, HalfedgeHandle he2) const;
@@ -28,10 +25,10 @@ private:
                           TriMesh::Point p1,
                           TriMesh::Point p2) const;
     
-    double smoothnessWeight(boost_vertex_descriptor boost_v1,
-                            boost_vertex_descriptor boost_v2,
-                            TriMesh::Point p1,
-                            TriMesh::Point p2) const;
+//    double smoothnessWeight(boost_vertex_descriptor boost_v1,
+//                            boost_vertex_descriptor boost_v2,
+//                            TriMesh::Point p1,
+//                            TriMesh::Point p2) const;
     
 public:
     WeightFunctor(TriMesh *mesh,
