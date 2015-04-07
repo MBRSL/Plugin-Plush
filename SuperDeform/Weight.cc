@@ -18,8 +18,7 @@ double distToSeg_square(OpenMesh::Vec3d p, OpenMesh::Vec3d a, OpenMesh::Vec3d b)
 
 double cot(OpenMesh::Vec3d v1, OpenMesh::Vec3d v2)
 {
-    double dot_v = v1 | v2;
-    return dot_v / (1e-6 + sqrt((v1 | v1) * (v2 | v2) - dot_v * dot_v));
+    return (v1 | v2) / (v1 % v2).norm();
 }
 
 void Weight::computeBoneWeight(TriMesh *mesh, Skeleton *skeleton)
@@ -92,7 +91,6 @@ void Weight::setMatrix(TriMesh *mesh, const vector<Bone> &bones,
 	i = 0;
 	for(VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++, i++)
 	{
-        HalfedgeHandle he = mesh->halfedge_handle(*v_it);
         TriMesh::Point pi = mesh->point(*v_it);
         
 		// set diagonal matrix H
@@ -139,20 +137,19 @@ void Weight::setMatrix(TriMesh *mesh, const vector<Bone> &bones,
 		//   = 0                         otherwise
 		// start set matrix A and diagonal matrix D
 		double sumOmega = 0.0;
-		do{
-            he = mesh->next_halfedge_handle(he);
-
+        for (TriMesh::ConstVertexIHalfedgeIter cvih_it = mesh->cvih_begin(*v_it); cvih_it; cvih_it++) {
 			// start calculate omega_ij = cot(alpha) + cot(beta)
-			VertexHandle vj = mesh->to_vertex_handle(he); // incident vertex, vi's neighbor
+			VertexHandle vj = mesh->from_vertex_handle(*cvih_it); // incident vertex, vi's neighbor
             TriMesh::Point pj = mesh->point(vj);
 			double cot_alpha = 0;
 			double cot_beta = 0;
 
-            VertexHandle vij_1 = mesh->to_vertex_handle(mesh->next_halfedge_handle(he));
+            VertexHandle vij_1 = mesh->to_vertex_handle(mesh->next_halfedge_handle(*cvih_it));
             TriMesh::Point pij_1 = mesh->point(vij_1);
+            
             cot_alpha = cot(pi - pij_1, pj - pij_1);
 
-            VertexHandle vij_2 = mesh->to_vertex_handle(mesh->next_halfedge_handle(mesh->opposite_halfedge_handle(he)));
+            VertexHandle vij_2 = mesh->to_vertex_handle(mesh->next_halfedge_handle(mesh->opposite_halfedge_handle(*cvih_it)));
             TriMesh::Point pij_2 = mesh->point(vij_2);
             cot_beta = cot(pi - pij_2, pj - pij_2);
             
@@ -161,10 +158,8 @@ void Weight::setMatrix(TriMesh *mesh, const vector<Bone> &bones,
 
             tripletList.push_back(Eigen::Triplet<double>(i, vj.idx(), -omega_ij));
 			sumOmega += omega_ij;
-
-            he = mesh->opposite_halfedge_handle(he);
-		} while(mesh->halfedge_handle(*v_it) != he);
-
+		}
+        
 		if(D(i) < 1e-7)
 			D(i) = 1e-7;
 		D(i) = 1.0 / D(i); // d(i) = 1/area
