@@ -188,8 +188,8 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
     
     // Form edges from vertices
     visited.clear();
-    OpenMesh::MPropHandleT< std::vector<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
-    std::vector<EdgeHandle> &seams = m_mesh->property(seamsHandle);
+    OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
+    std::set<EdgeHandle> &seams = m_mesh->property(seamsHandle);
     for (auto v_it = finalBorderVertices.begin(); v_it != finalBorderVertices.end(); v_it++) {
         VertexHandle startingV = *v_it;
         if (visited.find(startingV) != visited.end()) {
@@ -233,7 +233,7 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
                     EdgeHandle originalEh;
                     bool edgeExist = getEdge(m_mesh, originalEh, originalV1, originalV2);
                     assert(edgeExist);
-                    seams.push_back(originalEh);
+                    seams.insert(originalEh);
                 }
             }
         }
@@ -314,9 +314,8 @@ bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices
     }
     
     // insert edges into seams
-    OpenMesh::MPropHandleT< std::vector<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
-    std::vector<EdgeHandle> &seams = m_mesh->property(seamsHandle);
-    seams.clear();
+    OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
+    std::set<EdgeHandle> &seams = m_mesh->property(seamsHandle);
 
     int count = 0;
     for (std::vector<std::pair<double, std::vector<VertexHandle> > >::iterator it = result.begin(); it != result.end(); it++, count++) {
@@ -337,7 +336,7 @@ bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices
             EdgeHandle eh;
             bool edgeExist = getEdge(m_mesh, eh, path[i-1], path[i]);
             assert(edgeExist);
-            seams.push_back(eh);
+            seams.insert(eh);
         }
         
         QString msg = QString("Weight of path #%1 from %2 to %3: %4").arg(count+1).arg((path.begin())->idx()).arg((path.end()-1)->idx()).arg(it->first);

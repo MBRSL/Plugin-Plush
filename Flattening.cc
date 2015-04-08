@@ -6,7 +6,7 @@
 
 bool PlushPatternGenerator::calcFlattenedGraph()
 {
-    std::vector<EdgeHandle> *seams = getSeams();
+    std::set<EdgeHandle> *seams = getSeams();
     if (!seams) {
         emit log(LOGERR, "Seams not ready. Call calcSeams() first.");
         return false;
@@ -17,7 +17,7 @@ bool PlushPatternGenerator::calcFlattenedGraph()
     flattenedMeshes->clear();
 
     // Create sub meshes using boundaries
-    splitWithBoundary(flattenedMeshes);
+    splitWithBoundary(flattenedMeshes, seams);
 
     isJobCanceled = false;
     for (size_t i = 0; i < flattenedMeshes->size(); i++) {
@@ -160,7 +160,7 @@ bool PlushPatternGenerator::calcInteriorPoints(TriMesh *mesh, std::map<VertexHan
  @return <#retval#>
  @retval <#meaning#>
  */
-bool PlushPatternGenerator::calcLPFB(const TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition) {
+bool PlushPatternGenerator::calcLPFB(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition) {
     Ipopt::SmartPtr<Ipopt::TNLP> mynlp = new LPFB_NLP(mesh, boundaryPosition);
     Ipopt::SmartPtr<Ipopt::IpoptApplication> app = IpoptApplicationFactory();
     

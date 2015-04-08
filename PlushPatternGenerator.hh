@@ -70,7 +70,7 @@ public:
     static OpenMesh::VPropHandleT<double> distortionVHandle;
     /// Mapping flattened vertex handle back to original vertex handle
     static OpenMesh::VPropHandleT<VertexHandle> getInverseMappingHandle(TriMesh *mesh);
-    static OpenMesh::MPropHandleT< std::vector<EdgeHandle> > getSeamsHandle(TriMesh *mesh);
+    static OpenMesh::MPropHandleT< std::set<EdgeHandle> > getSeamsHandle(TriMesh *mesh);
     ///@}
     
     static bool getHalfedge(const TriMesh *mesh, HalfedgeHandle &heh, int fromNo, int toNo);
@@ -109,7 +109,7 @@ public:
     bool calcFlattenedGraph();
     
     std::vector<TriMesh>* getFlattenedMeshes();
-    std::vector<EdgeHandle>* getSeams();
+    std::set<EdgeHandle>* getSeams();
     
 private:
     TriMesh *m_mesh;
@@ -124,11 +124,11 @@ private:
     
     bool isIntersected(std::vector<VertexHandle> path1, std::vector<VertexHandle> path2);
     
-    bool splitWithBoundary(std::vector<TriMesh> *subMeshes);
+    bool splitWithBoundary(std::vector<TriMesh> *subMeshes, std::set<EdgeHandle> *seams);
 
     /// @name Flattening
     ///@{
-    bool calcLPFB(const TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition);
+    bool calcLPFB(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition);
     bool calcInteriorPoints(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition);
     /// Calculate the distortion between original 3D mesh and flattened graph, the result is stored in distortionHandle
     void calcDistortion(std::vector<TriMesh> *flattenedMeshes);

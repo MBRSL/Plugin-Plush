@@ -9,7 +9,7 @@
 using namespace Ipopt;
 
 // constructor
-LPFB_NLP::LPFB_NLP(const TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition) : m_mesh(mesh), m_boundaryPosition(boundaryPosition)
+LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition) : m_mesh(mesh), m_boundaryPosition(boundaryPosition)
 {
     std::vector< std::vector<HalfedgeHandle> > boundaries;
     PlushPatternGenerator::getBoundaryOfOpenedMesh(boundaries, m_mesh, true);
@@ -414,11 +414,14 @@ void LPFB_NLP::finalize_solution(SolverReturn status,
         posX[k+1] = posX[k] + m_edgeLengths[k] * cos(phi_k[k]);
         posY[k+1] = posY[k] + m_edgeLengths[k] * sin(phi_k[k]);
         
-        printf("%d : %d | %.3lf\n", k, m_mesh->from_vertex_handle(m_boundary3D[k]).idx(), x[k]);
+        printf("%d : %d | %.3lf | %.3lf\n", k, m_mesh->from_vertex_handle(m_boundary3D[k]).idx(), x[k], x[k]-m_innerAngle3D[k]);
     }
     
+//    OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = PlushPatternGenerator::getSeamsHandle(m_mesh);
+//    std::set<EdgeHandle> &seams = m_mesh->property(seamsHandle);
     for (Index k = 0; k < n; k++) {
         // If k == 0, it will be placed at (0,0,0)
+//        seams.insert(m_mesh->edge_handle(m_boundary3D[k]));
         VertexHandle v = m_mesh->from_vertex_handle(m_boundary3D[k]);
         if (m_mesh->is_boundary(v)) {
             m_boundaryPosition->emplace(v, OpenMesh::Vec3d(posX[k], posY[k], 0));

@@ -7,7 +7,7 @@
 class LPFB_NLP : public Ipopt::TNLP
 {
 public:
-    LPFB_NLP(const TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition);
+    LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition);
     virtual ~LPFB_NLP();
     
     /**@name Overloaded from TNLP */
@@ -66,7 +66,7 @@ public:
     //@}
     
 private:
-    const TriMesh *m_mesh;
+    TriMesh *m_mesh;
     std::map<VertexHandle, OpenMesh::Vec3d> *m_boundaryPosition;
     std::vector<double> m_innerAngle3D;
     std::vector<double> m_edgeLengths;

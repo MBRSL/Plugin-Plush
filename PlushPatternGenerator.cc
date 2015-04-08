@@ -26,8 +26,8 @@ OpenMesh::VPropHandleT<VertexHandle> PlushPatternGenerator::getInverseMappingHan
     return inverseMappingHandle;
 }
 
-OpenMesh::MPropHandleT< std::vector<EdgeHandle> > PlushPatternGenerator::getSeamsHandle(TriMesh *mesh) {
-    OpenMesh::MPropHandleT< std::vector<EdgeHandle> > seamsHandle;
+OpenMesh::MPropHandleT< std::set<EdgeHandle> > PlushPatternGenerator::getSeamsHandle(TriMesh *mesh) {
+    OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle;
     if(!mesh->get_property_handle(seamsHandle, "seams")) {
         mesh->add_property(seamsHandle, "seams");
     }
@@ -185,8 +185,8 @@ std::vector<TriMesh>* PlushPatternGenerator::getFlattenedMeshes() {
     }
 }
 
-std::vector<EdgeHandle>* PlushPatternGenerator::getSeams() {
-    OpenMesh::MPropHandleT< std::vector<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
+std::set<EdgeHandle>* PlushPatternGenerator::getSeams() {
+    OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
     if (m_mesh->property(seamsHandle).size() == 0) {
         return NULL;
     } else {
@@ -328,15 +328,14 @@ bool PlushPatternGenerator::getBoundaryOfOpenedMesh(std::vector< std::vector<Hal
  @param loops The given set of boundaries. Each boundary should be a loop.
  @param subMeshes Resulting sub meshes will be stored here.
  */
-bool PlushPatternGenerator::splitWithBoundary(std::vector<TriMesh> *subMeshes)
+bool PlushPatternGenerator::splitWithBoundary(std::vector<TriMesh> *subMeshes, std::set<EdgeHandle> *seamsEdgeSet)
 {
     // construct set for efficient searching
-    OpenMesh::MPropHandleT< std::vector<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
-    std::set<EdgeHandle> seamsEdgeSet(m_mesh->property(seamsHandle).begin(), m_mesh->property(seamsHandle).end());
-    assert(!seamsEdgeSet.empty() && "seams should not be empty.");
+//    std::set<EdgeHandle> seamsEdgeSet(seams->begin(), seams->end());
+    assert(!seamsEdgeSet->empty() && "seams should not be empty.");
     
     std::set<VertexHandle> seamsVertexSet;
-    for (auto e_it = m_mesh->property(seamsHandle).begin(); e_it != m_mesh->property(seamsHandle).end(); e_it++) {
+    for (auto e_it = seamsEdgeSet->begin(); e_it != seamsEdgeSet->end(); e_it++) {
         HalfedgeHandle heh = m_mesh->halfedge_handle(*e_it, 0);
         seamsVertexSet.emplace(m_mesh->from_vertex_handle(heh));
         seamsVertexSet.emplace(m_mesh->to_vertex_handle(heh));
@@ -382,7 +381,7 @@ bool PlushPatternGenerator::splitWithBoundary(std::vector<TriMesh> *subMeshes)
                 // If this is a boundary vertex...
                 if (seamsVertexSet.find(vi) != seamsVertexSet.end()) {
                     // And only add new vertex if this is a boundary halfedge
-                    if (seamsEdgeSet.find(m_mesh->edge_handle(heh[i])) != seamsEdgeSet.end()) {
+                    if (seamsEdgeSet->find(m_mesh->edge_handle(heh[i])) != seamsEdgeSet->end()) {
                         VertexHandle newV = newMesh.add_vertex(m_mesh->point(vi));
                         newMesh.property(inverseMapping, newV) = vi;
                         halfedgeToVertexMapping.emplace(heh[i], newV);
@@ -397,7 +396,7 @@ bool PlushPatternGenerator::splitWithBoundary(std::vector<TriMesh> *subMeshes)
                 
                 // Explore other faces through non-boundary halfedges
                 FaceHandle neighborFi = m_mesh->opposite_face_handle(heh[i]);
-                if (seamsEdgeSet.find(m_mesh->edge_handle(heh[i])) == seamsEdgeSet.end()
+                if (seamsEdgeSet->find(m_mesh->edge_handle(heh[i])) == seamsEdgeSet->end()
                 &&  visitedF.find(neighborFi) == visitedF.end()) {
                     queue.push(neighborFi);
                     visitedF.insert(neighborFi);
@@ -422,14 +421,14 @@ bool PlushPatternGenerator::splitWithBoundary(std::vector<TriMesh> *subMeshes)
                     newV[i] = vertexToVertexMapping[vi];
                 }
                 // boundary vertex on boundary halfedge
-                else if (seamsEdgeSet.find(m_mesh->edge_handle(heh[i])) != seamsEdgeSet.end()) {
+                else if (seamsEdgeSet->find(m_mesh->edge_handle(heh[i])) != seamsEdgeSet->end()) {
                     newV[i] = halfedgeToVertexMapping[heh[i]];
                 }
                 // boundary vertex on non-boundary halfedge, we need to search for neighbor boundary halfedge
                 else {
                     // loop until we find a boundary halfedge
                     HalfedgeHandle current_heh = m_mesh->next_halfedge_handle(m_mesh->opposite_halfedge_handle(heh[i]));
-                    for (unsigned int count = 0; seamsEdgeSet.find(m_mesh->edge_handle(current_heh)) == seamsEdgeSet.end(); count++) {
+                    for (unsigned int count = 0; seamsEdgeSet->find(m_mesh->edge_handle(current_heh)) == seamsEdgeSet->end(); count++) {
                         current_heh = m_mesh->next_halfedge_handle(m_mesh->opposite_halfedge_handle(current_heh));
                         assert(count < m_mesh->valence(vi));
                     }
