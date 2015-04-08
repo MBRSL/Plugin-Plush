@@ -222,16 +222,16 @@ bool PlushPatternGenerator::getBoundaryOfOpenedMesh(std::vector< std::vector<Hal
     std::set<HalfedgeHandle> visited;
     for (HalfedgeIter he_it = mesh->halfedges_begin(); he_it != mesh->halfedges_end(); he_it++) {
         if (!mesh->is_boundary(*he_it)
-            ||  visited.find(*he_it) != visited.end()) {
+        ||  visited.find(*he_it) != visited.end()) {
             continue;
         }
         
-    std:vector<HalfedgeHandle> boundary;
+        std:vector<HalfedgeHandle> boundary;
         std::queue<HalfedgeHandle> queue;
         queue.push(*he_it);
         visited.insert(*he_it);
         
-        while (queue.size() > 0) {
+        while (!queue.empty()) {
             HalfedgeHandle current_heh = queue.front();
             queue.pop();
             
@@ -330,128 +330,117 @@ bool PlushPatternGenerator::getBoundaryOfOpenedMesh(std::vector< std::vector<Hal
  */
 bool PlushPatternGenerator::splitWithBoundary(std::vector<TriMesh> *subMeshes)
 {
-    std::set<FaceHandle> visitedF;
-    
+    // construct set for efficient searching
     OpenMesh::MPropHandleT< std::vector<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
-    std::set<EdgeHandle> seams(m_mesh->property(seamsHandle).begin(), m_mesh->property(seamsHandle).end());
-    assert(seams.size() > 0);
+    std::set<EdgeHandle> seamsEdgeSet(m_mesh->property(seamsHandle).begin(), m_mesh->property(seamsHandle).end());
+    assert(!seamsEdgeSet.empty() && "seams should not be empty.");
+    
+    std::set<VertexHandle> seamsVertexSet;
+    for (auto e_it = m_mesh->property(seamsHandle).begin(); e_it != m_mesh->property(seamsHandle).end(); e_it++) {
+        HalfedgeHandle heh = m_mesh->halfedge_handle(*e_it, 0);
+        seamsVertexSet.emplace(m_mesh->from_vertex_handle(heh));
+        seamsVertexSet.emplace(m_mesh->to_vertex_handle(heh));
+    }
 
+    // Segment mesh into sub meshes using BFS.
+    std::set<FaceHandle> visitedF;
     for (FaceIter f_it = m_mesh->faces_begin(); f_it != m_mesh->faces_end(); f_it++) {
         if (visitedF.find(*f_it) != visitedF.end()) {
             continue;
         }
         
         TriMesh newMesh;
-        newMesh.request_face_colors();
         OpenMesh::VPropHandleT<VertexHandle> inverseMapping = getInverseMappingHandle(&newMesh);
 
+        // For non-boundary vertices, we construct a one-to-one mapping from old to new
+        std::map<VertexHandle, VertexHandle> vertexToVertexMapping;
+        // But for boundary vertices, one old vertex maps to two new vertices. This is the problem.
+        // So we use halfedge-vertex mapping because two old halfedges can map to two new vertices.
+        std::map<HalfedgeHandle, VertexHandle> halfedgeToVertexMapping;
+        
         std::queue<FaceHandle> queue;
         std::set<FaceHandle> connectedFaces;
-        std::set<VertexHandle> connectedVertices;
-        
+
         queue.push(*f_it);
         visitedF.insert(*f_it);
         connectedFaces.insert(*f_it);
         
+        // Explore & insert new vertices
         while (!queue.empty()) {
             FaceHandle f = queue.front();
             queue.pop();
             connectedFaces.insert(f);
             
-            HalfedgeHandle heh2 = m_mesh->halfedge_handle(f);
-            HalfedgeHandle heh3 = m_mesh->next_halfedge_handle(heh2);
-            HalfedgeHandle heh1 = m_mesh->prev_halfedge_handle(heh2);
+            HalfedgeHandle heh[3];
+            heh[0] = m_mesh->halfedge_handle(f);
+            heh[1] = m_mesh->next_halfedge_handle(heh[0]);
+            heh[2] = m_mesh->next_halfedge_handle(heh[1]);
             
-            FaceHandle neighborF1 = m_mesh->opposite_face_handle(heh1);
-            FaceHandle neighborF2 = m_mesh->opposite_face_handle(heh2);
-            FaceHandle neighborF3 = m_mesh->opposite_face_handle(heh3);
-            
-            VertexHandle v1 = m_mesh->to_vertex_handle(heh1);
-            VertexHandle v2 = m_mesh->to_vertex_handle(heh2);
-            VertexHandle v3 = m_mesh->to_vertex_handle(heh3);
-            
-            connectedVertices.insert(v1);
-            connectedVertices.insert(v2);
-            connectedVertices.insert(v3);
-            
-            if (seams.find(m_mesh->edge_handle(heh1)) == seams.end()
-            &&  visitedF.find(neighborF1) == visitedF.end()) {
-                queue.push(neighborF1);
-                visitedF.insert(neighborF1);
-            }
-            if (seams.find(m_mesh->edge_handle(heh2)) == seams.end()
-                &&  visitedF.find(neighborF2) == visitedF.end()) {
-                queue.push(neighborF2);
-                visitedF.insert(neighborF2);
-            }
-            if (seams.find(m_mesh->edge_handle(heh3)) == seams.end()
-                &&  visitedF.find(neighborF3) == visitedF.end()) {
-                queue.push(neighborF3);
-                visitedF.insert(neighborF3);
+            for (int i = 0; i < 3; i++) {
+                VertexHandle vi = m_mesh->from_vertex_handle(heh[i]);
+                // Insert vertices into new mesh
+                // If this is a boundary vertex...
+                if (seamsVertexSet.find(vi) != seamsVertexSet.end()) {
+                    // And only add new vertex if this is a boundary halfedge
+                    if (seamsEdgeSet.find(m_mesh->edge_handle(heh[i])) != seamsEdgeSet.end()) {
+                        VertexHandle newV = newMesh.add_vertex(m_mesh->point(vi));
+                        newMesh.property(inverseMapping, newV) = vi;
+                        halfedgeToVertexMapping.emplace(heh[i], newV);
+                    }
+                }
+                // If not a boundary vertex, we have to check if this vertex is already added
+                else if (vertexToVertexMapping.find(vi) == vertexToVertexMapping.end()) {
+                    VertexHandle newV = newMesh.add_vertex(m_mesh->point(vi));
+                    newMesh.property(inverseMapping, newV) = vi;
+                    vertexToVertexMapping.emplace(vi, newV);
+                }
+                
+                // Explore other faces through non-boundary halfedges
+                FaceHandle neighborFi = m_mesh->opposite_face_handle(heh[i]);
+                if (seamsEdgeSet.find(m_mesh->edge_handle(heh[i])) == seamsEdgeSet.end()
+                &&  visitedF.find(neighborFi) == visitedF.end()) {
+                    queue.push(neighborFi);
+                    visitedF.insert(neighborFi);
+                }
             }
         }
         
-        // Insert vertices into new mesh
-        std::map<VertexHandle, VertexHandle> vertexToVertexMapping; // Old vertex to new vertex mapping function
-        for (auto v_it = connectedVertices.begin(); v_it != connectedVertices.end(); v_it++) {
-            VertexHandle newV = newMesh.add_vertex(m_mesh->point(*v_it));
-            newMesh.property(inverseMapping, newV) = *v_it;
-            vertexToVertexMapping.emplace(*v_it, newV);
-        }
-        
-        // Insert other faces into new mesh
-        /**
-         *          v3
-         *         /  \
-         *        /    \
-         *      v1 ---- v2
-         *          heh
-         */
+        // Insert new faces
+        newMesh.request_face_colors();
         for (std::set<FaceHandle>::iterator f_it = connectedFaces.begin(); f_it != connectedFaces.end(); f_it++) {
-            HalfedgeHandle heh12 = m_mesh->halfedge_handle(*f_it);
-            HalfedgeHandle heh23 = m_mesh->next_halfedge_handle(heh12);
-            HalfedgeHandle heh31 = m_mesh->next_halfedge_handle(heh23);
-            VertexHandle v1 = m_mesh->from_vertex_handle(heh12);
-            VertexHandle v2 = m_mesh->to_vertex_handle(heh12);
-            VertexHandle v3 = m_mesh->to_vertex_handle(heh23);
+            HalfedgeHandle heh[3];
+            heh[0] = m_mesh->halfedge_handle(*f_it);
+            heh[1] = m_mesh->next_halfedge_handle(heh[0]);
+            heh[2] = m_mesh->next_halfedge_handle(heh[1]);
             
-            VertexHandle newV1 = vertexToVertexMapping[v1];
-            VertexHandle newV2 = vertexToVertexMapping[v2];
-            VertexHandle newV3 = vertexToVertexMapping[v3];
-            
-            /* Duplicate boundary vertices
-             * For any seam edges, it has two faces beside it.
-             * If both two faces ARE visited, this edge should be split.
-             */
-            if (seams.find(m_mesh->edge_handle(heh12)) != seams.end()
-            &&  connectedFaces.find(m_mesh->opposite_face_handle(heh12)) != connectedFaces.end()) {
-                if (m_mesh->halfedge_handle(m_mesh->edge_handle(heh12), 0) == heh12) {
-                    newV1 = newMesh.add_vertex(m_mesh->point(v1));
-                    newV2 = newMesh.add_vertex(m_mesh->point(v2));
-                    newMesh.property(inverseMapping, newV1) = v1;
-                    newMesh.property(inverseMapping, newV2) = v2;
+            // Search for corresponding new vertex
+            VertexHandle newV[3];
+            for (int i = 0; i < 3; i++) {
+                VertexHandle vi = m_mesh->from_vertex_handle(heh[i]);
+                // Non-boundary vertex
+                if (seamsVertexSet.find(vi) == seamsVertexSet.end()) {
+                    newV[i] = vertexToVertexMapping[vi];
                 }
-            } else if (seams.find(m_mesh->edge_handle(heh23)) != seams.end()
-                   &&  connectedFaces.find(m_mesh->opposite_face_handle(heh23)) != connectedFaces.end()) {
-                if (m_mesh->halfedge_handle(m_mesh->edge_handle(heh23), 0) == heh23) {
-                    newV2 = newMesh.add_vertex(m_mesh->point(v2));
-                    newV3 = newMesh.add_vertex(m_mesh->point(v3));
-                    newMesh.property(inverseMapping, newV2) = v2;
-                    newMesh.property(inverseMapping, newV3) = v3;
+                // boundary vertex on boundary halfedge
+                else if (seamsEdgeSet.find(m_mesh->edge_handle(heh[i])) != seamsEdgeSet.end()) {
+                    newV[i] = halfedgeToVertexMapping[heh[i]];
                 }
-            } else if (seams.find(m_mesh->edge_handle(heh31)) != seams.end()
-                    && connectedFaces.find(m_mesh->opposite_face_handle(heh31)) != connectedFaces.end()) {
-                if (m_mesh->halfedge_handle(m_mesh->edge_handle(heh31), 0) == heh31) {
-                    newV1 = newMesh.add_vertex(m_mesh->point(v1));
-                    newV3 = newMesh.add_vertex(m_mesh->point(v3));
-                    newMesh.property(inverseMapping, newV1) = v1;
-                    newMesh.property(inverseMapping, newV3) = v3;
+                // boundary vertex on non-boundary halfedge, we need to search for neighbor boundary halfedge
+                else {
+                    // loop until we find a boundary halfedge
+                    HalfedgeHandle current_heh = m_mesh->next_halfedge_handle(m_mesh->opposite_halfedge_handle(heh[i]));
+                    for (unsigned int count = 0; seamsEdgeSet.find(m_mesh->edge_handle(current_heh)) == seamsEdgeSet.end(); count++) {
+                        current_heh = m_mesh->next_halfedge_handle(m_mesh->opposite_halfedge_handle(current_heh));
+                        assert(count < m_mesh->valence(vi));
+                    }
+                    newV[i] = halfedgeToVertexMapping[current_heh];
                 }
             }
+            
             std::vector<VertexHandle> face_vhs;
-            face_vhs.push_back(newV1);
-            face_vhs.push_back(newV2);
-            face_vhs.push_back(newV3);
+            face_vhs.push_back(newV[0]);
+            face_vhs.push_back(newV[1]);
+            face_vhs.push_back(newV[2]);
             FaceHandle newF = newMesh.add_face(face_vhs);
             newMesh.set_color(newF, m_mesh->color(*f_it));
         }
