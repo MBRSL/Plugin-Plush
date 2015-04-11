@@ -71,6 +71,7 @@ private:
     std::vector<double> m_innerAngle3D;
     std::vector<double> m_edgeLengths;
     std::vector<HalfedgeHandle> m_boundary3D;
+    std::vector< std::pair<int, int> > m_innerBoundaryStartingPair;
     std::vector< std::pair<int, int> > m_coincidePair;
 };
 

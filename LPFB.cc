@@ -28,62 +28,73 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *bound
     m_boundary3D.insert(m_boundary3D.begin(), baseBoundary.begin(), baseBoundary.end());
 
     // For inner boundaries, calculate virtual cut and insert them into appropriate position of m_boundary3D
+//    for (size_t i = 1; i < boundaries.size(); i++) {
     for (size_t i = 1; i < boundaries.size(); i++) {
         std::vector<HalfedgeHandle> &sourceBoundary = boundaries[i];
 
         // Calculate the virtual cut using BFS
-        // Randomly choose one vertex as starting point
         std::set<VertexHandle> sourceBoundarySet;
         for (size_t j = 0; j < sourceBoundary.size(); j++) {
             VertexHandle v = m_mesh->to_vertex_handle(sourceBoundary[j]);
             sourceBoundarySet.insert(v);
         }
         
-        std::queue<VertexHandle> queue;
-        std::set<VertexHandle> visited;
-        std::map<VertexHandle, VertexHandle> predecessor;
-        
-        VertexHandle currentV = m_mesh->from_vertex_handle(sourceBoundary[0]);
-        queue.push(currentV);
-        visited.insert(currentV);
-        
-        while (!queue.empty() && targetBoudarySet.find(currentV) == targetBoudarySet.end()) {
-            for (TriMesh::ConstVertexVertexIter cvv_it = m_mesh->cvv_iter(currentV); cvv_it; cvv_it++) {
-                if (visited.find(*cvv_it) == visited.end()
-                    // Don't go through sourceBoundary itself
-                &&  sourceBoundarySet.find(*cvv_it) == sourceBoundarySet.end()) {
-                    queue.push(*cvv_it);
-                    visited.insert(*cvv_it);
-                    
-                    predecessor.emplace(*cvv_it, currentV);
-                }
-            }
-            currentV = queue.front();
-            queue.pop();
-        }
-        visited.clear();
+        std::vector<HalfedgeHandle> minVirtualCut;
+        std::vector<HalfedgeHandle> minVirtualCutReverse;
+        int insertionPosition = 0;
+        for (size_t j = 0; j < sourceBoundary.size(); j++) {
+            std::queue<VertexHandle> queue;
+            std::set<VertexHandle> visited;
+            std::map<VertexHandle, VertexHandle> predecessor;
 
-        // We got to one of the targets
-        std::vector<HalfedgeHandle> virtualCut;
-        std::vector<HalfedgeHandle> virtualCutReverse;
-        while (predecessor.find(currentV) != predecessor.end()) {
-            VertexHandle nextV = predecessor[currentV];
-            HalfedgeHandle heh;
-            PlushPatternGenerator::getHalfedge(m_mesh, heh, currentV, nextV);
-            virtualCut.push_back(heh);
-            virtualCutReverse.push_back(m_mesh->opposite_halfedge_handle(heh));
-            currentV = nextV;
+            VertexHandle currentV = m_mesh->from_vertex_handle(sourceBoundary[j]);
+            queue.push(currentV);
+            visited.insert(currentV);
+            
+            while (targetBoudarySet.find(currentV) == targetBoudarySet.end()) {
+                for (TriMesh::ConstVertexVertexIter cvv_it = m_mesh->cvv_iter(currentV); cvv_it; cvv_it++) {
+                    if (visited.find(*cvv_it) == visited.end()
+                    &&  sourceBoundarySet.find(*cvv_it) == sourceBoundarySet.end()) {
+                        queue.push(*cvv_it);
+                        visited.insert(*cvv_it);
+                        predecessor.emplace(*cvv_it, currentV);
+                    }
+                }
+                currentV = queue.front();
+                queue.pop();
+            }
+            visited.clear();
+
+            // We got to one of the targets
+            std::vector<HalfedgeHandle> virtualCut;
+            std::vector<HalfedgeHandle> virtualCutReverse;
+            while (predecessor.find(currentV) != predecessor.end()) {
+                VertexHandle nextV = predecessor[currentV];
+                HalfedgeHandle heh;
+                PlushPatternGenerator::getHalfedge(m_mesh, heh, currentV, nextV);
+                virtualCut.push_back(heh);
+                virtualCutReverse.push_back(m_mesh->opposite_halfedge_handle(heh));
+                currentV = nextV;
+            }
+            std::reverse(virtualCutReverse.begin(), virtualCutReverse.end());
+            
+            if (minVirtualCut.empty() || virtualCut.size() < minVirtualCut.size()) {
+                minVirtualCut = virtualCut;
+                minVirtualCutReverse = virtualCutReverse;
+                insertionPosition = j;
+            }
         }
-        std::reverse(virtualCutReverse.begin(), virtualCutReverse.end());
+        // Rotate sourceBoundary so that the 0th element matches insertion position
+        std::rotate(sourceBoundary.begin(), sourceBoundary.begin() + insertionPosition, sourceBoundary.end());
         
         // Insert this boundary and virtual cut into overall boundary
         for (auto he_it = m_boundary3D.begin(); he_it != m_boundary3D.end(); he_it++) {
             HalfedgeHandle heh = *he_it;
             // Find the insertion position
-            if (m_mesh->from_vertex_handle(heh) == m_mesh->from_vertex_handle(virtualCut[0])) {
-                he_it = m_boundary3D.insert(he_it, virtualCut.begin(), virtualCut.end());
-                he_it = m_boundary3D.insert(he_it+virtualCut.size(), sourceBoundary.begin(), sourceBoundary.end());
-                he_it = m_boundary3D.insert(he_it+sourceBoundary.size(), virtualCutReverse.begin(), virtualCutReverse.end());
+            if (m_mesh->from_vertex_handle(heh) == m_mesh->from_vertex_handle(minVirtualCut[0])) {
+                he_it = m_boundary3D.insert(he_it, minVirtualCut.begin(), minVirtualCut.end());
+                he_it = m_boundary3D.insert(he_it+minVirtualCut.size(), sourceBoundary.begin(), sourceBoundary.end());
+                he_it = m_boundary3D.insert(he_it+sourceBoundary.size(), minVirtualCutReverse.begin(), minVirtualCutReverse.end());
                 break;
             }
         }
@@ -94,6 +105,7 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *bound
     m_coincidePair.push_back(std::make_pair(0, m_boundary3D.size()));
     // Other inner boundaries
     std::map<VertexHandle, int> vertexPosition;
+    bool cycle = false;
     for (size_t position = 0; position < m_boundary3D.size(); position++) {
         VertexHandle v = m_mesh->from_vertex_handle(m_boundary3D[position]);
         
@@ -101,9 +113,14 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *bound
         if (vertexPosition.find(v) != vertexPosition.end()) {
             int prevPosition = vertexPosition[v];
             m_coincidePair.push_back(std::make_pair(prevPosition, position));
-            
+            if (!cycle) {
+                m_innerBoundaryStartingPair.push_back(std::make_pair(prevPosition, position));
+            }
             // We need to delete it first before update it.
             vertexPosition.erase(v);
+            cycle = true;
+        } else {
+            cycle = false;
         }
         vertexPosition.emplace(v, position);
     }
@@ -130,13 +147,19 @@ bool LPFB_NLP::get_nlp_info(Index& n, Index& m, Index& nnz_jac_g,
     n = m_boundary3D.size();
     
     // constraints
-    m = 1 + m_coincidePair.size() * 2;
+    m = 1 + + m_innerBoundaryStartingPair.size() + m_coincidePair.size() * 2;
     
     // jacobian
     nnz_jac_g = n;
+    for (size_t innerBoundaryNo = 0; innerBoundaryNo < m_innerBoundaryStartingPair.size(); innerBoundaryNo++) {
+        int startingIdx = m_innerBoundaryStartingPair[innerBoundaryNo].first;
+        int endingIdx = m_innerBoundaryStartingPair[innerBoundaryNo].second;
+
+        nnz_jac_g += endingIdx - startingIdx + 1;
+    }
     for (size_t pairNo = 0; pairNo < m_coincidePair.size(); pairNo++) {
         int endingIdx = m_coincidePair[pairNo].second;
-
+        
         nnz_jac_g += 2*endingIdx;
     }
     
@@ -220,7 +243,21 @@ bool LPFB_NLP::eval_g(Index n, const Number* x, bool new_x, Index m, Number* g)
         posX[k+1] = posX[k] + m_edgeLengths[k] * cos(phi_k);
         posY[k+1] = posY[k] + m_edgeLengths[k] * sin(phi_k);
     }
-    g[0] = sumAngle;
+    Index constraintIdx = 0;
+    g[constraintIdx++] = sumAngle;
+
+    for (size_t innerBoundaryNo = 0; innerBoundaryNo < m_innerBoundaryStartingPair.size(); innerBoundaryNo++) {
+        int startingIdx = m_innerBoundaryStartingPair[innerBoundaryNo].first;
+        int endingIdx = m_innerBoundaryStartingPair[innerBoundaryNo].second;
+        
+        double sumInnerAngle = 0;
+        for (int i = startingIdx; i <= endingIdx; i++) {
+            sumInnerAngle += x[i];
+        }
+        int nInnerAngles = endingIdx - startingIdx;
+        
+        g[constraintIdx++] = (nInnerAngles + 2) * M_PI - sumInnerAngle;
+    }
 
     for (size_t pairNo = 0; pairNo < m_coincidePair.size(); pairNo++) {
         int startingIdx = m_coincidePair[pairNo].first;
@@ -228,8 +265,8 @@ bool LPFB_NLP::eval_g(Index n, const Number* x, bool new_x, Index m, Number* g)
         
         double v1 = posX[endingIdx];
         double v2 = posX[startingIdx];
-        g[1 + 2*pairNo] = posX[endingIdx] - posX[startingIdx];
-        g[2 + 2*pairNo] = posY[endingIdx] - posY[startingIdx];
+        g[constraintIdx++] = posX[endingIdx] - posX[startingIdx];
+        g[constraintIdx++] = posY[endingIdx] - posY[startingIdx];
     }
     delete[] posX;
     delete[] posY;
@@ -249,24 +286,40 @@ bool LPFB_NLP::eval_jac_g(Index n, const Number* x, bool new_x,
         // First constraints
         // N variables
         Index idx = 0;
+        Index constraintIdx = 0;
         for (Index j = 0; j < n; j++) {
-            iRow[idx] = 0;
+            iRow[idx] = constraintIdx;
             jCol[idx] = j;
             idx++;
         }
+        constraintIdx++;
         
+        for (size_t innerBoundaryNo = 0; innerBoundaryNo < m_innerBoundaryStartingPair.size(); innerBoundaryNo++) {
+            int startingIdx = m_innerBoundaryStartingPair[innerBoundaryNo].first;
+            int endingIdx = m_innerBoundaryStartingPair[innerBoundaryNo].second;
+
+            for (Index j = startingIdx; j <= endingIdx; j++) {
+                iRow[idx] = constraintIdx;
+                jCol[idx] = j;
+                idx++;
+            }
+            constraintIdx++;
+        }
+            
         for (size_t pairNo = 0; pairNo < m_coincidePair.size(); pairNo++) {
             Index endingIdx = m_coincidePair[pairNo].second;
             for (Index j = 0; j < endingIdx; j++) {
-                iRow[idx] = 1 + 2*pairNo;
+                iRow[idx] = constraintIdx;
                 jCol[idx] = j;
                 idx++;
             }
+            constraintIdx++;
             for (Index j = 0; j < endingIdx; j++) {
-                iRow[idx] = 2 + 2*pairNo;
+                iRow[idx] = constraintIdx;
                 jCol[idx] = j;
                 idx++;
             }
+            constraintIdx++;
         }
         
         assert(idx == nele_jac);
@@ -289,6 +342,16 @@ bool LPFB_NLP::eval_jac_g(Index n, const Number* x, bool new_x,
             values[k] = -1;
         }
         Index idx = n;
+
+        
+        for (size_t innerBoundaryNo = 0; innerBoundaryNo < m_innerBoundaryStartingPair.size(); innerBoundaryNo++) {
+            int startingIdx = m_innerBoundaryStartingPair[innerBoundaryNo].first;
+            int endingIdx = m_innerBoundaryStartingPair[innerBoundaryNo].second;
+            
+            for (Index j = startingIdx; j <= endingIdx; j++) {
+                values[idx++] = -1;
+            }
+        }
 
         // 2nd & 3rd constraints, closed loop position
         for (size_t pairNo = 0; pairNo < m_coincidePair.size(); pairNo++) {
@@ -414,14 +477,14 @@ void LPFB_NLP::finalize_solution(SolverReturn status,
         posX[k+1] = posX[k] + m_edgeLengths[k] * cos(phi_k[k]);
         posY[k+1] = posY[k] + m_edgeLengths[k] * sin(phi_k[k]);
         
-        printf("%d : %d | %.3lf | %.3lf\n", k, m_mesh->from_vertex_handle(m_boundary3D[k]).idx(), x[k], x[k]-m_innerAngle3D[k]);
+//        printf("%d : %d | %.3lf | %.3lf\n", k, m_mesh->from_vertex_handle(m_boundary3D[k]).idx(), x[k], x[k]-m_innerAngle3D[k]);
     }
     
-//    OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = PlushPatternGenerator::getSeamsHandle(m_mesh);
-//    std::set<EdgeHandle> &seams = m_mesh->property(seamsHandle);
+    OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = PlushPatternGenerator::getSeamsHandle(m_mesh);
+    std::set<EdgeHandle> &seams = m_mesh->property(seamsHandle);
     for (Index k = 0; k < n; k++) {
         // If k == 0, it will be placed at (0,0,0)
-//        seams.insert(m_mesh->edge_handle(m_boundary3D[k]));
+        seams.insert(m_mesh->edge_handle(m_boundary3D[k]));
         VertexHandle v = m_mesh->from_vertex_handle(m_boundary3D[k]);
         if (m_mesh->is_boundary(v)) {
             m_boundaryPosition->emplace(v, OpenMesh::Vec3d(posX[k], posY[k], 0));
