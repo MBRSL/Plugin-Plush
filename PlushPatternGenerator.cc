@@ -227,41 +227,27 @@ bool PlushPatternGenerator::getBoundaryOfOpenedMesh(std::vector< std::vector<Hal
         }
         
         std:vector<HalfedgeHandle> boundary;
-        std::queue<HalfedgeHandle> queue;
-        queue.push(*he_it);
-        visited.insert(*he_it);
-        
-        while (!queue.empty()) {
-            HalfedgeHandle current_heh = queue.front();
-            queue.pop();
-            
+
+        HalfedgeHandle start_heh = *he_it;
+        HalfedgeHandle current_heh = start_heh;
+        do {
+            visited.insert(current_heh);
             boundary.push_back(current_heh);
-            
-            HalfedgeHandle next_heh = mesh->next_halfedge_handle(current_heh);
-            if (visited.find(next_heh) == visited.end()) {
-                queue.push(next_heh);
-                visited.insert(next_heh);
-            }
-        }
+            current_heh = mesh->next_halfedge_handle(current_heh);
+        } while (current_heh != start_heh);
         
         assert(boundary.size() > 0);
-        if (mesh->from_vertex_handle(*he_it) != mesh->to_vertex_handle(boundary[boundary.size()-1])) {
-            // Not a loop
-            continue;
-        }
+        assert(mesh->from_vertex_handle(start_heh) == mesh->to_vertex_handle(boundary[boundary.size()-1]));
         
-        // The lopp of opposite halfedges is in reversed direction
+        // The loop of opposite halfedges is in reversed direction
         if (getInteriorHalfedge) {
             std::reverse(boundary.begin(), boundary.end());
             for (size_t i = 0; i < boundary.size(); i++) {
                 boundary[i] = mesh->opposite_halfedge_handle(boundary[i]);
             }
         }
-        
         boundaries.push_back(boundary);
     }
-    
-    
     return boundaries.empty();
 }
 

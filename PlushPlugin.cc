@@ -277,6 +277,7 @@ void PlushPlugin::showGeodesicButtonClicked() {
     }
     
     if (m_patternGenerator->calcSeams(selectedVertices, geodesicNumPaths->value(), geodesicElimination->isChecked(), showAllPath)) {
+        MeshSelection::clearEdgeSelection(mesh);
         std::vector<TriMesh> *subMeshes = m_patternGenerator->getFlattenedMeshes();
         if (subMeshes) {
             for (size_t i = 0; i < subMeshes->size(); i++) {
@@ -289,8 +290,6 @@ void PlushPlugin::showGeodesicButtonClicked() {
             for (auto e_it = seams->begin(); e_it != seams->end(); e_it++) {
                 edgeList.push_back(e_it->idx());
             }
-            
-            MeshSelection::clearEdgeSelection(mesh);
             MeshSelection::selectEdges(mesh, edgeList);
             emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
         }
