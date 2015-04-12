@@ -1,22 +1,16 @@
 #include "WeightFunctor.hh"
 
 WeightFunctor::WeightFunctor(TriMesh *mesh,
-                             const Polyhedron &polyhedron,
-                             boost_vertex_descriptor *currentV,
-                             const boost::iterator_property_map<std::vector<boost_vertex_descriptor>::iterator, VertexIdPropertyMap>
-                             &predecessor_pmap,
-                             const EdgeIdPropertyMap &edgeIndexMap) :
-m_mesh(mesh), m_polyhedron(polyhedron), m_predecessor_pmap(predecessor_pmap), m_edgeIndexMap(edgeIndexMap), m_currentV(currentV), m_maxEdgeLength(0) {
+                             VertexHandle *currentV,
+                             const boost::iterator_property_map<std::vector<VertexHandle>::iterator, boost::TriMesh_Vertices_id_map>
+                             &predecessor_pmap) :
+m_mesh(mesh), m_predecessor_pmap(predecessor_pmap), m_currentV(currentV), m_maxEdgeLength(0) {
     for (EdgeIter e_it = m_mesh->edges_begin(); e_it != m_mesh->edges_end(); e_it++) {
         HalfedgeHandle he = m_mesh->halfedge_handle(*e_it, 0);
         TriMesh::Point p1 = m_mesh->point(m_mesh->from_vertex_handle(he));
         TriMesh::Point p2 = m_mesh->point(m_mesh->to_vertex_handle(he));
         
         m_maxEdgeLength = max(m_maxEdgeLength, (p1-p2).norm());
-    }
-    
-    for (VertexIter v_it = m_mesh->vertices_begin(); v_it != m_mesh->vertices_end(); v_it++) {
-        double curvature = m_mesh->property(PlushPatternGenerator::maxCurvatureHandle, *v_it);
     }
 }
 
@@ -26,11 +20,13 @@ double WeightFunctor::distanceWeight(TriMesh::Point p1, TriMesh::Point p2) const
     return (p1-p2).norm()/m_maxEdgeLength;
 }
 
-double WeightFunctor::textureWeight(HalfedgeHandle he1, HalfedgeHandle he2) const {
+double WeightFunctor::textureWeight(EdgeHandle eh) const {
     // if the two faces along this edge are different color, set weight of this edge to almost 0
     // we encourage path go through the boundary of different colors
-    if (!m_mesh->is_boundary(he1) && !m_mesh->is_boundary(he2)
-        &&  m_mesh->color(m_mesh->face_handle(he1)) != m_mesh->color(m_mesh->face_handle(he2))) {
+    HalfedgeHandle heh1 = m_mesh->halfedge_handle(eh, 0);
+    HalfedgeHandle heh2 = m_mesh->halfedge_handle(eh, 1);
+    if (!m_mesh->is_boundary(heh1) && !m_mesh->is_boundary(heh2)
+        &&  m_mesh->color(m_mesh->face_handle(heh1)) != m_mesh->color(m_mesh->face_handle(heh2))) {
         return 1e-9;
     } else {
         return 1;
@@ -92,50 +88,34 @@ double WeightFunctor::skeletonWeight(VertexHandle v1,
     return weight;
 }
 
-//double WeightFunctor::smoothnessWeight(boost_vertex_descriptor boost_v1,
-//                                       boost_vertex_descriptor boost_v2,
-//                                       TriMesh::Point p1,
-//                                       TriMesh::Point p2) const {
-//    boost_vertex_descriptor predecessor = m_predecessor_pmap[boost_v1];
-//    if (predecessor == boost_v1) {
-//        // we reach the begining, assign weight to 1 (max) to ensure that
-//        // when combining path, total weight would not increase
-//        return 1;
-//    } else {
-//        auto boost_p0 = predecessor->point();
-//        TriMesh::Point p0(boost_p0[0],boost_p0[1],boost_p0[2]);
-//        double cosAngle = ((p1-p0) | (p1-p2) / ((p1-p0).norm() * (p1-p2).norm()));
-//        // cosAngle = [-1, 1], we need [0, 1]
-//        return (cosAngle + 1) / 2;
-//    }
-//}
+double WeightFunctor::smoothnessWeight(VertexHandle v1,
+                                       VertexHandle v2,
+                                       TriMesh::Point p1,
+                                       TriMesh::Point p2) const {
+    VertexHandle predecessor = m_predecessor_pmap[v1];
+    if (predecessor == v1) {
+        // we reach the begining, assign weight to 1 (max) to ensure that
+        // when combining path, total weight would not increase
+        return 1;
+    } else {
+        TriMesh::Point p0 = m_mesh->point(predecessor);
+        double cosAngle = ((p1-p0) | (p1-p2) / ((p1-p0).norm() * (p1-p2).norm()));
+        // cosAngle = [-1, 1], we need [0, 1]
+        return (cosAngle + 1) / 2;
+    }
+}
 
-double WeightFunctor::operator()(boost_edge_descriptor e) const {
+double WeightFunctor::operator()(HalfedgeHandle heh) const {
+    EdgeHandle eh = m_mesh->edge_handle(heh);
+
+    VertexHandle v1 = m_mesh->from_vertex_handle(heh);
+    VertexHandle v2 = m_mesh->to_vertex_handle(heh);
+
+    assert (v1 == *m_currentV || v2 == *m_currentV);
     
-    int index = get(m_edgeIndexMap, e);
-    EdgeHandle eh = m_mesh->edge_handle(index);
-    
-    boost_vertex_descriptor boost_v1 = boost::source(e, m_polyhedron);
-    boost_vertex_descriptor boost_v2 = boost::target(e, m_polyhedron);
-    
-    //    assert (boost_v1 == *m_currentV || boost_v2 == *m_currentV);
-    
-    //    if (boost_v2 == *m_currentV) {
-    //        boost_v2 = boost_v1;
-    //        boost_v1 = *m_currentV;
-    //    }
-    
-    HalfedgeHandle he1 = m_mesh->halfedge_handle(eh, 0);
-    HalfedgeHandle he2 = m_mesh->halfedge_handle(eh, 1);
-    
-    VertexHandle v1 = m_mesh->from_vertex_handle(he1);
-    VertexHandle v2 = m_mesh->to_vertex_handle(he1);
-    
-    // make sure the direction is correct with boost_vertex_descriptor
-    if (v1.idx() != (int)boost_v1->id()) {
-        VertexHandle tmp = v1;
-        v1 = v2;
-        v2 = tmp;
+    if (v2 == *m_currentV) {
+        v2 = v1;
+        v1 = *m_currentV;
     }
     
     TriMesh::Point p1 = m_mesh->point(v1);
@@ -154,7 +134,7 @@ double WeightFunctor::operator()(boost_edge_descriptor e) const {
         edgeWeight = m_mesh->property(PlushPatternGenerator::edgeWeightHandle, eh);
     } else {
         edgeWeight += distanceCoefficient * distanceWeight(p1, p2);
-        edgeWeight += textureCoefficient * textureWeight(he1, he2);
+        edgeWeight += textureCoefficient * textureWeight(eh);
         edgeWeight += curvatureCoefficient * curvatureWeight(v1, v2);
         edgeWeight += skeletonCoefficient * skeletonWeight(v1, v2, p1, p2);
         
@@ -163,10 +143,9 @@ double WeightFunctor::operator()(boost_edge_descriptor e) const {
     
     // re-calculate smoothness weight every time because it depends on path.
     // it can not be saved and reuse
-//    double pathCoefficient = 0;
-    double pathWeight = 0;
-//    pathCoefficient * smoothnessWeight(boost_v1, boost_v2, p1, p2);
-//    coefficients += pathCoefficient;
+    double pathCoefficient = 0.5;
+    double pathWeight = pathCoefficient * smoothnessWeight(v1, v2, p1, p2);
+    coefficients += pathCoefficient;
     
     return (edgeWeight + pathWeight) / coefficients;
 }

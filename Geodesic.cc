@@ -6,23 +6,17 @@
 //
 //
 
+#include "OpenMesh_Boost_Wrapper.hh"
 #include "PlushPatternGenerator.hh"
 #include "WeightFunctor.hh"
 
 #include <boost/graph/dijkstra_shortest_paths.hpp>
-//#include <boost/property_map/function_property_map.hpp>
+#include <boost/property_map/function_property_map.hpp>
 
 #include <QTextStream>
 
-typedef boost::property_map<Polyhedron, boost::vertex_external_index_t>::type VertexIdPropertyMap;
-typedef boost::property_map<Polyhedron, boost::edge_external_index_t>::type EdgeIdPropertyMap;
-
 void PlushPatternGenerator::calcGeodesic(std::vector<VertexHandle> targetVertices)
 {
-    // Prepare property maps for shortest path
-    VertexIdPropertyMap vertex_index_pmap = get(boost::vertex_external_index, m_polyhedron);
-    EdgeIdPropertyMap edge_index_pmap = get(boost::edge_external_index, m_polyhedron);
-
     isJobCanceled = false;
     
     std::map<std::pair<VertexHandle, VertexHandle>, double> &geodesicDistance = m_mesh->property(geodesicDistanceHandle);
@@ -38,51 +32,42 @@ void PlushPatternGenerator::calcGeodesic(std::vector<VertexHandle> targetVertice
 
         VertexHandle sourceHandle = targetVertices[i];
         
-        std::vector<boost_vertex_descriptor> predecessor(boost::num_vertices(m_polyhedron));
-        boost::iterator_property_map<std::vector<boost_vertex_descriptor>::iterator, VertexIdPropertyMap> predecessor_pmap(predecessor.begin(), vertex_index_pmap);
+        // Prepare property maps for shortest path
+        boost::TriMesh_Vertices_id_map vertex_index_pmap = get(boost::vertex_index, *m_mesh);
+        boost::TriMesh_Halfedges_id_map edge_index_pmap = get(boost::edge_index, *m_mesh);
 
-        std::vector<double> distance(boost::num_vertices(m_polyhedron));
-        boost::iterator_property_map<std::vector<double>::iterator, VertexIdPropertyMap> distance_pmap(distance.begin(), vertex_index_pmap);
-        
-        std::vector<double> weight(boost::num_edges(m_polyhedron));
-        boost::iterator_property_map<std::vector<double>::iterator, EdgeIdPropertyMap> weight_pmap(weight.begin(), edge_index_pmap);
-        
-        boost_vertex_descriptor source = m_verticesMapping[targetVertices[i].idx()];
+        std::vector<VertexHandle> predecessor(m_mesh->n_vertices());
+        boost::iterator_property_map<std::vector<VertexHandle>::iterator,
+        boost::TriMesh_Vertices_id_map>
+            predecessor_pmap(predecessor.begin(), vertex_index_pmap);
+
+        std::vector<double> distance(m_mesh->n_vertices());
+        boost::iterator_property_map<std::vector<double>::iterator,
+        boost::TriMesh_Vertices_id_map>
+            distance_pmap(distance.begin(), vertex_index_pmap);
         
         // HACK: This is a local variable "shared" by both (functional)weightmap & visitor
         //       so that we can first assign it in visitor and then access it in weightmap
-        boost_vertex_descriptor currentV = source;
-        
+        VertexHandle currentV = sourceHandle;
+        Dijkstra_visitor visitor(&currentV);
         WeightFunctor weightFunctor(m_mesh,
-                                    m_polyhedron,
                                     &currentV,
-                                    predecessor_pmap,
-                                    edge_index_pmap);
-//        auto weight_pmap = boost::make_function_property_map< boost_edge_descriptor,
-//                                                            double,
-//                                                            WeightFunctor > (weightFunctor);
+                                    predecessor_pmap);
+        auto weight_pmap = boost::make_function_property_map< HalfedgeHandle,
+                                                            double,
+                                                            WeightFunctor > (weightFunctor);
 
-        // If smooth term is not used, pre-calculate edge weights can accelerate calculation
-        boost_edge_iterator eit, eite;
-        for (boost::tie(eit, eite) = boost::edges(m_polyhedron); eit != eite; eit++) {
-            weight_pmap[*eit] = weightFunctor(*eit);
-        }
-//        Dijkstra_visitor visitor(&currentV);
-        
         // Calculate geodesic using Dijkstra
-        boost::dijkstra_shortest_paths(m_polyhedron, source,
+        boost::dijkstra_shortest_paths(*m_mesh, sourceHandle,
                                        vertex_index_map(vertex_index_pmap)
                                        .weight_map(weight_pmap)
                                        .distance_map(distance_pmap)
                                        .predecessor_map(predecessor_pmap)
-//                                       .visitor(visitor)
+                                       .visitor(visitor)
                                        );
         
         for (size_t j = 0; j < targetVertices.size(); j++) {
         VertexHandle destHandle = targetVertices[j];
-    //    for (VertexIter v_it = m_mesh->vertices_begin(); v_it != m_mesh->vertices_end(); v_it++) {
-    //        VertexHandle destHandle = *v_it;
-    //        int id = v_it->idx();
             if (destHandle == sourceHandle) {
                 continue;
             }
@@ -93,8 +78,8 @@ void PlushPatternGenerator::calcGeodesic(std::vector<VertexHandle> targetVertice
             
             // Back tracking
             std::vector<VertexHandle> path;
-            for(boost_vertex_descriptor predecessor = m_verticesMapping[destHandle.idx()]; predecessor_pmap[predecessor] != predecessor;) {
-                path.push_back(m_mesh->vertex_handle(predecessor->id()));
+            for(VertexHandle predecessor = destHandle; predecessor_pmap[predecessor] != predecessor;) {
+                path.push_back(predecessor);
                 predecessor = predecessor_pmap[predecessor];
             }
             
@@ -120,7 +105,7 @@ void PlushPatternGenerator::calcGeodesic(std::vector<VertexHandle> targetVertice
             // TODO:
             // The true distance from A to B should be identical with distance from B to A
             // Currently we only choose the direction with smaller cost
-            double cost = distance_pmap[m_verticesMapping[destHandle.idx()]];
+            double cost = distance_pmap[destHandle];
             
             // First, check if opposite direction is already calculated
             std::map<std::pair<VertexHandle, VertexHandle>, double>::iterator cost_reverse_it = geodesicDistance.find(edgeDS);
