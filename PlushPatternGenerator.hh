@@ -115,10 +115,10 @@ private:
     TriMesh *m_mesh;
     QString m_meshName;
 
-    Polyhedron m_polyhedron;
+//    Polyhedron m_polyhedron;
     
     /// Mapping from TriMesh::VertexHandle::idx to boost_vertex_descriptor
-    std::map<int, boost_vertex_descriptor> m_verticesMapping;
+//    std::map<int, boost_vertex_descriptor> m_verticesMapping;
     
     bool isJobCanceled;
     
