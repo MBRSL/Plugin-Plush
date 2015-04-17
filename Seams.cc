@@ -5,8 +5,14 @@
 //  Created by 饒亢 on 2015/1/13.
 //
 //
-
+#include "OpenMesh_Boost_Wrapper.hh"
 #include "PlushPatternGenerator.hh"
+
+#include <boost/graph/adjacency_list.hpp>
+#include <boost/graph/filtered_graph.hpp>
+#include <boost/graph/connected_components.hpp>
+#include <boost/graph/boykov_kolmogorov_max_flow.hpp>
+#include <boost/graph/copy.hpp>
 
 #include <MeshTools/MeshSelectionT.hh>
 #include <queue>
@@ -106,137 +112,280 @@ bool PlushPatternGenerator::isIntersected(std::vector<VertexHandle> pathA, std::
 
 /**
  @brief Generate circular seams that are not possible to get with calcSeams.
- This function find vertices with high curvature and try to form rings of seams.
+ The step of this function:
+ 1. Find vertices with high curvature (curvature threshold = mean + std).
+ 2. Categorize these vertices using connected component.
+ 3. Discard component with only one boundary.
+ 4. Calculate a max flow problem using faces correspond to vertices component.
+ 5. The resulting cut corresponds to the seam edge.
+
  The result is append to seamsHandle property of m_mesh.
  @param <#parameter#>
  @return <#retval#>
  @retval <#meaning#>
  */
 bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
-    // Find the most distorted vertex, also calculate mean & std
-    double minAreaDiff = 1e9;
+    // Calculate mean & std
     double sumCurvature = 0;
     double sumCurvatureSqr = 0;
-    VertexHandle minV;
     OpenMesh::VPropHandleT<VertexHandle> inverseMapping = getInverseMappingHandle(mesh);
     for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
         VertexHandle originalV = mesh->property(inverseMapping, *v_it);
-        double avgAreaDiff = m_mesh->property(distortionVHandle, originalV);
-        
-        if (avgAreaDiff < minAreaDiff) {
-            minAreaDiff = avgAreaDiff;
-            minV = *v_it;
-        }
-        
         double curvature = m_mesh->property(maxCurvatureHandle, originalV);
         sumCurvature += curvature;
         sumCurvatureSqr += curvature * curvature;
     }
     double mean = sumCurvature/mesh->n_vertices();
     double std = sqrt(sumCurvatureSqr/mesh->n_vertices() - mean*mean);
+    double threshold = mean + std;
 
-    minV = *mesh->vertices_begin();
-    // Try to search boundary with high curvature from minV
-    std::set<VertexHandle> visited;
-    std::queue<VertexHandle> queue;
-    queue.push(minV);
+    struct Filter {
+    private:
+        TriMesh *m_mesh;
+        std::function<bool(VertexHandle v)> m_functor;
+    public:
+        Filter() {}
+        Filter(TriMesh *mesh, std::function<bool(VertexHandle v)> functor) : m_mesh(mesh), m_functor(functor){}
+        bool operator()(const VertexHandle& v) const {
+            return m_functor(v);
+        }
+    };
     
-    while (queue.size() > 0) {
-        VertexHandle v = queue.front();
-        queue.pop();
-        visited.insert(v);
+    // Select vertices with curvature greater than threshold
+    auto curvatureFilterFunctor = [&](VertexHandle v) -> bool {
+        VertexHandle originalV = mesh->property(inverseMapping, v);
+        double curvature = abs(m_mesh->property(maxCurvatureHandle, originalV));
+        return curvature > threshold;
+    };
+    Filter curvatureFilter(mesh, curvatureFilterFunctor);
+    typedef boost::filtered_graph<TriMesh, boost::keep_all, Filter> Filtered_graph;
+    Filtered_graph curvature_filtered_mesh(*mesh, boost::keep_all(), curvatureFilter);
+    
+    typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
+    VertexHandle, EdgeHandle > Graph;
+    Graph curvature_graph;
+
+    struct Graph_copier {
+    public:
+        Graph *m_g_dst;
+        Graph_copier(Graph *g_dst) : m_g_dst(g_dst) {}
+        void operator()(const Filtered_graph::vertex_descriptor v_src, Graph::vertex_descriptor &v_dst) {
+            (*m_g_dst)[v_dst] = v_src;
+        }
+        void operator()(const Filtered_graph::edge_descriptor e_src, Graph::edge_descriptor &e_dst) {
+            (*m_g_dst)[e_dst] = e_src;
+        }
+    };
+    Graph_copier graph_copier(&curvature_graph);
+    
+    // Split vertices into connected component
+    // There seems to be some problems when applying connected components algorithm on filtered graph.
+    // So we copy first it to a regular graph then apply the algorithm.
+    std::map<int, int> componentMap;
+    boost::copy_graph(curvature_filtered_mesh, curvature_graph,
+                      boost::vertex_copy(graph_copier)
+                      .edge_copy(graph_copier));
+    int nComponents = boost::connected_components(curvature_graph, boost::make_assoc_property_map(componentMap));
+    
+    std::vector< std::set<VertexHandle> > components;
+    components.resize(nComponents);
+    for (size_t i = 0; i < num_vertices(curvature_graph); i++) {
+        VertexHandle v = curvature_graph[i];
+        components[componentMap[i]].insert(v);
+    }
+    
+    // For each component
+    int count = 0;
+    for (auto component_it = components.begin(); component_it != components.end(); component_it++, count++) {
+        std::set<VertexHandle> component = *component_it;
         
-        for (TriMesh::ConstVertexOHalfedgeIter cvoh_it = mesh->cvoh_iter(v); cvoh_it; cvoh_it++) {
-            VertexHandle neighborV = mesh->to_vertex_handle(*cvoh_it);
-            VertexHandle originalNeighborV = mesh->property(inverseMapping, neighborV);
-            
-            // outward expanding
-            if (visited.find(neighborV) == visited.end()) {
-                visited.insert(neighborV);
+        // Expand n rings
+        int nRings = 2;
+        for (int i = 0; i < nRings; i++) {
+            std::set<VertexHandle> expandList;
+            for (auto v_it = component.begin(); v_it != component.end(); v_it++) {
+                for (TriMesh::ConstVertexVertexIter cvv_it = mesh->cvv_iter(*v_it); cvv_it; cvv_it++) {
+                    expandList.insert(*cvv_it);
+                }
+            }
+            component.insert(expandList.begin(), expandList.end());
+        }
+
+        // Split boundary vertices into connected components
+        int nVertices = 0;
+        auto boundaryFilterFunctor = [&](VertexHandle v) -> bool {
+            if (component.find(v) != component.end()) {
+                for (TriMesh::ConstVertexVertexIter cvv_it = mesh->cvv_iter(v); cvv_it; cvv_it++) {
+                    // Any vertex connecting to non-component vertex is treat as boundary vertex
+                    if (component.find(*cvv_it) == component.end()) {
+                        nVertices++;
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+
+        Filter boundaryFilter(mesh, boundaryFilterFunctor);
+        Filtered_graph boundary_filtered_mesh(*mesh, boost::keep_all(), boundaryFilter);
+        
+        std::map<int, int> boundaryMap;
+        Graph boundary_graph;
+        graph_copier.m_g_dst = &boundary_graph;
+        boost::copy_graph(boundary_filtered_mesh, boundary_graph,
+                          boost::vertex_copy(graph_copier)
+                          .edge_copy(graph_copier));
+        int nBoundaries = boost::connected_components(boundary_graph, boost::make_assoc_property_map(boundaryMap));
+        
+        // Boundary more than two forms a ring
+        // Currently ignore component with less than two boundaries.
+        if (nBoundaries < 2) {
+            continue;
+        }
+
+        std::vector< std::set<VertexHandle> > boundariesVertices;
+        boundariesVertices.resize(nBoundaries);
+        for (size_t i = 0; i < num_vertices(boundary_graph); i++) {
+            VertexHandle v = boundary_graph[i];
+            boundariesVertices[boundaryMap[i]].insert(v);
+        }
+        
+        // Find faces corresponds to boundariesVertices, also categorize all faces into first two boundary
+        std::vector<FaceHandle> facesCandidates;
+        std::vector< std::set<FaceHandle> > boundariesFaces(2);
+        for (TriMesh::ConstFaceIter cf_it = mesh->faces_begin(); cf_it != mesh->faces_end(); cf_it++) {
+            TriMesh::ConstFaceVertexIter cfv_it = mesh->cfv_iter(*cf_it);
+            VertexHandle v1 = *cfv_it++;
+            VertexHandle v2 = *cfv_it++;
+            VertexHandle v3 = *cfv_it++;
+
+            if (component.find(v1) != component.end()
+            &&  component.find(v2) != component.end()
+            &&  component.find(v3) != component.end()) {
+                facesCandidates.push_back(*cf_it);
                 
-                double curvature = m_mesh->property(maxCurvatureHandle, originalNeighborV);
-                // Only continue exploring from low curvature vertex
-                if (curvature < mean + 1.5*std) {
-                    queue.push(neighborV);
+                for (int i = 0; i < 2; i++) {
+                    if (boundariesVertices[i].find(v1) != boundariesVertices[i].end()
+                    ||  boundariesVertices[i].find(v2) != boundariesVertices[i].end()
+                    ||  boundariesVertices[i].find(v3) != boundariesVertices[i].end()) {
+                    // This face contains boundary vertices, add it to source/drain
+                        boundariesFaces[i].insert(*cf_it);
+                    }
                 }
             }
         }
-    }
-
-    // visualize vertices beyond threshold
-//    std::vector<int> verticesId;
-//    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
-//        VertexHandle originalV = mesh->property(inverseMapping, *v_it);
-//        if (m_mesh->property(maxCurvatureHandle, originalV) >= mean + std) {
-//            verticesId.push_back(originalV.idx());
-//        }
-//    }
-//    MeshSelection::selectVertices(m_mesh, verticesId);
-    
-    // Now visited vector should contains some part of the mesh and stopped at high curvature area
-    // Extract boundary vertices from visited vector
-    std::set<VertexHandle> finalBorderVertices;
-    for (auto v_it = visited.begin(); v_it != visited.end(); v_it++) {
-        // If this vertex has a non-visited neighbor, it's boundary vertex
-        for (TriMesh::ConstVertexVertexIter cvv_it = mesh->cvv_iter(*v_it); cvv_it; cvv_it++) {
-            if (visited.find(*cvv_it) == visited.end()) {
-                finalBorderVertices.insert(*v_it);
-                break;
-            }
-        }
-    }
-    
-    // Form edges from vertices
-    visited.clear();
-    OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
-    std::set<EdgeHandle> &seams = m_mesh->property(seamsHandle);
-    for (auto v_it = finalBorderVertices.begin(); v_it != finalBorderVertices.end(); v_it++) {
-        VertexHandle startingV = *v_it;
-        if (visited.find(startingV) != visited.end()) {
-            continue;
-        }
-        queue.push(startingV);
-        visited.insert(startingV);
-        
-        std::vector<HalfedgeHandle> subBorderEdges;
-        while (queue.size() > 0) {
-            VertexHandle v = queue.front();
-            queue.pop();
-            
-            for (TriMesh::ConstVertexOHalfedgeIter cvoh_it = mesh->cvoh_iter(v); cvoh_it; cvoh_it++) {
-                VertexHandle neighborV = mesh->to_vertex_handle(*cvoh_it);
                 
-                if (finalBorderVertices.find(neighborV) != finalBorderVertices.end()) {
-                    if (visited.find(neighborV) == visited.end()) {
-                        visited.insert(neighborV);
-                        queue.push(neighborV);
+        // Create a graph for min cut
+        typedef unsigned int Id;
+        typedef double EdgeWeight;
+        typedef boost::adjacency_list_traits<boost::vecS, boost::vecS, boost::directedS> Traits;
+        typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::directedS,
+            boost::property < boost::vertex_index_t, Id,
+        // Stores inverse mapping here
+            boost::property < boost::vertex_owner_t, FaceHandle,
+            boost::property < boost::vertex_color_t, boost::default_color_type,
+            boost::property < boost::vertex_distance_t, EdgeWeight,
+            boost::property < boost::vertex_predecessor_t, Traits::edge_descriptor > > > > >,
+        
+            boost::property<boost::edge_index_t, Id,
+            boost::property<boost::edge_capacity_t, EdgeWeight,
+            boost::property<boost::edge_residual_capacity_t, EdgeWeight,
+            boost::property<boost::edge_reverse_t, Traits::edge_descriptor> > > > > FlowGraph;
+
+        FlowGraph flow_graph;
+        auto capacity_map = get(boost::edge_capacity, flow_graph);
+        auto reverse_edge_map = get(boost::edge_reverse, flow_graph);
+
+        auto addBidirectionalEdge = [&](Id source, Id target, EdgeWeight capacity) {
+            int nEdges = boost::num_edges(flow_graph);
+            FlowGraph::edge_descriptor edge = boost::add_edge(source, target, nEdges+1, flow_graph).first;
+            FlowGraph::edge_descriptor reverseEdge = boost::add_edge(target, source, nEdges+2, flow_graph).first;
+            
+            reverse_edge_map[edge] = reverseEdge;
+            reverse_edge_map[reverseEdge] = edge;
+
+            capacity_map[edge] = capacity;
+            capacity_map[reverseEdge] = capacity;
+        };
+        
+        std::map<FaceHandle, Id> idMapping;
+        for (auto f_it = facesCandidates.begin(); f_it != facesCandidates.end(); f_it++) {
+            Id vId = boost::add_vertex(flow_graph);
+            put(boost::vertex_owner, flow_graph, vId, *f_it);
+            idMapping.emplace(*f_it, vId);
+        }
+        std::set<FaceHandle> visitedF;
+        for (auto f_it = facesCandidates.begin(); f_it != facesCandidates.end(); f_it++) {
+            visitedF.insert(*f_it);
+            for (TriMesh::ConstFaceHalfedgeIter cfh_it = mesh->cfh_iter(*f_it); cfh_it; cfh_it++) {
+                if (!mesh->is_boundary(mesh->opposite_halfedge_handle(*cfh_it))) {
+                    FaceHandle neighborF = mesh->opposite_face_handle(*cfh_it);
+                    if (visitedF.find(neighborF) == visitedF.end()
+                    &&  idMapping.find(neighborF) != idMapping.end()) {
+                        Id source = idMapping[*f_it];
+                        Id target = idMapping[neighborF];
                         
-                        subBorderEdges.push_back(*cvoh_it);
-                        break;
-                    } else if (neighborV == startingV
-                           && std::find(subBorderEdges.begin(), subBorderEdges.end(),
-                                        mesh->opposite_halfedge_handle(*cvoh_it)) == subBorderEdges.end()) {
-                       subBorderEdges.push_back(*cvoh_it);
-                       break;
+                        double theta = mesh->calc_dihedral_angle(*cfh_it);
+//                        double angWij = pow((1-(1-abs(cos(theta)))*convexityFac),2);
+                        double angWij = pow(cos(theta),2);
+                        addBidirectionalEdge(source, target, angWij);
                     }
                 }
             }
         }
         
-        if (subBorderEdges.size() > 1) {
-            VertexHandle endingV = mesh->to_vertex_handle(subBorderEdges[subBorderEdges.size()-1]);
-            // Test if this is a ring using last halfedge
-            if (startingV == endingV) {
-                for (auto he_it = subBorderEdges.begin(); he_it != subBorderEdges.end(); he_it++) {
-                    VertexHandle originalV1 = mesh->property(inverseMapping, mesh->from_vertex_handle(*he_it));
-                    VertexHandle originalV2 = mesh->property(inverseMapping, mesh->to_vertex_handle(*he_it));
-                    EdgeHandle originalEh;
-                    bool edgeExist = getEdge(m_mesh, originalEh, originalV1, originalV2);
-                    assert(edgeExist);
-                    seams.insert(originalEh);
+        // Insert source & drain node
+        for (size_t i = 0; i < boundariesFaces.size(); i++) {
+            // Id of Source & drain are facesCandidates.size(), facesCandidates.size()+1 respectively.
+            Id source = facesCandidates.size()+i;
+            for (auto f_it = boundariesFaces[i].begin(); f_it != boundariesFaces[i].end(); f_it++) {
+                Id target = idMapping[*f_it];
+                addBidirectionalEdge(source, target, 1e9);
+            }
+        }
+
+        // Because floating point error will cause assertion error in max flow, we just temporarily disable it.
+#ifdef NDEBUG
+#undef NDEBUG
+#define _UN_NDEBUG_
+#endif
+        boost::boykov_kolmogorov_max_flow(flow_graph, facesCandidates.size(), facesCandidates.size()+1);
+#ifdef _UN_NDEBUG_
+#undef _UN_NDEBUG_
+#define NDEBUG
+#endif
+        // Find target cut(edges)
+        std::vector<EdgeHandle> final_edges;
+        FlowGraph::edge_iterator e_it, e_ite;
+        for (tie(e_it, e_ite) = boost::edges(flow_graph); e_it != e_ite; e_it++) {
+            Id v1 = boost::source(*e_it, flow_graph);
+            Id v2 = boost::target(*e_it, flow_graph);
+            
+            // Ignore virtual source/drain
+            if (v1 < facesCandidates.size() &&  v2 < facesCandidates.size()) {
+                boost::default_color_type color1 = get(boost::vertex_color, flow_graph, v1);
+                boost::default_color_type color2 = get(boost::vertex_color, flow_graph, v2);
+            
+                if (color1 != color2
+                && (color1 == boost::black_color || color2 == boost::black_color)) {
+                    FaceHandle f1 = get(boost::vertex_owner, flow_graph, v1);
+                    FaceHandle f2 = get(boost::vertex_owner, flow_graph, v2);
+                    for (TriMesh::ConstFaceHalfedgeIter cfh_it = mesh->cfh_iter(f1); cfh_it; cfh_it++) {
+                        if (!mesh->is_boundary(mesh->opposite_halfedge_handle(*cfh_it))
+                       &&   mesh->opposite_face_handle(*cfh_it) == f2) {
+                            VertexHandle originalV1 = mesh->property(inverseMapping, mesh->from_vertex_handle(*cfh_it));
+                            VertexHandle originalV2 = mesh->property(inverseMapping, mesh->to_vertex_handle(*cfh_it));
+                            EdgeHandle original_eh;
+                            assert(getEdge(m_mesh, original_eh, originalV1, originalV2));
+                            final_edges.push_back(original_eh);
+                        }
+                    }
                 }
             }
         }
+        OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
+        std::set<EdgeHandle> &seams = m_mesh->property(seamsHandle);
+        seams.insert(final_edges.begin(), final_edges.end());
     }
     return true;
 }
