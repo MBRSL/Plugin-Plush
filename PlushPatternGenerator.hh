@@ -3,13 +3,14 @@
 
 // This one must be included before any other OpenFlipper headers, otherwise it will cause weird runtime errors.
 #include <OpenFlipper/BasePlugin/BaseInterface.hh>
-#include <ObjectTypes/PolyLine/PolyLine.hh>
 
-#include "CGAL_Polyhedron_builder.hh"
+//#include "CGAL_Polyhedron_builder.hh"
 
 #include "SuperDeform/Skeleton.hh"
 
 #include "Common.hh"
+
+#include <MeshTools/MeshSelectionT.hh>
 
 #include <QObject>
 
@@ -138,6 +139,57 @@ private:
     
     void initProperties();
     void uninitProperties();
+    
+    /// Utils
+    template<class T>
+    void markSelection(const std::vector< std::set<T> > &group_of_handles, TriMesh *mesh) {
+        OpenMesh::VPropHandleT<VertexHandle> inverseMapping = getInverseMappingHandle(mesh);
+        for (auto group_it = group_of_handles.begin(); group_it != group_of_handles.end(); group_it++) {
+            markSelection(*group_it, mesh, inverseMapping);
+        }
+    }
+    
+    template<class T>
+    inline void markSelection(const std::set<T> &handles, TriMesh *mesh, OpenMesh::VPropHandleT<VertexHandle> &inverseMapping) {
+        std::vector<T> tmp(handles.begin(), handles.end());
+        markSelection(tmp, mesh, inverseMapping);
+    }
+    inline void markSelection(const std::vector<FaceHandle> &faces, TriMesh *mesh, OpenMesh::VPropHandleT<VertexHandle> &inverseMapping) {
+        std::vector<int> facesId;
+        for (auto f_it = faces.begin(); f_it != faces.end(); f_it++) {
+            VertexHandle originalV[3];
+            int count = 0;
+            for (TriMesh::ConstFaceVertexIter cfv_it = mesh->cfv_iter(*f_it); cfv_it; cfv_it++) {
+                originalV[count++] = mesh->property(inverseMapping, *cfv_it);
+            }
+            FaceHandle originalF;
+            assert(getFace(m_mesh, originalF, originalV[0], originalV[1], originalV[2]));
+            facesId.push_back(originalF.idx());
+        }
+        MeshSelection::selectFaces(m_mesh, facesId);
+    }
+
+    inline void markSelection(const std::vector<VertexHandle> &vertices, TriMesh *mesh, OpenMesh::VPropHandleT<VertexHandle> &inverseMapping) {
+        std::vector<int> verticesId;
+        for (auto v_it = vertices.begin(); v_it != vertices.end(); v_it++) {
+            VertexHandle originalV = mesh->property(inverseMapping, *v_it);
+            verticesId.push_back(originalV.idx());
+        }
+        MeshSelection::selectVertices(m_mesh, verticesId);
+    }
+
+    inline void markSelection(const std::vector<EdgeHandle> &edes, TriMesh *mesh, OpenMesh::VPropHandleT<VertexHandle> &inverseMapping) {
+        std::vector<int> edgesId;
+        for (auto e_it = edes.begin(); e_it != edes.end(); e_it++) {
+            HalfedgeHandle heh = mesh->halfedge_handle(*e_it, 0);
+            VertexHandle originalV1 = mesh->property(inverseMapping, mesh->from_vertex_handle(heh));
+            VertexHandle originalV2 = mesh->property(inverseMapping, mesh->to_vertex_handle(heh));
+            EdgeHandle original_eh;
+            assert(getEdge(m_mesh, original_eh, originalV1, originalV2));
+            edgesId.push_back(original_eh.idx());
+        }
+        MeshSelection::selectEdges(m_mesh, edgesId);
+    }
     
     public slots:
     /// Cancel time-consuming works. (calcGeodesic, calcCurvature, etc.)
