@@ -2,7 +2,7 @@
 
 WeightFunctor::WeightFunctor(TriMesh *mesh,
                              VertexHandle *currentV,
-                             const boost::iterator_property_map<std::vector<VertexHandle>::iterator, boost::TriMesh_Vertices_id_map>
+                             const boost::iterator_property_map<std::vector<VertexHandle>::iterator, TriMesh_id_map>
                              &predecessor_pmap) :
 m_mesh(mesh), m_predecessor_pmap(predecessor_pmap), m_currentV(currentV), m_maxEdgeLength(0) {
     for (EdgeIter e_it = m_mesh->edges_begin(); e_it != m_mesh->edges_end(); e_it++) {
@@ -105,8 +105,8 @@ double WeightFunctor::smoothnessWeight(VertexHandle v1,
     }
 }
 
-double WeightFunctor::operator()(HalfedgeHandle heh) const {
-    EdgeHandle eh = m_mesh->edge_handle(heh);
+double WeightFunctor::operator()(EdgeHandle eh) const {
+    HalfedgeHandle heh = m_mesh->halfedge_handle(eh, 0);
 
     VertexHandle v1 = m_mesh->from_vertex_handle(heh);
     VertexHandle v2 = m_mesh->to_vertex_handle(heh);

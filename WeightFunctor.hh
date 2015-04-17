@@ -6,7 +6,7 @@
 class WeightFunctor {
 private:
     TriMesh *m_mesh;
-    const boost::iterator_property_map<std::vector<VertexHandle>::iterator, boost::TriMesh_Vertices_id_map>
+    const boost::iterator_property_map<std::vector<VertexHandle>::iterator, TriMesh_id_map>
     m_predecessor_pmap;
     VertexHandle *m_currentV;
     double m_maxEdgeLength;
@@ -29,10 +29,10 @@ private:
 public:
     WeightFunctor(TriMesh *mesh,
                   VertexHandle *currentV,
-                  const boost::iterator_property_map<std::vector<VertexHandle>::iterator, boost::TriMesh_Vertices_id_map>
+                  const boost::iterator_property_map<std::vector<VertexHandle>::iterator, TriMesh_id_map>
                   &predecessor_pmap);
     
-    double operator()(HalfedgeHandle heh) const;
+    double operator()(EdgeHandle eh) const;
 };
 
 class Dijkstra_visitor : public boost::default_dijkstra_visitor {

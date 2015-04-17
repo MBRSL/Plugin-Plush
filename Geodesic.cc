@@ -33,17 +33,17 @@ void PlushPatternGenerator::calcGeodesic(std::vector<VertexHandle> targetVertice
         VertexHandle sourceHandle = targetVertices[i];
         
         // Prepare property maps for shortest path
-        boost::TriMesh_Vertices_id_map vertex_index_pmap = get(boost::vertex_index, *m_mesh);
-        boost::TriMesh_Halfedges_id_map edge_index_pmap = get(boost::edge_index, *m_mesh);
+        TriMesh_id_map vertex_index_pmap = get(boost::vertex_index, *m_mesh);
+        TriMesh_id_map edge_index_pmap = get(boost::edge_index, *m_mesh);
 
         std::vector<VertexHandle> predecessor(m_mesh->n_vertices());
         boost::iterator_property_map<std::vector<VertexHandle>::iterator,
-        boost::TriMesh_Vertices_id_map>
+        TriMesh_id_map>
             predecessor_pmap(predecessor.begin(), vertex_index_pmap);
 
         std::vector<double> distance(m_mesh->n_vertices());
         boost::iterator_property_map<std::vector<double>::iterator,
-        boost::TriMesh_Vertices_id_map>
+        TriMesh_id_map>
             distance_pmap(distance.begin(), vertex_index_pmap);
         
         // HACK: This is a local variable "shared" by both (functional)weightmap & visitor
@@ -53,7 +53,7 @@ void PlushPatternGenerator::calcGeodesic(std::vector<VertexHandle> targetVertice
         WeightFunctor weightFunctor(m_mesh,
                                     &currentV,
                                     predecessor_pmap);
-        auto weight_pmap = boost::make_function_property_map< HalfedgeHandle,
+        auto weight_pmap = boost::make_function_property_map< EdgeHandle,
                                                             double,
                                                             WeightFunctor > (weightFunctor);
 
