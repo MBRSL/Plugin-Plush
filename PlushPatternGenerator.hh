@@ -4,8 +4,6 @@
 // This one must be included before any other OpenFlipper headers, otherwise it will cause weird runtime errors.
 #include <OpenFlipper/BasePlugin/BaseInterface.hh>
 
-//#include "CGAL_Polyhedron_builder.hh"
-
 #include "SuperDeform/Skeleton.hh"
 
 #include "Common.hh"
