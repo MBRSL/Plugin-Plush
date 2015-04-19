@@ -1,5 +1,11 @@
+#include "OpenMesh_Boost_Wrapper.hh"
 #include "LPFB.hh"
 #include "PlushPatternGenerator.hh"
+
+#include <boost/graph/adjacency_list.hpp>
+#include <boost/graph/copy.hpp>
+#include <boost/graph/filtered_graph.hpp>
+#include <boost/graph/dijkstra_shortest_paths.hpp>
 
 #include <cassert>
 #include <iostream>
@@ -15,75 +21,130 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *bound
     PlushPatternGenerator::getBoundaryOfOpenedMesh(boundaries, m_mesh, true);
     
     assert(!boundaries.empty() && "No cut is found on given sub mesh.");
+    
+    // Because of unknown reason, the multiple source version of Dijkastra doesn't work.
+    // We have to constrcut a new graph with an additional starting point to achieve it.
+    typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
+    boost::property<boost::vertex_owner_t, VertexHandle>,
 
-    // We use the 1st boundary as base boundary. Other boundaries are treated as inner boundaries.
+    boost::property<boost::edge_weight_t, double,
+    boost::property<boost::edge_owner_t, EdgeHandle> >
+    > Graph;
+    Graph multi_source_graph;
+    
+    struct Graph_copier {
+    public:
+        TriMesh *m_mesh;
+        Graph *m_g_dst;
+        Graph_copier(TriMesh *mesh, Graph *g_dst) : m_mesh(mesh), m_g_dst(g_dst) {}
+        void operator()(const VertexHandle v_src, Graph::vertex_descriptor &v_dst) {
+            put(boost::vertex_owner, *m_g_dst, v_dst, v_src);
+        }
+        void operator()(const EdgeHandle e_src, Graph::edge_descriptor &e_dst) {
+            put(boost::edge_owner, *m_g_dst, e_dst, e_src);
+            put(boost::edge_weight, *m_g_dst, e_dst, m_mesh->calc_edge_length(e_src));
+        }
+    };
+    Graph_copier graph_copier(m_mesh, &multi_source_graph);
+
+    // It seems that we can't directly appy copy_graph on TriMesh, but wrap it with filtered_graph does the trick
+    typedef boost::filtered_graph<TriMesh, boost::keep_all> Filtered_graph;
+    Filtered_graph filtered_mesh(*m_mesh, boost::keep_all());
+    boost::copy_graph(filtered_mesh, multi_source_graph,
+                      boost::vertex_copy(graph_copier)
+                      .edge_copy(graph_copier));
+
+    // We use the boundary with most vertices number as base boundary. Other boundaries are treated as inner boundaries.
     // The target set. Virtual cut searching will stop when reaching target set.
-    std::vector<HalfedgeHandle> &baseBoundary = boundaries[0];
-    std::set<VertexHandle> targetBoudarySet;
-    for (size_t j = 0; j < baseBoundary.size(); j++) {
-        VertexHandle v = m_mesh->to_vertex_handle(baseBoundary[j]);
-        targetBoudarySet.insert(v);
+    std::vector<HalfedgeHandle> *baseBoundary = &boundaries[0];
+    for (size_t j = 1; j < boundaries.size(); j++) {
+        if (boundaries[j].size() > baseBoundary->size()) {
+            baseBoundary = &boundaries[j];
+        }
     }
 
-    m_boundary3D.insert(m_boundary3D.begin(), baseBoundary.begin(), baseBoundary.end());
+    m_boundary3D.insert(m_boundary3D.begin(), baseBoundary->begin(), baseBoundary->end());
 
     // For inner boundaries, calculate virtual cut and insert them into appropriate position of m_boundary3D
-//    for (size_t i = 1; i < boundaries.size(); i++) {
-    for (size_t i = 1; i < boundaries.size(); i++) {
+    for (size_t i = 0; i < boundaries.size(); i++) {
         std::vector<HalfedgeHandle> &sourceBoundary = boundaries[i];
-
-        // Calculate the virtual cut using BFS
-        std::set<VertexHandle> sourceBoundarySet;
-        for (size_t j = 0; j < sourceBoundary.size(); j++) {
-            VertexHandle v = m_mesh->to_vertex_handle(sourceBoundary[j]);
-            sourceBoundarySet.insert(v);
+        if (sourceBoundary == *baseBoundary) {
+            continue;
         }
+
+        std::set<VertexHandle> sourceBoundaryVertices;
+        for (auto e_it = sourceBoundary.begin(); e_it != sourceBoundary.end(); e_it++) {
+            sourceBoundaryVertices.insert(m_mesh->from_vertex_handle(*e_it));
+        }
+
+        std::vector<Graph::vertex_descriptor> predecessor_map(num_vertices(multi_source_graph));
+        auto predecessor_pmap = boost::make_iterator_property_map(predecessor_map.begin(), get(boost::vertex_index, multi_source_graph));
         
-        std::vector<HalfedgeHandle> minVirtualCut;
-        std::vector<HalfedgeHandle> minVirtualCutReverse;
-        int insertionPosition = 0;
-        for (size_t j = 0; j < sourceBoundary.size(); j++) {
-            std::queue<VertexHandle> queue;
-            std::set<VertexHandle> visited;
-            std::map<VertexHandle, VertexHandle> predecessor;
+        std::vector<double> distance_map(num_vertices(multi_source_graph));
+        auto distance_pmap = boost::make_iterator_property_map(distance_map.begin(), get(boost::vertex_index, multi_source_graph));
 
-            VertexHandle currentV = m_mesh->from_vertex_handle(sourceBoundary[j]);
-            queue.push(currentV);
-            visited.insert(currentV);
-            
-            while (targetBoudarySet.find(currentV) == targetBoudarySet.end()) {
-                for (TriMesh::ConstVertexVertexIter cvv_it = m_mesh->cvv_iter(currentV); cvv_it; cvv_it++) {
-                    if (visited.find(*cvv_it) == visited.end()
-                    &&  sourceBoundarySet.find(*cvv_it) == sourceBoundarySet.end()) {
-                        queue.push(*cvv_it);
-                        visited.insert(*cvv_it);
-                        predecessor.emplace(*cvv_it, currentV);
-                    }
-                }
-                currentV = queue.front();
-                queue.pop();
-            }
-            visited.clear();
-
-            // We got to one of the targets
-            std::vector<HalfedgeHandle> virtualCut;
-            std::vector<HalfedgeHandle> virtualCutReverse;
-            while (predecessor.find(currentV) != predecessor.end()) {
-                VertexHandle nextV = predecessor[currentV];
-                HalfedgeHandle heh;
-                PlushPatternGenerator::getHalfedge(m_mesh, heh, currentV, nextV);
-                virtualCut.push_back(heh);
-                virtualCutReverse.push_back(m_mesh->opposite_halfedge_handle(heh));
-                currentV = nextV;
-            }
-            std::reverse(virtualCutReverse.begin(), virtualCutReverse.end());
-            
-            if (minVirtualCut.empty() || virtualCut.size() < minVirtualCut.size()) {
-                minVirtualCut = virtualCut;
-                minVirtualCutReverse = virtualCutReverse;
-                insertionPosition = j;
+        // we solve multi-source shoretest path problem by manually construct a new graph
+        // with new additional vertex as starting point and inserting 0-weight edges
+        // from starting point to other point on source boundary
+        Graph::vertex_descriptor startingV = boost::add_vertex(multi_source_graph);
+        Graph::vertex_iterator v_it, v_ite;
+        for (tie(v_it, v_ite) = vertices(multi_source_graph); v_it != v_ite; v_it++) {
+            VertexHandle v = get(boost::vertex_owner, multi_source_graph, *v_it);
+            if (sourceBoundaryVertices.find(v) != sourceBoundaryVertices.end()) {
+                Graph::edge_descriptor e = boost::add_edge(startingV, *v_it, multi_source_graph).first;
+                put(boost::edge_weight, multi_source_graph, e, 0);
             }
         }
+
+        boost::dijkstra_shortest_paths(multi_source_graph, startingV,
+                                       boost::predecessor_map(predecessor_pmap)
+                                       .distance_map(distance_pmap)
+                                      );
+        
+        // Don't forget to remove starting point so that multi_source_graph can be reuse for next boundary
+        boost::clear_vertex(startingV, multi_source_graph);
+        boost::remove_vertex(startingV, multi_source_graph);
+        
+        // Find the shortest distance on target boundary
+        double minDistance = std::numeric_limits<double>::max();
+        Graph::vertex_descriptor minDstV;
+        for (size_t j = 0; j < baseBoundary->size(); j++) {
+            VertexHandle v = m_mesh->to_vertex_handle(baseBoundary->at(j));
+            if (distance_map[v.idx()] < minDistance) {
+                minDistance = distance_map[v.idx()];
+                minDstV = v.idx();
+            }
+        }
+        assert(minDistance > 0);
+        
+        // Back tracing
+        std::vector<HalfedgeHandle> virtualCut;
+        std::vector<HalfedgeHandle> virtualCutReverse;
+        Graph::vertex_descriptor currentV = minDstV, nextV = predecessor_map[minDstV];
+        while (nextV != startingV) {
+            assert(std::find(sourceBoundaryVertices.begin(), sourceBoundaryVertices.end(), m_mesh->vertex_handle(currentV)) == sourceBoundaryVertices.end());
+            HalfedgeHandle heh;
+            bool edgeExist = PlushPatternGenerator::getHalfedge(m_mesh, heh, currentV, nextV);
+            assert(edgeExist);
+            
+            virtualCut.push_back(heh);
+            virtualCutReverse.push_back(m_mesh->opposite_halfedge_handle(heh));
+            
+            currentV = nextV;
+            nextV = predecessor_map[nextV];
+        }
+        std::reverse(virtualCutReverse.begin(), virtualCutReverse.end());
+        
+        // Find the insertion position (the index of starting point in source boundary)
+        int insertionPosition = -1;
+        for (size_t j = 0; j < sourceBoundary.size(); j++) {
+            if ((unsigned long)m_mesh->from_vertex_handle(sourceBoundary[j]).idx() == currentV) {
+                insertionPosition = j;
+                break;
+            }
+        }
+        assert(insertionPosition >= 0 && "The end point of virtual cut is not found in source boundary.");
+        
         // Rotate sourceBoundary so that the 0th element matches insertion position
         std::rotate(sourceBoundary.begin(), sourceBoundary.begin() + insertionPosition, sourceBoundary.end());
         
@@ -91,10 +152,17 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *bound
         for (auto he_it = m_boundary3D.begin(); he_it != m_boundary3D.end(); he_it++) {
             HalfedgeHandle heh = *he_it;
             // Find the insertion position
-            if (m_mesh->from_vertex_handle(heh) == m_mesh->from_vertex_handle(minVirtualCut[0])) {
-                he_it = m_boundary3D.insert(he_it, minVirtualCut.begin(), minVirtualCut.end());
-                he_it = m_boundary3D.insert(he_it+minVirtualCut.size(), sourceBoundary.begin(), sourceBoundary.end());
-                he_it = m_boundary3D.insert(he_it+sourceBoundary.size(), minVirtualCutReverse.begin(), minVirtualCutReverse.end());
+            if (m_mesh->from_vertex_handle(heh) == m_mesh->from_vertex_handle(virtualCut[0])) {
+                he_it = m_boundary3D.insert(he_it, virtualCut.begin(), virtualCut.end());
+                he_it = m_boundary3D.insert(he_it+virtualCut.size(), sourceBoundary.begin(), sourceBoundary.end());
+                he_it = m_boundary3D.insert(he_it+sourceBoundary.size(), virtualCutReverse.begin(), virtualCutReverse.end());
+                
+                // Check if this boundary is well connected together
+                for (size_t edgeNo = 0; edgeNo < m_boundary3D.size(); edgeNo++) {
+                    assert(m_mesh->to_vertex_handle(m_boundary3D[edgeNo])
+                        == m_mesh->from_vertex_handle(m_boundary3D[(edgeNo+1)%m_boundary3D.size()]));
+                    assert(!m_mesh->is_boundary(m_boundary3D[edgeNo]));
+                }
                 break;
             }
         }
