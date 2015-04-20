@@ -20,13 +20,11 @@ double WeightFunctor::distanceWeight(TriMesh::Point p1, TriMesh::Point p2) const
     return (p1-p2).norm()/m_maxEdgeLength;
 }
 
-double WeightFunctor::textureWeight(EdgeHandle eh) const {
+double WeightFunctor::textureWeight(HalfedgeHandle heh) const {
     // if the two faces along this edge are different color, set weight of this edge to almost 0
     // we encourage path go through the boundary of different colors
-    HalfedgeHandle heh1 = m_mesh->halfedge_handle(eh, 0);
-    HalfedgeHandle heh2 = m_mesh->halfedge_handle(eh, 1);
-    if (!m_mesh->is_boundary(heh1) && !m_mesh->is_boundary(heh2)
-        &&  m_mesh->color(m_mesh->face_handle(heh1)) != m_mesh->color(m_mesh->face_handle(heh2))) {
+    if (!m_mesh->is_boundary(heh) && !m_mesh->is_boundary(m_mesh->opposite_halfedge_handle(heh))
+        &&  m_mesh->color(m_mesh->face_handle(heh)) != m_mesh->color(m_mesh->opposite_face_handle(heh))) {
         return 1e-9;
     } else {
         return 1;
@@ -105,9 +103,8 @@ double WeightFunctor::smoothnessWeight(VertexHandle v1,
     }
 }
 
-double WeightFunctor::operator()(EdgeHandle eh) const {
-    HalfedgeHandle heh = m_mesh->halfedge_handle(eh, 0);
-
+double WeightFunctor::operator()(HalfedgeHandle heh) const {
+    EdgeHandle eh = m_mesh->edge_handle(heh);
     VertexHandle v1 = m_mesh->from_vertex_handle(heh);
     VertexHandle v2 = m_mesh->to_vertex_handle(heh);
 
@@ -134,7 +131,7 @@ double WeightFunctor::operator()(EdgeHandle eh) const {
         edgeWeight = m_mesh->property(PlushPatternGenerator::edgeWeightHandle, eh);
     } else {
         edgeWeight += distanceCoefficient * distanceWeight(p1, p2);
-        edgeWeight += textureCoefficient * textureWeight(eh);
+        edgeWeight += textureCoefficient * textureWeight(heh);
         edgeWeight += curvatureCoefficient * curvatureWeight(v1, v2);
         edgeWeight += skeletonCoefficient * skeletonWeight(v1, v2, p1, p2);
         

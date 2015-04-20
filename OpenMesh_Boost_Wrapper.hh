@@ -4,6 +4,7 @@
 #include <ObjectTypes/TriangleMesh/TriangleMesh.hh>
 
 #include <boost/config.hpp>
+#include <boost/iterator/iterator_facade.hpp>
 #include <boost/graph/graph_concepts.hpp>
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/properties.hpp>
@@ -13,8 +14,7 @@ namespace boost {
     struct graph_traits< TriMesh > {
         // Graph
         typedef TriMesh::VertexHandle vertex_descriptor;
-//        typedef TriMesh::HalfedgeHandle edge_descriptor;
-        typedef TriMesh::EdgeHandle edge_descriptor;
+        typedef TriMesh::HalfedgeHandle edge_descriptor;
         
         typedef undirected_tag directed_category;
         typedef disallow_parallel_edge_tag edge_parallel_category;
@@ -35,14 +35,69 @@ namespace boost {
         typedef int vertices_size_type;
         
         // IncidenceGraph
-        typedef TriMesh::ConstVertexEdgeIter out_edge_iterator;
+        typedef TriMesh::ConstVertexOHalfedgeIter out_edge_iterator;
         typedef int degree_size_type;
         
         // BidirectionalGraph
-        typedef TriMesh::ConstVertexEdgeIter in_edge_iterator;
-
+        typedef TriMesh::ConstVertexIHalfedgeIter in_edge_iterator;
+        
         // EdgeListGraph
-        typedef TriMesh::ConstEdgeIter edge_iterator;
+        //        typedef TriMesh::ConstHalfedgeIter edge_iterator;
+        class edge_iterator
+        : public boost::iterator_facade<edge_iterator,
+        edge_descriptor,
+        bidirectional_traversal_tag,
+        const edge_descriptor&>
+        {
+        public:
+            edge_iterator() : m_g(NULL) {}
+            
+            edge_iterator(const TriMesh* g,
+                          bool isEnd)
+            : m_g(g) {
+                if (!isEnd) {
+                    m_eh_iter = m_g->edges_begin();
+                    m_current_heh = m_g->halfedge_handle(*m_eh_iter, 0);
+                } else {
+                    m_eh_iter = m_g->edges_end();
+                }
+            }
+            
+        private:
+            const edge_descriptor& dereference() const {
+                return m_current_heh;
+            }
+            
+            bool equal(const edge_iterator& other) const {
+                return *other == m_current_heh;
+            }
+            
+            void increment() {
+                m_eh_iter++;
+                if (m_eh_iter != m_g->edges_end()) {
+                    m_current_heh = m_g->halfedge_handle(*m_eh_iter, 0);
+                } else {
+                    m_current_heh.invalidate();
+                }
+            }
+            void decrement() {
+                m_eh_iter--;
+                if (m_eh_iter != m_g->edges_end()) {
+                    m_current_heh = m_g->halfedge_handle(*m_eh_iter, 0);
+                } else {
+                    m_current_heh.invalidate();
+                }
+            }
+            
+            const TriMesh *m_g;
+            TriMesh::EdgeIter m_eh_iter;
+            
+            // To prevent from returning local variable
+            edge_descriptor m_current_heh;
+            
+            friend class iterator_core_access;
+        };
+        
         typedef int edges_size_type;
     };
     
@@ -121,7 +176,7 @@ num_vertices(const TriMesh& g)
 inline boost::graph_traits< TriMesh >::edges_size_type
 num_edges(const TriMesh& g)
 {
-    return g.n_halfedges() / 2;
+    return g.n_edges();
 }
 
 inline boost::graph_traits< TriMesh >::degree_size_type
@@ -145,28 +200,12 @@ in_degree(boost::graph_traits< TriMesh >::vertex_descriptor v
     return g.valence(v);
 }
 
-//inline boost::graph_traits< TriMesh >::vertex_descriptor
-//source(
-//       boost::graph_traits< TriMesh >::edge_descriptor e,
-//       const TriMesh& g)
-//{
-//    return g.from_vertex_handle(e);
-//}
-//
-//inline boost::graph_traits< TriMesh >::vertex_descriptor
-//target(
-//       boost::graph_traits< TriMesh >::edge_descriptor e,
-//       const TriMesh& g)
-//{
-//    return g.to_vertex_handle(e);
-//}
-
 inline boost::graph_traits< TriMesh >::vertex_descriptor
 source(
        boost::graph_traits< TriMesh >::edge_descriptor e,
        const TriMesh& g)
 {
-    return g.from_vertex_handle(g.halfedge_handle(e,0));
+    return g.from_vertex_handle(e);
 }
 
 inline boost::graph_traits< TriMesh >::vertex_descriptor
@@ -174,21 +213,43 @@ target(
        boost::graph_traits< TriMesh >::edge_descriptor e,
        const TriMesh& g)
 {
-    return g.to_vertex_handle(g.halfedge_handle(e,0));
+    return g.to_vertex_handle(e);
 }
+
+//inline boost::graph_traits< TriMesh >::vertex_descriptor
+//source(
+//       boost::graph_traits< TriMesh >::edge_descriptor e,
+//       const TriMesh& g)
+//{
+////    return g.from_vertex_handle(g.halfedge_handle(e,0));
+//    return e.source();
+//}
+//
+//inline boost::graph_traits< TriMesh >::vertex_descriptor
+//target(
+//       boost::graph_traits< TriMesh >::edge_descriptor e,
+//       const TriMesh& g)
+//{
+////    return g.to_vertex_handle(g.halfedge_handle(e,0));
+//    return e.target();
+//}
 
 //inline std::pair<boost::graph_traits< TriMesh >::edge_descriptor, bool>
 //edge(boost::graph_traits< TriMesh >::vertex_descriptor u
 //     , boost::graph_traits< TriMesh >::vertex_descriptor v
 //     , const TriMesh& g)
 //{
+//    typedef boost::graph_traits<TriMesh>::edge_descriptor edge_descriptor;
 //    // circulate around the inedges of u
-//    for (TriMesh::ConstVertexOHalfedgeIter voh_it = g.cvoh_begin(u); voh_it; voh_it++) {
-//        if(*voh_it == v) {
-//            return std::make_pair(*voh_it, true);
+//    for (TriMesh::HalfedgeHandle voh : g.voh_range(u)) {
+//        if(g.to_vertex_handle(voh) == v) {
+//            edge_descriptor e(&g);
+//            e.m_heh = voh;
+//            e.m_eh = g.edge_handle(voh);
+//            return std::make_pair(e, true);
 //        }
 //    }
-//    return std::make_pair(TriMesh::HalfedgeHandle(), false);
+//    return std::make_pair(edge_descriptor(NULL), false);
 //}
 
 //inline std::pair<boost::graph_traits< TriMesh >::edge_descriptor, bool>
@@ -220,7 +281,11 @@ std::pair<boost::graph_traits< TriMesh >::edge_iterator
 >
 edges( const TriMesh& g)
 {
-    return std::make_pair( g.edges_begin(), g.edges_end() );
+    typedef typename boost::graph_traits< TriMesh >::edge_iterator Iter;
+    Iter ve_it(&g, false);
+    Iter ve_ite(&g, true);
+    
+    return std::make_pair( ve_it, ve_ite );
 }
 
 inline
@@ -230,7 +295,7 @@ boost::graph_traits< TriMesh >::in_edge_iterator>
 in_edges( boost::graph_traits< TriMesh >::vertex_descriptor u
          , const TriMesh& g)
 {
-    return std::make_pair( g.cve_begin(u), g.cve_end(u) );
+    return std::make_pair( g.cvih_begin(u), g.cvih_end(u) );
 }
 
 inline
@@ -240,10 +305,12 @@ boost::graph_traits< TriMesh >::out_edge_iterator>
 out_edges( boost::graph_traits< TriMesh >::vertex_descriptor u
           , const TriMesh& g)
 {
-    for (auto e_it = g.cve_begin(u); e_it != g.cve_end(u); e_it++) {
-        assert(target(*e_it, g) == u);
+    // Boost require the ouput of out_edges(u, g) to be (u, v) not (v, u)
+    for (auto e_it = g.cvoh_begin(u); e_it != g.cvoh_end(u); e_it++) {
+        assert(source(*e_it, g) == u);
     }
-    return std::make_pair( g.cve_begin(u), g.cve_end(u) );
+    
+    return std::make_pair( g.cvoh_begin(u), g.cvoh_end(u) );
 }
 
 BOOST_CONCEPT_ASSERT((boost::BidirectionalGraphConcept<TriMesh>));

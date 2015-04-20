@@ -162,7 +162,7 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
     Filtered_graph curvature_filtered_mesh(*mesh, boost::keep_all(), curvatureFilter);
     
     typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
-    VertexHandle, EdgeHandle > Graph;
+    VertexHandle, HalfedgeHandle > Graph;
     Graph curvature_graph;
 
     struct Graph_copier {

@@ -53,7 +53,7 @@ void PlushPatternGenerator::calcGeodesic(std::vector<VertexHandle> targetVertice
         WeightFunctor weightFunctor(m_mesh,
                                     &currentV,
                                     predecessor_pmap);
-        auto weight_pmap = boost::make_function_property_map< EdgeHandle,
+        auto weight_pmap = boost::make_function_property_map< HalfedgeHandle,
                                                             double,
                                                             WeightFunctor > (weightFunctor);
 

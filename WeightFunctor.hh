@@ -12,7 +12,7 @@ private:
     double m_maxEdgeLength;
     
     double distanceWeight(TriMesh::Point p1, TriMesh::Point p2) const;
-    double textureWeight(EdgeHandle eh) const;
+    double textureWeight(HalfedgeHandle heh) const;
     
     double curvatureWeight(VertexHandle v1, VertexHandle v2) const;
     
@@ -32,7 +32,7 @@ public:
                   const boost::iterator_property_map<std::vector<VertexHandle>::iterator, TriMesh_id_map>
                   &predecessor_pmap);
     
-    double operator()(EdgeHandle eh) const;
+    double operator()(HalfedgeHandle heh) const;
 };
 
 class Dijkstra_visitor : public boost::default_dijkstra_visitor {

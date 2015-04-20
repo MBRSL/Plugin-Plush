@@ -28,7 +28,7 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *bound
     boost::property<boost::vertex_owner_t, VertexHandle>,
 
     boost::property<boost::edge_weight_t, double,
-    boost::property<boost::edge_owner_t, EdgeHandle> >
+    boost::property<boost::edge_owner_t, HalfedgeHandle> >
     > Graph;
     Graph multi_source_graph;
     
@@ -40,7 +40,7 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *bound
         void operator()(const VertexHandle v_src, Graph::vertex_descriptor &v_dst) {
             put(boost::vertex_owner, *m_g_dst, v_dst, v_src);
         }
-        void operator()(const EdgeHandle e_src, Graph::edge_descriptor &e_dst) {
+        void operator()(const HalfedgeHandle e_src, Graph::edge_descriptor &e_dst) {
             put(boost::edge_owner, *m_g_dst, e_dst, e_src);
             put(boost::edge_weight, *m_g_dst, e_dst, m_mesh->calc_edge_length(e_src));
         }
