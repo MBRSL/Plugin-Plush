@@ -110,9 +110,11 @@ bool Skeleton::build(const std::string &filename)
     parentids.resize(ids_tmp.size());
     for (size_t i = 0; i < ids_tmp.size(); i++)
     {
-        int id = ids_tmp[i];
+        size_t id = ids_tmp[i];
+        assert(0 <= id && id < ids_tmp.size() && "Bone index should be [0, #bones)");
         verts[id] = verts_tmp[i];
         parentids[id] = parentids_tmp[id];
+        assert(parentids[id] < (int)ids_tmp.size() &&  "Parent bone index should be (-inf, #bones)");
     }
     for (size_t i = 0; i < ids_tmp.size(); i++)
     {
@@ -120,6 +122,7 @@ bool Skeleton::build(const std::string &filename)
         if(parentids[id] >= 0)
         {
             Bone bone(verts[parentids[id]], verts[id], parentids[id], id);
+            assert((bone.getA() - bone.getB()).norm() > 0 && "A bone contains no length. Do you have identical joints?");
             bones.push_back(bone);
         }
     }
