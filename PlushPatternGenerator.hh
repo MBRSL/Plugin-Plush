@@ -8,6 +8,8 @@
 
 #include "Common.hh"
 
+#include <Eigen/sparse>
+
 #include <MeshTools/MeshSelectionT.hh>
 
 #include <QObject>
@@ -77,12 +79,18 @@ public:
     
     /// Calculate the sum of inner (clockwise) angles by iterating from one halfedge to another.
     static double getSumInnerAngle(const TriMesh *mesh, HalfedgeHandle heh1, HalfedgeHandle heh2);
-    
+    static double getSumInnerAngle(const TriMesh *mesh, VertexHandle v);
+
     /// Get boundary for a given opened mesh
     static bool getBoundaryOfOpenedMesh(std::vector< std::vector<HalfedgeHandle> > &boundaries, const TriMesh *mesh, bool getInteriorHalfedge);
     
     /** Expand selection by n-ring connectivity **/
     static void expandVertice(TriMesh *mesh, VertexHandle centerV, std::set<VertexHandle> &verticesSelection, int n, double maxDistance);
+
+    static double calcArea(OpenMesh::Vec3d p1, OpenMesh::Vec3d p2, OpenMesh::Vec3d p3);
+    
+    enum InteriorParameterizationMethod { Barycentric, Conformal, MeanValue };
+
     PlushPatternGenerator(TriMesh *mesh, QString meshName);
     ~PlushPatternGenerator();
     
@@ -94,6 +102,8 @@ public:
     
     bool calcCurvature();
     
+    bool calcSelection(std::vector<VertexHandle> &targetVertices, double threshold=0.001);
+    
     void calcGeodesic(std::vector<VertexHandle> targetVertices);
     bool loadGeodesic();
     bool saveGeodesic(std::vector<VertexHandle> selectedVertices);
@@ -102,6 +112,9 @@ public:
     bool calcCircularSeams(TriMesh *mesh);
     
     bool calcSkeletonWeight();
+    
+    // Used in selection
+    void calc_parameterization_weight_matrix(TriMesh *mesh, Eigen::SparseMatrix<double> &M, InteriorParameterizationMethod method);
     
     /// Flatten 3D loops into 2D loops using LPFB.
     bool calcFlattenedGraph();

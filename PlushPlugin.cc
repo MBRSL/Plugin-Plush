@@ -55,17 +55,23 @@ void PlushPlugin::initializePlugin()
     flatteningGroup->setLayout(flatteningLayout);
     
     QGroupBox *selectionGroup = new QGroupBox(tr("Selection"));
-    loadSelectionButton = new QPushButton(tr("Load"));
-    saveSelectionButton = new QPushButton(tr("Save"));
-    clearSelectionButton = new QPushButton(tr("Clear"));
-    QHBoxLayout *selectionLayout = new QHBoxLayout;
-    selectionLayout->addWidget(loadSelectionButton);
-    selectionLayout->addWidget(saveSelectionButton);
-    selectionLayout->addWidget(clearSelectionButton);
+    QPushButton *loadSelectionButton = new QPushButton(tr("Load"));
+    QPushButton *saveSelectionButton = new QPushButton(tr("Save"));
+    QPushButton *clearSelectionButton = new QPushButton(tr("Clear"));
+    QPushButton *calcSelectionButton = new QPushButton(tr("Calculate selction"));
+    QVBoxLayout *selectionLayout = new QVBoxLayout;
+    QHBoxLayout *selectionRow1Layout = new QHBoxLayout;
+    QHBoxLayout *selectionRow2Layout = new QHBoxLayout;
+    selectionRow1Layout->addWidget(loadSelectionButton);
+    selectionRow1Layout->addWidget(saveSelectionButton);
+    selectionRow1Layout->addWidget(clearSelectionButton);
+    selectionRow2Layout->addWidget(calcSelectionButton);
+    selectionLayout->addLayout(selectionRow1Layout);
+    selectionLayout->addLayout(selectionRow2Layout);
     selectionGroup->setLayout(selectionLayout);
     
     QGroupBox *curvatureGroup = new QGroupBox(tr("Curvature"));
-    calcCurvatureButton = new QPushButton(tr("Calculate"));
+    QPushButton *calcCurvatureButton = new QPushButton(tr("Calculate"));
     QHBoxLayout *curvatureLayout = new QHBoxLayout;
     curvatureLayout->addWidget(calcCurvatureButton);
     curvatureGroup->setLayout(curvatureLayout);
@@ -89,6 +95,7 @@ void PlushPlugin::initializePlugin()
     connect(loadSelectionButton, SIGNAL(clicked()), this, SLOT(loadSelectionButtonClicked()));
     connect(saveSelectionButton, SIGNAL(clicked()), this, SLOT(saveSelectionButtonClicked()));
     connect(clearSelectionButton, SIGNAL(clicked()), this, SLOT(clearSelectionButtonClicked()));
+    connect(calcSelectionButton, SIGNAL(clicked()), this, SLOT(calcSelectionButtonClicked()));
     connect(calcFlattenButton, SIGNAL(clicked()), this, SLOT(calcFlattenedGraphButtonClicked()));
     connect(showFlattenButton, SIGNAL(clicked()), this, SLOT(showFlattenedGrpahButtonClicked()));
     connect(calcCurvatureButton, SIGNAL(clicked()), this, SLOT(calcCurvatureButtonClicked()));
@@ -166,7 +173,7 @@ int PlushPlugin::loadSelection(TriMesh *mesh, QString meshName) {
     }
     
     MeshSelection::selectVertices(mesh, selectedVertices);
-    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION_EDGES);
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
     return selectedVertices.size();
 }
 
@@ -186,7 +193,19 @@ void PlushPlugin::saveSelection(TriMesh *mesh, QString meshName) {
 
 void PlushPlugin::clearSelection(TriMesh *mesh) {
     MeshSelection::clearVertexSelection(mesh);
-    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION_EDGES);
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
+}
+
+void PlushPlugin::calcSelection(TriMesh *mesh) {
+    std::vector<VertexHandle> targetVertices;
+    m_patternGenerator->calcSelection(targetVertices);
+    
+    std::vector<int> targetVerticesId;
+    for (auto v : targetVertices) {
+        targetVerticesId.push_back(v.idx());
+    }
+    MeshSelection::selectVertices(mesh, targetVerticesId);
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
 }
 
 void PlushPlugin::calcSkeletonWeightButtonClicked() {
@@ -429,6 +448,14 @@ void PlushPlugin::clearSelectionButtonClicked() {
     }
     
     clearSelection(m_triMeshObj->mesh());
+}
+
+void PlushPlugin::calcSelectionButtonClicked() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+    
+    calcSelection(m_triMeshObj->mesh());
 }
 
 void PlushPlugin::calcCurvatureThread() {

@@ -200,6 +200,22 @@ double PlushPatternGenerator::getSumInnerAngle(const TriMesh *mesh, HalfedgeHand
     return sumInnerAngle;
 }
 
+double PlushPatternGenerator::getSumInnerAngle(const TriMesh *mesh, VertexHandle v) {
+    double sumAngle = 0;
+    for (HalfedgeHandle cvih : mesh->vih_range(v)) {
+        if (!mesh->is_boundary(cvih)) {
+            sumAngle += mesh->calc_sector_angle(cvih);
+        }
+    }
+    return sumAngle;
+}
+
+double PlushPatternGenerator::calcArea(OpenMesh::Vec3d p1, OpenMesh::Vec3d p2, OpenMesh::Vec3d p3) {
+    OpenMesh::Vec3d v12 = p2-p1;
+    OpenMesh::Vec3d v13 = p3-p1;
+    return (v12 % v13).norm() / 2;
+}
+
 /** Expand selection by n-ring connectivity **/
 void PlushPatternGenerator::expandVertice(TriMesh *mesh, VertexHandle centerV, std::set<VertexHandle> &verticesSelection, int n, double maxDistance) {
     TriMesh::Point p = mesh->point(centerV);
@@ -215,6 +231,7 @@ void PlushPatternGenerator::expandVertice(TriMesh *mesh, VertexHandle centerV, s
         verticesSelection.insert(ring.begin(), ring.end());
     }
 }
+
 /**
  @brief Return rings of boundary halfedges. May contains multiple rings
  @param boundary Result will be stored here, Ordered halfedges forms a ring.

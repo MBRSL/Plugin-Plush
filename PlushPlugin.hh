@@ -82,11 +82,6 @@ private:
     QPushButton *geodesicShowAllButton;
     QCheckBox *geodesicElimination;
     
-    QPushButton *loadSelectionButton;
-    QPushButton *saveSelectionButton;
-    QPushButton *clearSelectionButton;
-    QPushButton *calcCurvatureButton;
-    
     bool showAllPath;
     /// Flag for thread stopping
     bool isJobStopped;
@@ -97,6 +92,7 @@ private:
     int loadSelection(TriMesh *mesh, QString meshName);
     void saveSelection(TriMesh *mesh, QString meshName);
     void clearSelection(TriMesh *mesh);
+    void calcSelection(TriMesh *mesh);
 
 private slots:
     // BaseInterface
@@ -111,6 +107,7 @@ private slots:
     void loadSelectionButtonClicked();
     void saveSelectionButtonClicked();
     void clearSelectionButtonClicked();
+    void calcSelectionButtonClicked();
     
     void showFlattenedGrpahButtonClicked();
     void calcFlattenedGraphButtonClicked();

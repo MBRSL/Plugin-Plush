@@ -4,6 +4,83 @@
 #include <IpIpoptApplication.hpp>
 #include <LPFB.hh>
 
+/*
+ * v4 -------- v1
+ *  \         / \
+ *   \       /   \
+ *    \     /     \
+ *     \   /       \
+ *      \ /         \
+ *      v2 -------- v3
+ */
+void PlushPatternGenerator::calc_parameterization_weight_matrix(TriMesh *mesh,
+                                                                Eigen::SparseMatrix<double> &M,
+                                                                InteriorParameterizationMethod method) {
+    int n = mesh->n_vertices();
+    
+    // Prepare for matrix
+    std::vector< Eigen::Triplet<double> > tripletList;
+    double *rowSum = new double[n];
+    memset(rowSum, 0, sizeof(double)*n);
+    
+    for (EdgeHandle eh : mesh->edges()) {
+        HalfedgeHandle heh12 = mesh->halfedge_handle(eh, 0);
+        HalfedgeHandle heh21 = mesh->halfedge_handle(eh, 1);
+        
+        VertexHandle v1 = mesh->from_vertex_handle(heh12);
+        VertexHandle v2 = mesh->to_vertex_handle(heh12);
+        if (mesh->is_boundary(v1) && mesh->is_boundary(v2)) {
+            continue;
+        }
+        
+        HalfedgeHandle heh31 = mesh->prev_halfedge_handle(heh12);
+        HalfedgeHandle heh42 = mesh->prev_halfedge_handle(heh21);
+        
+        double weight12 = 0, weight21 = 0;
+        if (method == Barycentric) {
+            weight12 = 1;
+            weight21 = 1;
+        } else if (method == MeanValue) {
+            double angle312 = mesh->calc_sector_angle(heh31);
+            double angle214 = mesh->calc_sector_angle(heh21);
+            double angle123 = mesh->calc_sector_angle(heh12);
+            double angle421 = mesh->calc_sector_angle(heh42);
+            weight12 = (tan(angle312/2) + tan(angle214/2)) / mesh->calc_edge_length(heh12);
+            weight21 = (tan(angle123/2) + tan(angle421/2)) / mesh->calc_edge_length(heh21);
+        } else if (method == Conformal) {
+            double angle231 = mesh->calc_sector_angle(mesh->next_halfedge_handle(heh12));
+            double angle142 = mesh->calc_sector_angle(mesh->next_halfedge_handle(heh21));
+            double cotR231 = tan(M_PI_2 - angle231);
+            double cotR142 = tan(M_PI_2 - angle142);
+            weight12 = cotR231 + cotR142;
+            weight21 = weight12;
+        } else {
+            assert("Invalid InteriorParameterizationMethod");
+            return;
+        }
+        
+        if (!mesh->is_boundary(v1)) {
+            tripletList.push_back(Eigen::Triplet<double>(v1.idx(), v2.idx(), weight12));
+            rowSum[v1.idx()] += weight12;
+        }
+        if (!mesh->is_boundary(v2)) {
+            tripletList.push_back(Eigen::Triplet<double>(v2.idx(), v1.idx(), weight21));
+            rowSum[v2.idx()] += weight21;
+        }
+    }
+    
+    for (VertexHandle v : mesh->vertices()) {
+        if (mesh->is_boundary(v)) {
+            tripletList.push_back(Eigen::Triplet<double>(v.idx(), v.idx(), 1));
+        } else {
+            tripletList.push_back(Eigen::Triplet<double>(v.idx(), v.idx(), -rowSum[v.idx()]));
+        }
+    }
+    // Filling matrix
+    M.setFromTriplets(tripletList.begin(), tripletList.end());
+    M.makeCompressed();
+}
+
 bool PlushPatternGenerator::calcFlattenedGraph()
 {
     std::set<EdgeHandle> *seams = getSeams();
@@ -39,85 +116,16 @@ bool PlushPatternGenerator::calcFlattenedGraph()
 }
 
 /**
- This function flattens non-boundary vertices using intrinsic parameterization (mean value coordinates.)
+ This function flattens non-boundary vertices using intrinsic parameterization
  @param flattenedMeshes Input mesh, its non-boundary vertices will be modified.
  @retval True on success. False if failed to solve linear system during intrinsic parameterization.
  */
 bool PlushPatternGenerator::calcInteriorPoints(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition)
 {
     int n = mesh->n_vertices();
-    
-    // Prepare for matrix
-    std::vector< Eigen::Triplet<double> > tripletList;
-    double *rowSum = new double[n];
-    memset(rowSum, 0, sizeof(double)*n);
-
-    /**     v3
-     *     /  \
-     *    /    \
-     *  v1⥫---⥬v2
-     *    \    /
-     *     \  /
-     *      v4
-     */
-    for (EdgeIter e_it = mesh->edges_begin(); e_it != mesh->edges_end(); e_it++) {
-        HalfedgeHandle heh12 = mesh->halfedge_handle(*e_it, 0);
-        HalfedgeHandle heh21 = mesh->halfedge_handle(*e_it, 1);
-        
-        VertexHandle v1 = mesh->from_vertex_handle(heh12);
-        VertexHandle v2 = mesh->to_vertex_handle(heh12);
-        if (mesh->is_boundary(v1) && mesh->is_boundary(v2)) {
-            continue;
-        }
-
-        HalfedgeHandle heh31 = mesh->prev_halfedge_handle(heh12);
-        HalfedgeHandle heh42 = mesh->prev_halfedge_handle(heh21);
-
-
-
-//            // Conformal mapping
-//            double angle231 = mesh->calc_sector_angle(mesh->next_halfedge_handle(heh12));
-//            double angle142 = mesh->calc_sector_angle(mesh->next_halfedge_handle(heh21));
-//            double cotR231 = tan(M_PI_2 - angle231);
-//            double cotR142 = tan(M_PI_2 - angle142);
-//            double weight12 = cotR231 + cotR142;
-//            double weight21 = weight12;
-        
-//            // Barycentrical mapping
-//            double weight12 = 1;
-//            double weight21 = 1;
-        
-        // Mean value mapping
-        double angle312 = mesh->calc_sector_angle(heh31);
-        double angle214 = mesh->calc_sector_angle(heh21);
-        double angle123 = mesh->calc_sector_angle(heh12);
-        double angle421 = mesh->calc_sector_angle(heh42);
-        double weight12 = (tan(angle312/2) + tan(angle214/2)) / mesh->calc_edge_length(heh12);
-        double weight21 = (tan(angle123/2) + tan(angle421/2)) / mesh->calc_edge_length(heh21);
-    
-        if (!mesh->is_boundary(v1)) {
-            tripletList.push_back(Eigen::Triplet<double>(v1.idx(), v2.idx(), weight12));
-            rowSum[v1.idx()] += weight12;
-        }
-        if (!mesh->is_boundary(v2)) {
-            tripletList.push_back(Eigen::Triplet<double>(v2.idx(), v1.idx(), weight21));
-            rowSum[v2.idx()] += weight21;
-        }
-    }
-    
-    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
-        VertexHandle v = *v_it;
-        if (mesh->is_boundary(v)) {
-            tripletList.push_back(Eigen::Triplet<double>(v.idx(), v.idx(), 1));
-        } else {
-            tripletList.push_back(Eigen::Triplet<double>(v.idx(), v.idx(), -rowSum[v.idx()]));
-        }
-    }
-    // Filling matrix
     Eigen::SparseMatrix<double> M(n, n);
-    M.setFromTriplets(tripletList.begin(), tripletList.end());
-    M.makeCompressed();
-    
+    calc_parameterization_weight_matrix(mesh, M, MeanValue);
+
     Eigen::SparseLU< Eigen::SparseMatrix<double> > solver;
     solver.compute(M);
     if (solver.info() != Eigen::Success)
@@ -169,6 +177,7 @@ bool PlushPatternGenerator::calcLPFB(TriMesh *mesh, std::map<VertexHandle, OpenM
     app->Options()->SetStringValue("linear_solver", "ma57");
     // This let us not implementing eval_h()
     app->Options()->SetStringValue("hessian_approximation","limited-memory");
+//    app->Options()->SetStringValue("derivative_test","first-order");
     
     // Intialize the IpoptApplication and process the options
     Ipopt::ApplicationReturnStatus status;
