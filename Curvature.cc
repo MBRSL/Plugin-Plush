@@ -14,19 +14,6 @@
 #include <CGAL/Monge_via_jet_fitting.h>
 #include <CGAL/Eigen_svd.h>
 
-/** Expand selection by n-ring connectivity **/
-void expandVerticeSelection(TriMesh *mesh, std::set<VertexHandle> &verticesSelection, int n) {
-    for (int i = 0; i < n; i++) {
-        std::vector<VertexHandle> ring;
-        for (std::set<VertexHandle>::iterator it = verticesSelection.begin(); it != verticesSelection.end(); it++) {
-            for (TriMesh::VertexVertexIter vv_it = mesh->vv_iter(*it); vv_it++;) {
-                ring.push_back(*vv_it);
-            }
-        }
-        verticesSelection.insert(ring.begin(), ring.end());
-    }
-}
-
 class Vertex_distance
 {
 public:
@@ -54,39 +41,40 @@ bool PlushPatternGenerator::calcCurvature() {
     
     isJobCanceled = false;
     
-    std::vector<int> selectedVertices;
-    // If no one is selected, show all of them
-    if (selectedVertices.size() == 0) {
-        for (VertexIter v_it = m_mesh->vertices_begin(); v_it != m_mesh->vertices_end(); v_it++) {
-            selectedVertices.push_back(v_it->idx());
-        }
+    double avgEdgeLength = 0;
+    for (EdgeHandle eh : m_mesh->edges()) {
+        avgEdgeLength += m_mesh->calc_edge_length(eh);
     }
-    
+    avgEdgeLength /= m_mesh->n_edges();
+
     // for each selected vertex, calculate curvature
-    for (size_t i = 0; i < selectedVertices.size(); i++) {
+    int count = 0;
+    for (VertexHandle centerV : m_mesh->vertices()) {
         if (isJobCanceled) {
             emit log(LOGINFO, "Curvature calculation canceled.");
             return false;
         }
         
-        VertexHandle centerV = m_mesh->vertex_handle(selectedVertices[i]);
-
         std::set<VertexHandle> neighboringVertices;
         neighboringVertices.insert(centerV);
 
         // Expand selection until we got enough samples
         // Or terminate if selection doesn't grow anymore
+        double maxDistance = avgEdgeLength * 2;
         size_t requiredSamples = (d_fitting+1)*(d_fitting+2)/2;
-        size_t nNeighbors;
-        do {
-            nNeighbors = neighboringVertices.size();
-            expandVerticeSelection(m_mesh, neighboringVertices, 1);
-        } while (nNeighbors != neighboringVertices.size() && neighboringVertices.size() < requiredSamples*3);
-        
-        if (nNeighbors == neighboringVertices.size() && nNeighbors < requiredSamples) {
-            QString str = QString("Not enough points for fitting for mesh: %1").arg(m_meshName);
-            emit log(LOGERR, str);
-            continue;
+        while (neighboringVertices.size() < requiredSamples*3) {
+            size_t nNeighbors = neighboringVertices.size();
+            expandVertice(m_mesh, centerV, neighboringVertices, 1, maxDistance);
+            
+            // We can't expand selection, try large area
+            if (nNeighbors == neighboringVertices.size()) {
+                maxDistance *= 2;
+                if (maxDistance < avgEdgeLength*100) {
+                    continue;
+                } else {
+                    assert("Not enough sample points for fitting. And it seems there are no possible ways to expand selection.");
+                }
+            }
         }
         
         std::vector<DPoint> in_points;
@@ -105,18 +93,9 @@ bool PlushPatternGenerator::calcCurvature() {
         monge_form.comply_wrt_given_normal(normalACGL);
         
         // Save result
-        OpenMesh::Vec3d d1(monge_form.maximal_principal_direction()[0],
-                           monge_form.maximal_principal_direction()[1],
-                           monge_form.maximal_principal_direction()[2]);
-        OpenMesh::Vec3d d2(monge_form.minimal_principal_direction()[0],
-                           monge_form.minimal_principal_direction()[1],
-                           monge_form.minimal_principal_direction()[2]);
-        m_mesh->property(maxCurvatureDirectionHandle, centerV) = d1;
-        m_mesh->property(minCurvatureDirectionHandle, centerV) = d2;
         m_mesh->property(maxCurvatureHandle, centerV) = monge_form.principal_curvatures(0);
-        m_mesh->property(minCurvatureHandle, centerV) = monge_form.principal_curvatures(1);
         
-        int status = (int)((double)i / selectedVertices.size() * 100);
+        int status = (int)((double)++count / m_mesh->n_vertices() * 100);
         emit setJobState(status);
     }
     
@@ -127,12 +106,7 @@ bool PlushPatternGenerator::calcCurvature() {
 
     for (VertexIter v_it = m_mesh->vertices_begin(); v_it != m_mesh->vertices_end(); v_it++)
     {
-        OpenMesh::Vec3d d1 = m_mesh->property(maxCurvatureDirectionHandle, *v_it);
-        OpenMesh::Vec3d d2 = m_mesh->property(minCurvatureDirectionHandle, *v_it);
-        out << d1[0] << " " << d1[1] << " " << d1[2] << " ";
-        out << d2[0] << " " << d2[1] << " " << d2[2] << " ";
         out << m_mesh->property(maxCurvatureHandle, *v_it) << " ";
-        out << m_mesh->property(minCurvatureHandle, *v_it) << "\n";
     }
     file.close();
     
@@ -151,12 +125,9 @@ void PlushPatternGenerator::loadCurvature() {
     QTextStream in(&file);
     
     double minK1 = 1e9, minK2 = 1e9;
-    double d1x, d1y, d1z, d2x, d2y, d2z, k1, k2;
+    double k1;
     for (VertexIter v_it = m_mesh->vertices_begin(); v_it != m_mesh->vertices_end(); v_it++) {
-        in >> d1x >> d1y >> d1z >> d2x >> d2y >> d2z >> k1 >> k2;
-        m_mesh->property(maxCurvatureDirectionHandle, *v_it) = OpenMesh::Vec3d(d1x, d1y, d1z);
-        m_mesh->property(minCurvatureDirectionHandle, *v_it) = OpenMesh::Vec3d(d2x, d2y, d2z);
+        in >> k1;
         m_mesh->property(maxCurvatureHandle, *v_it) = k1;
-        m_mesh->property(minCurvatureHandle, *v_it) = k2;
     }
 }

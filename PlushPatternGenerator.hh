@@ -37,10 +37,7 @@ public:
     /// @name Curvature property handle
     ///@{
     /// Curvature value/direction of each vertex. It's empty before curvature calculation.
-    static OpenMesh::VPropHandleT<double> minCurvatureHandle;
     static OpenMesh::VPropHandleT<double> maxCurvatureHandle;
-    static OpenMesh::VPropHandleT<OpenMesh::Vec3d> minCurvatureDirectionHandle;
-    static OpenMesh::VPropHandleT<OpenMesh::Vec3d> maxCurvatureDirectionHandle;
     ///@}
     
     /// @name Geodesic distance property handle
@@ -84,6 +81,8 @@ public:
     /// Get boundary for a given opened mesh
     static bool getBoundaryOfOpenedMesh(std::vector< std::vector<HalfedgeHandle> > &boundaries, const TriMesh *mesh, bool getInteriorHalfedge);
     
+    /** Expand selection by n-ring connectivity **/
+    static void expandVertice(TriMesh *mesh, VertexHandle centerV, std::set<VertexHandle> &verticesSelection, int n, double maxDistance);
     PlushPatternGenerator(TriMesh *mesh, QString meshName);
     ~PlushPatternGenerator();
     

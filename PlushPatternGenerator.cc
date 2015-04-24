@@ -2,10 +2,7 @@
 
 #include <queue>
 
-OpenMesh::VPropHandleT<double> PlushPatternGenerator::minCurvatureHandle;
 OpenMesh::VPropHandleT<double> PlushPatternGenerator::maxCurvatureHandle;
-OpenMesh::VPropHandleT<OpenMesh::Vec3d> PlushPatternGenerator::minCurvatureDirectionHandle;
-OpenMesh::VPropHandleT<OpenMesh::Vec3d> PlushPatternGenerator::maxCurvatureDirectionHandle;
 
 OpenMesh::EPropHandleT<double> PlushPatternGenerator::edgeWeightHandle;
 OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, double> > PlushPatternGenerator::geodesicDistanceHandle;
@@ -52,10 +49,7 @@ PlushPatternGenerator::~PlushPatternGenerator() {
 }
 
 void PlushPatternGenerator::initProperties() {
-    m_mesh->add_property(minCurvatureHandle, "Min Curvature");
     m_mesh->add_property(maxCurvatureHandle, "Max Curvature");
-    m_mesh->add_property(minCurvatureDirectionHandle, "Min curvature direction");
-    m_mesh->add_property(maxCurvatureDirectionHandle, "Max curvature direction");
     
     m_mesh->add_property(edgeWeightHandle, "Edge weight");
     m_mesh->add_property(geodesicDistanceHandle, "Geodesic distance between vertices pair");
@@ -75,10 +69,7 @@ void PlushPatternGenerator::initProperties() {
 }
 
 void PlushPatternGenerator::uninitProperties() {
-    m_mesh->remove_property(minCurvatureHandle);
     m_mesh->remove_property(maxCurvatureHandle);
-    m_mesh->remove_property(minCurvatureDirectionHandle);
-    m_mesh->remove_property(maxCurvatureDirectionHandle);
     
     m_mesh->remove_property(edgeWeightHandle);
     m_mesh->remove_property(geodesicDistanceHandle);
@@ -209,6 +200,21 @@ double PlushPatternGenerator::getSumInnerAngle(const TriMesh *mesh, HalfedgeHand
     return sumInnerAngle;
 }
 
+/** Expand selection by n-ring connectivity **/
+void PlushPatternGenerator::expandVertice(TriMesh *mesh, VertexHandle centerV, std::set<VertexHandle> &verticesSelection, int n, double maxDistance) {
+    TriMesh::Point p = mesh->point(centerV);
+    for (int i = 0; i < n; i++) {
+        std::set<VertexHandle> ring;
+        for (VertexHandle v : verticesSelection) {
+            for (VertexHandle cvv : mesh->vv_range(v)) {
+                if ((p - mesh->point(cvv)).norm() < maxDistance) {
+                    ring.insert(cvv);
+                }
+            }
+        }
+        verticesSelection.insert(ring.begin(), ring.end());
+    }
+}
 /**
  @brief Return rings of boundary halfedges. May contains multiple rings
  @param boundary Result will be stored here, Ordered halfedges forms a ring.
