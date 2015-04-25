@@ -28,8 +28,7 @@ bool PlushPatternGenerator::calcSelection(std::vector<VertexHandle> &targetVerti
     calc_parameterization_weight_matrix(m_mesh, M, Conformal);
     
     Eigen::SparseLU< Eigen::SparseMatrix<double> > solver;
-    // Laplace-Beltrami with cotangent weight is symmetric
-    solver.compute(M.triangularView<Eigen::Upper>());
+    solver.compute(M);
     if (solver.info() != Eigen::Success)
     {
         std::cout << "Failed to decompose matrix " << std::endl;

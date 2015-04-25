@@ -210,6 +210,57 @@ double PlushPatternGenerator::getSumInnerAngle(const TriMesh *mesh, VertexHandle
     return sumAngle;
 }
 
+VertexHandle PlushPatternGenerator::get_original_handle(TriMesh *mesh, const VertexHandle vh) const {
+    if (mesh == m_mesh) {
+        return vh;
+    } else {
+        OpenMesh::VPropHandleT<VertexHandle> inverse_mapping = getInverseMappingHandle(mesh);
+        return mesh->property(inverse_mapping, vh);
+    }
+}
+
+EdgeHandle PlushPatternGenerator::get_original_handle(TriMesh *mesh, const EdgeHandle eh) const {
+    if (mesh == m_mesh) {
+        return eh;
+    } else {
+        OpenMesh::VPropHandleT<VertexHandle> inverse_mapping = getInverseMappingHandle(mesh);
+        HalfedgeHandle heh = mesh->halfedge_handle(eh, 0);
+        VertexHandle v1 = mesh->property(inverse_mapping, mesh->from_vertex_handle(heh));
+        VertexHandle v2 = mesh->property(inverse_mapping, mesh->to_vertex_handle(heh));
+        EdgeHandle original_eh;
+        assert(getEdge(m_mesh, original_eh, v1, v2));
+        return original_eh;
+    }
+}
+
+HalfedgeHandle PlushPatternGenerator::get_original_handle(TriMesh *mesh, const HalfedgeHandle heh) const {
+    if (mesh == m_mesh) {
+        return heh;
+    } else {
+        OpenMesh::VPropHandleT<VertexHandle> inverse_mapping = getInverseMappingHandle(mesh);
+        VertexHandle v1 = mesh->property(inverse_mapping, mesh->from_vertex_handle(heh));
+        VertexHandle v2 = mesh->property(inverse_mapping, mesh->to_vertex_handle(heh));
+        HalfedgeHandle original_heh;
+        assert(getHalfedge(m_mesh, original_heh, v1, v2));
+        return original_heh;
+    }
+}
+
+FaceHandle PlushPatternGenerator::get_original_handle(TriMesh *mesh, const FaceHandle fh) const {
+    if (mesh == m_mesh) {
+        return fh;
+    } else {
+        OpenMesh::VPropHandleT<VertexHandle> inverse_mapping = getInverseMappingHandle(mesh);
+        TriMesh::ConstFaceVertexIter cfv_it = mesh->cfv_iter(fh);
+        VertexHandle v1 = mesh->property(inverse_mapping, *cfv_it++);
+        VertexHandle v2 = mesh->property(inverse_mapping, *cfv_it++);
+        VertexHandle v3 = mesh->property(inverse_mapping, *cfv_it++);
+        FaceHandle original_fh;
+        assert(getFace(m_mesh, original_fh, v1, v2, v3));
+        return original_fh;
+    }
+}
+
 double PlushPatternGenerator::calcArea(OpenMesh::Vec3d p1, OpenMesh::Vec3d p2, OpenMesh::Vec3d p3) {
     OpenMesh::Vec3d v12 = p2-p1;
     OpenMesh::Vec3d v13 = p3-p1;
@@ -217,7 +268,7 @@ double PlushPatternGenerator::calcArea(OpenMesh::Vec3d p1, OpenMesh::Vec3d p2, O
 }
 
 /** Expand selection by n-ring connectivity **/
-void PlushPatternGenerator::expandVertice(TriMesh *mesh, VertexHandle centerV, std::set<VertexHandle> &verticesSelection, int n, double maxDistance) {
+void PlushPatternGenerator::expandVertice(const TriMesh *mesh, const VertexHandle centerV, std::set<VertexHandle> &verticesSelection, int n, double maxDistance) {
     TriMesh::Point p = mesh->point(centerV);
     for (int i = 0; i < n; i++) {
         std::set<VertexHandle> ring;
@@ -229,6 +280,29 @@ void PlushPatternGenerator::expandVertice(TriMesh *mesh, VertexHandle centerV, s
             }
         }
         verticesSelection.insert(ring.begin(), ring.end());
+    }
+}
+
+void PlushPatternGenerator::expandVertice(const TriMesh *mesh, std::set<VertexHandle> &verticesSelection, int n) {
+    expandVertice(mesh, *mesh->vertices_begin(), verticesSelection, n, std::numeric_limits<double>::max());
+}
+
+void PlushPatternGenerator::shrinkVertice(const TriMesh *mesh, std::set<VertexHandle> &verticesSelection, int n) {
+    for (int i = 0; i < n; i++) {
+        std::set<VertexHandle> innerVertices;
+        for (VertexHandle v : verticesSelection) {
+            bool isInner = true;
+            for (VertexHandle cvv : mesh->vv_range(v)) {
+                if (verticesSelection.find(cvv) == verticesSelection.end()) {
+                    isInner = false;
+                    break;
+                }
+            }
+            if (isInner) {
+                innerVertices.insert(v);
+            }
+        }
+        verticesSelection = innerVertices;
     }
 }
 

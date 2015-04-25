@@ -35,7 +35,7 @@ public:
     static const int LOGERR = 0;
     static const int LOGINFO = 1;
     ///@}
-
+    
     /// @name Curvature property handle
     ///@{
     /// Curvature value/direction of each vertex. It's empty before curvature calculation.
@@ -80,17 +80,19 @@ public:
     /// Calculate the sum of inner (clockwise) angles by iterating from one halfedge to another.
     static double getSumInnerAngle(const TriMesh *mesh, HalfedgeHandle heh1, HalfedgeHandle heh2);
     static double getSumInnerAngle(const TriMesh *mesh, VertexHandle v);
-
+    
     /// Get boundary for a given opened mesh
     static bool getBoundaryOfOpenedMesh(std::vector< std::vector<HalfedgeHandle> > &boundaries, const TriMesh *mesh, bool getInteriorHalfedge);
     
     /** Expand selection by n-ring connectivity **/
-    static void expandVertice(TriMesh *mesh, VertexHandle centerV, std::set<VertexHandle> &verticesSelection, int n, double maxDistance);
-
+    static void expandVertice(const TriMesh *mesh, const VertexHandle centerV, std::set<VertexHandle> &verticesSelection, int n, double maxDistance);
+    static void expandVertice(const TriMesh *mesh, std::set<VertexHandle> &verticesSelection, int n);
+    static void shrinkVertice(const TriMesh *mesh, std::set<VertexHandle> &verticesSelection, int n);
+    
     static double calcArea(OpenMesh::Vec3d p1, OpenMesh::Vec3d p2, OpenMesh::Vec3d p3);
     
     enum InteriorParameterizationMethod { Barycentric, Conformal, MeanValue };
-
+    
     PlushPatternGenerator(TriMesh *mesh, QString meshName);
     ~PlushPatternGenerator();
     
@@ -125,18 +127,13 @@ public:
 private:
     TriMesh *m_mesh;
     QString m_meshName;
-
-//    Polyhedron m_polyhedron;
-    
-    /// Mapping from TriMesh::VertexHandle::idx to boost_vertex_descriptor
-//    std::map<int, boost_vertex_descriptor> m_verticesMapping;
     
     bool isJobCanceled;
     
     bool isIntersected(std::vector<VertexHandle> path1, std::vector<VertexHandle> path2);
     
     bool splitWithBoundary(std::vector<TriMesh> *subMeshes, std::set<EdgeHandle> *seams);
-
+    
     /// @name Flattening
     ///@{
     bool calcLPFB(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition);
@@ -149,6 +146,11 @@ private:
     
     void initProperties();
     void uninitProperties();
+    
+    VertexHandle get_original_handle(TriMesh *mesh, const VertexHandle vh) const;
+    EdgeHandle get_original_handle(TriMesh *mesh, const EdgeHandle eh) const;
+    HalfedgeHandle get_original_handle(TriMesh *mesh, const HalfedgeHandle eh) const;
+    FaceHandle get_original_handle(TriMesh *mesh, const FaceHandle fh) const;
     
     /// Utils
     template<class T>
@@ -178,7 +180,7 @@ private:
         }
         MeshSelection::selectFaces(m_mesh, facesId);
     }
-
+    
     inline void markSelection(const std::vector<VertexHandle> &vertices, TriMesh *mesh, OpenMesh::VPropHandleT<VertexHandle> &inverseMapping) {
         std::vector<int> verticesId;
         for (auto v_it = vertices.begin(); v_it != vertices.end(); v_it++) {
@@ -187,7 +189,7 @@ private:
         }
         MeshSelection::selectVertices(m_mesh, verticesId);
     }
-
+    
     inline void markSelection(const std::vector<EdgeHandle> &edes, TriMesh *mesh, OpenMesh::VPropHandleT<VertexHandle> &inverseMapping) {
         std::vector<int> edgesId;
         for (auto e_it = edes.begin(); e_it != edes.end(); e_it++) {
