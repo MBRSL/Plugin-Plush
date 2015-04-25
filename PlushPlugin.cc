@@ -25,7 +25,7 @@ void PlushPlugin::initializePlugin()
     QLabel *geodesicNumberLabel = new QLabel(tr("#"));
     geodesicNumPaths = new QSpinBox();
     geodesicNumPaths->setMinimum(0);
-    geodesicNumPaths->setValue(36);
+    geodesicNumPaths->setValue(999);
     geodesicElimination = new QCheckBox(tr("Eliminate crossover paths"));
     geodesicElimination->setChecked(true);
     geodesicShowSingleButton = new QPushButton(tr("Show single path"));
@@ -295,23 +295,23 @@ void PlushPlugin::showGeodesicButtonClicked() {
         selectedVertices.push_back(mesh->vertex_handle(selectedVerticesId[i]));
     }
     
-    if (m_patternGenerator->calcSeams(selectedVertices, geodesicNumPaths->value(), geodesicElimination->isChecked(), showAllPath)) {
-        MeshSelection::clearEdgeSelection(mesh);
-        std::vector<TriMesh> *subMeshes = m_patternGenerator->getFlattenedMeshes();
-        if (subMeshes) {
-            for (size_t i = 0; i < subMeshes->size(); i++) {
-                m_patternGenerator->calcCircularSeams(&subMeshes->at(i));
-            }
+    MeshSelection::clearEdgeSelection(mesh);
+    m_patternGenerator->calcSeams(selectedVertices, geodesicNumPaths->value(), geodesicElimination->isChecked(), showAllPath);
+    m_patternGenerator->calcCircularSeams(mesh);
+    std::vector<TriMesh> *subMeshes = m_patternGenerator->getFlattenedMeshes();
+    if (subMeshes) {
+        for (size_t i = 0; i < subMeshes->size(); i++) {
+            m_patternGenerator->calcCircularSeams(&subMeshes->at(i));
         }
-        std::set<EdgeHandle> *seams = m_patternGenerator->getSeams();
-        if (seams) {
-            std::vector<int> edgeList;
-            for (auto e_it = seams->begin(); e_it != seams->end(); e_it++) {
-                edgeList.push_back(e_it->idx());
-            }
-            MeshSelection::selectEdges(mesh, edgeList);
-            emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
+    }
+    std::set<EdgeHandle> *seams = m_patternGenerator->getSeams();
+    if (seams) {
+        std::vector<int> edgeList;
+        for (auto e_it = seams->begin(); e_it != seams->end(); e_it++) {
+            edgeList.push_back(e_it->idx());
         }
+        MeshSelection::selectEdges(mesh, edgeList);
+        emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
     }
 }
 

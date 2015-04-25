@@ -217,7 +217,7 @@ double PlushPatternGenerator::calcArea(OpenMesh::Vec3d p1, OpenMesh::Vec3d p2, O
 }
 
 /** Expand selection by n-ring connectivity **/
-void PlushPatternGenerator::expandVertice(TriMesh *mesh, VertexHandle centerV, std::set<VertexHandle> &verticesSelection, int n, double maxDistance) {
+void PlushPatternGenerator::expandVertice(const TriMesh *mesh, const VertexHandle centerV, std::set<VertexHandle> &verticesSelection, int n, double maxDistance) {
     TriMesh::Point p = mesh->point(centerV);
     for (int i = 0; i < n; i++) {
         std::set<VertexHandle> ring;
@@ -229,6 +229,29 @@ void PlushPatternGenerator::expandVertice(TriMesh *mesh, VertexHandle centerV, s
             }
         }
         verticesSelection.insert(ring.begin(), ring.end());
+    }
+}
+
+void PlushPatternGenerator::expandVertice(const TriMesh *mesh, std::set<VertexHandle> &verticesSelection, int n) {
+    expandVertice(mesh, *mesh->vertices_begin(), verticesSelection, n, std::numeric_limits<double>::max());
+}
+
+void PlushPatternGenerator::shrinkVertice(const TriMesh *mesh, std::set<VertexHandle> &verticesSelection, int n) {
+    for (int i = 0; i < n; i++) {
+        std::set<VertexHandle> innerVertices;
+        for (VertexHandle v : verticesSelection) {
+            bool isInner = true;
+            for (VertexHandle cvv : mesh->vv_range(v)) {
+                if (verticesSelection.find(cvv) == verticesSelection.end()) {
+                    isInner = false;
+                    break;
+                }
+            }
+            if (isInner) {
+                innerVertices.insert(v);
+            }
+        }
+        verticesSelection = innerVertices;
     }
 }
 

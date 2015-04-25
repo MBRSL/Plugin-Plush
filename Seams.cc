@@ -125,19 +125,29 @@ bool PlushPatternGenerator::isIntersected(std::vector<VertexHandle> pathA, std::
  @retval <#meaning#>
  */
 bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
-    // Calculate mean & std
-    double sumCurvature = 0;
-    double sumCurvatureSqr = 0;
     OpenMesh::VPropHandleT<VertexHandle> inverseMapping = getInverseMappingHandle(mesh);
-    for (VertexIter v_it = mesh->vertices_begin(); v_it != mesh->vertices_end(); v_it++) {
-        VertexHandle originalV = mesh->property(inverseMapping, *v_it);
-        double curvature = m_mesh->property(maxCurvatureHandle, originalV);
-        sumCurvature += curvature;
-        sumCurvatureSqr += curvature * curvature;
+    // Calculate mean & std
+    double sum_curvature = 0;
+    double sum_curvature_sqr = 0;
+    int count = 0;
+    for (VertexHandle v : mesh->vertices()) {
+        VertexHandle original_v = get_original_handle(mesh, v);
+        double curvature = m_mesh->property(maxCurvatureHandle, original_v);
+        if (curvature < 0) {
+            sum_curvature += curvature;
+            sum_curvature_sqr += curvature * curvature;
+            count++;
+        }
     }
-    double mean = sumCurvature/mesh->n_vertices();
-    double std = sqrt(sumCurvatureSqr/mesh->n_vertices() - mean*mean);
-    double threshold = mean + std;
+    double mean = sum_curvature/count;
+    double std = sqrt(sum_curvature_sqr/mesh->n_vertices() - mean*mean);
+    double threshold = mean/2;
+    
+    double avg_edge_length = 0;
+    for (EdgeHandle eh : mesh->edges()) {
+        avg_edge_length += mesh->calc_edge_length(eh);
+    }
+    avg_edge_length /= mesh->n_edges();
 
     struct Filter {
     private:
@@ -153,9 +163,9 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
     
     // Select vertices with curvature greater than threshold
     auto curvatureFilterFunctor = [&](VertexHandle v) -> bool {
-        VertexHandle originalV = mesh->property(inverseMapping, v);
-        double curvature = abs(m_mesh->property(maxCurvatureHandle, originalV));
-        return curvature > threshold;
+        VertexHandle original_v = get_original_handle(mesh, v);
+        double curvature = m_mesh->property(maxCurvatureHandle, original_v);
+        return curvature < threshold;
     };
     Filter curvatureFilter(mesh, curvatureFilterFunctor);
     typedef boost::filtered_graph<TriMesh, boost::keep_all, Filter> Filtered_graph;
@@ -195,29 +205,21 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
     }
     
     // For each component
-    int count = 0;
-    for (auto component_it = components.begin(); component_it != components.end(); component_it++, count++) {
+    for (auto component_it = components.begin(); component_it != components.end(); component_it++) {
         std::set<VertexHandle> component = *component_it;
         
-        // Expand n rings
-        int nRings = 2;
-        for (int i = 0; i < nRings; i++) {
-            std::set<VertexHandle> expandList;
-            for (auto v_it = component.begin(); v_it != component.end(); v_it++) {
-                for (TriMesh::ConstVertexVertexIter cvv_it = mesh->cvv_iter(*v_it); cvv_it; cvv_it++) {
-                    expandList.insert(*cvv_it);
-                }
-            }
-            component.insert(expandList.begin(), expandList.end());
-        }
-
+        // Use expand-shrink to form a much complete selection without holes
+        const int nRings = 5;
+        expandVertice(mesh, component, nRings);
+        shrinkVertice(mesh, component, nRings-2);
+        
         // Split boundary vertices into connected components
         int nVertices = 0;
         auto boundaryFilterFunctor = [&](VertexHandle v) -> bool {
             if (component.find(v) != component.end()) {
-                for (TriMesh::ConstVertexVertexIter cvv_it = mesh->cvv_iter(v); cvv_it; cvv_it++) {
+                for (VertexHandle cvv : mesh->vv_range(v)) {
                     // Any vertex connecting to non-component vertex is treat as boundary vertex
-                    if (component.find(*cvv_it) == component.end()) {
+                    if (component.find(cvv) == component.end()) {
                         nVertices++;
                         return true;
                     }
@@ -243,6 +245,11 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
             continue;
         }
 
+        // Visualize
+//        for (VertexHandle v : component) {
+//            mesh->status(v).set_selected(true);
+//        }
+        
         std::vector< std::set<VertexHandle> > boundariesVertices;
         boundariesVertices.resize(nBoundaries);
         for (size_t i = 0; i < num_vertices(boundary_graph); i++) {
@@ -253,8 +260,8 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
         // Find faces corresponds to boundariesVertices, also categorize all faces into first two boundary
         std::vector<FaceHandle> facesCandidates;
         std::vector< std::set<FaceHandle> > boundariesFaces(2);
-        for (TriMesh::ConstFaceIter cf_it = mesh->faces_begin(); cf_it != mesh->faces_end(); cf_it++) {
-            TriMesh::ConstFaceVertexIter cfv_it = mesh->cfv_iter(*cf_it);
+        for (const FaceHandle cf : mesh->faces()) {
+            TriMesh::ConstFaceVertexIter cfv_it = mesh->cfv_iter(cf);
             VertexHandle v1 = *cfv_it++;
             VertexHandle v2 = *cfv_it++;
             VertexHandle v3 = *cfv_it++;
@@ -262,14 +269,14 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
             if (component.find(v1) != component.end()
             &&  component.find(v2) != component.end()
             &&  component.find(v3) != component.end()) {
-                facesCandidates.push_back(*cf_it);
+                facesCandidates.push_back(cf);
                 
                 for (int i = 0; i < 2; i++) {
                     if (boundariesVertices[i].find(v1) != boundariesVertices[i].end()
                     ||  boundariesVertices[i].find(v2) != boundariesVertices[i].end()
                     ||  boundariesVertices[i].find(v3) != boundariesVertices[i].end()) {
                     // This face contains boundary vertices, add it to source/drain
-                        boundariesFaces[i].insert(*cf_it);
+                        boundariesFaces[i].insert(cf);
                     }
                 }
             }
@@ -315,20 +322,36 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
             idMapping.emplace(*f_it, vId);
         }
         std::set<FaceHandle> visitedF;
-        for (auto f_it = facesCandidates.begin(); f_it != facesCandidates.end(); f_it++) {
-            visitedF.insert(*f_it);
-            for (TriMesh::ConstFaceHalfedgeIter cfh_it = mesh->cfh_iter(*f_it); cfh_it; cfh_it++) {
-                if (!mesh->is_boundary(mesh->opposite_halfedge_handle(*cfh_it))) {
-                    FaceHandle neighborF = mesh->opposite_face_handle(*cfh_it);
+        for (FaceHandle f : facesCandidates) {
+            visitedF.insert(f);
+            for (const HalfedgeHandle cfh : mesh->fh_range(f)) {
+                if (!mesh->is_boundary(mesh->opposite_halfedge_handle(cfh))) {
+                    FaceHandle neighborF = mesh->opposite_face_handle(cfh);
                     if (visitedF.find(neighborF) == visitedF.end()
                     &&  idMapping.find(neighborF) != idMapping.end()) {
-                        Id source = idMapping[*f_it];
+                        Id source = idMapping[f];
                         Id target = idMapping[neighborF];
                         
-                        double theta = mesh->calc_dihedral_angle(*cfh_it);
+                        double weight = 1e9;
+                        const double
+                        alpha = 0.8;
 //                        double angWij = pow((1-(1-abs(cos(theta)))*convexityFac),2);
-                        double angWij = pow(cos(theta),2);
-                        addBidirectionalEdge(source, target, angWij);
+//                        double angWij = pow(cos(theta),2);
+                        
+                        VertexHandle v1 = mesh->from_vertex_handle(cfh);
+                        VertexHandle v2 = mesh->to_vertex_handle(cfh);
+                        double curvature1 = m_mesh->property(maxCurvatureHandle, get_original_handle(mesh, v1));
+                        double curvature2 = m_mesh->property(maxCurvatureHandle, get_original_handle(mesh, v2));
+                        if (curvature1 < 0 && curvature2 < 0) {
+                            double curvatureWeight = abs((2 * mean)/(curvature1 + curvature2));
+                            
+                            double theta = mesh->calc_dihedral_angle(cfh);
+                            double angleWeight = abs(cos(theta));
+                            
+//                            double edge_length_weight = mesh->calc_edge_length(*cfh_it)/avg_edge_length;
+                            weight = alpha * curvatureWeight + (1-alpha) * angleWeight;
+                        }
+                        addBidirectionalEdge(source, target, weight);
                     }
                 }
             }
@@ -370,14 +393,11 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
                 && (color1 == boost::black_color || color2 == boost::black_color)) {
                     FaceHandle f1 = get(boost::vertex_owner, flow_graph, v1);
                     FaceHandle f2 = get(boost::vertex_owner, flow_graph, v2);
-                    for (TriMesh::ConstFaceHalfedgeIter cfh_it = mesh->cfh_iter(f1); cfh_it; cfh_it++) {
-                        if (!mesh->is_boundary(mesh->opposite_halfedge_handle(*cfh_it))
-                       &&   mesh->opposite_face_handle(*cfh_it) == f2) {
-                            VertexHandle originalV1 = mesh->property(inverseMapping, mesh->from_vertex_handle(*cfh_it));
-                            VertexHandle originalV2 = mesh->property(inverseMapping, mesh->to_vertex_handle(*cfh_it));
-                            EdgeHandle original_eh;
-                            assert(getEdge(m_mesh, original_eh, originalV1, originalV2));
-                            final_edges.push_back(original_eh);
+                    for (const HalfedgeHandle cfh : mesh->fh_range(f1)) {
+                        if (!mesh->is_boundary(mesh->opposite_halfedge_handle(cfh))
+                       &&   mesh->opposite_face_handle(cfh) == f2) {
+                            HalfedgeHandle original_heh = get_original_handle(mesh, cfh);
+                            final_edges.push_back(m_mesh->edge_handle(original_heh));
                         }
                     }
                 }
