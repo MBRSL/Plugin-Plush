@@ -253,6 +253,8 @@ bool PlushPatternGenerator::packFlattenedGraph(std::vector<TriMesh> *flattenedMe
     double *minZ = new double[n];
     double *maxZ = new double[n];
     double width = 0, height = 0, depth = 0;
+    double *columnWidth = new double[nColumns];
+    memset(columnWidth, 0, 4*sizeof(double));
     
     for (size_t i = 0; i < n; i++) {
         minX[i] = 1e9;
@@ -275,28 +277,39 @@ bool PlushPatternGenerator::packFlattenedGraph(std::vector<TriMesh> *flattenedMe
         width = max(width, maxX[i] - minX[i]);
         height = max(height, maxY[i] - minY[i]);
         depth = max(depth, maxZ[i] - minZ[i]);
+        
+        columnWidth[i % nColumns] = max(columnWidth[i % nColumns], maxX[i] - minX[i]);
     }
     
     double spacing = max(height, width)/5;
     double offsetX = 0, offsetY = 0, offsetZ = 0;
+    double lastRowHeight = 0, rowHeight = 0;
     for (size_t i = 0; i < n; i++) {
         TriMesh &mesh = flattenedMeshes->at(i);
 
         // For a new row, calculate row offset
-        if (i > 1 && i % nColumns == 0) {
-            double rowOffset = maxY[i-1];
-            for (int j = 2; j <= nColumns; j++) {
-                rowOffset = max(rowOffset, maxY[i-j] - minY[i-j]);
+        if (i % nColumns == 0) {
+            if (i > 0) {
+                lastRowHeight = rowHeight;
+                offsetY += lastRowHeight + spacing;
+
+                rowHeight = 0;
+                for (int j = 0; j < nColumns; j++) {
+                    rowHeight = max(rowHeight, maxY[i+j] - minY[i+j]);
+                }
             }
-            offsetY += rowOffset + spacing;
+            offsetX = 0;
+        } else {
+            offsetX += columnWidth[(i-1) % nColumns] + spacing;
         }
+        
 
         for (VertexIter v_it = mesh.vertices_begin(); v_it != mesh.vertices_end(); v_it++) {
             VertexHandle v = *v_it;
             TriMesh::Point &p = mesh.point(v);
 
-            p[0] += -minX[i] + width * (-0.5 + (i % nColumns) * spacing);
-            p[1] += -minY[i] + offsetY - height/2;
+            p[0] += -minX[i] + offsetX + columnWidth[i % nColumns]/2 -(maxX[i] - minX[i])/2;
+            p[1] += -minY[i] + offsetY + rowHeight/2 - (maxY[i] - minY[i])/2;
             p[2] += -minZ[i] - depth/2;
         }
     }
@@ -306,5 +319,6 @@ bool PlushPatternGenerator::packFlattenedGraph(std::vector<TriMesh> *flattenedMe
     delete[] maxY;
     delete[] minZ;
     delete[] maxZ;
+    delete[] columnWidth;
     return true;
 }
