@@ -110,6 +110,47 @@ bool PlushPatternGenerator::isIntersected(std::vector<VertexHandle> pathA, std::
     return false;
 }
 
+bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices,
+                                      int limitNum,
+                                      bool elimination,
+                                      bool allPath) {
+    std::map< std::vector<HalfedgeHandle>, double > &joint_boundary_distortion = m_mesh->property(joint_boundary_distortion_handle);
+    joint_boundary_distortion.clear();
+    m_mesh->property(merge_iterations_handle) = 0;
+
+    std::vector<TriMesh> subMeshes;
+
+    std::set<EdgeHandle> *seams = getSeams();
+    unsigned int num_prev_seams = 0;
+    
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        subMeshes.clear();
+        
+        if (!seams || seams->size() == 0) {
+            calcCircularSeams(m_mesh);
+        } else {
+            splitWithBoundary(&subMeshes, seams);
+
+            for (TriMesh &mesh : subMeshes) {
+                calcCircularSeams(&mesh);
+            }
+        }
+        
+        seams = getSeams();
+        
+        if (num_prev_seams != seams->size()) {
+            num_prev_seams = seams->size();
+            changed = true;
+        }
+    }
+    
+    calcStructralSeams(m_mesh, selectedVertices, limitNum, elimination, allPath);
+    
+    return true;
+}
+
 /**
  @brief Generate circular seams that are not possible to get with calcSeams.
  The step of this function:
@@ -423,7 +464,8 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
  *  @param allPath (Debugging) If false, only used (limitNum)-th path for spanningTree.
  *  @return False if error occured.
  */
-bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices,
+bool PlushPatternGenerator::calcStructralSeams(TriMesh *mesh,
+                                               std::vector<VertexHandle> selectedVertices,
                                              int limitNum,
                                              bool elimination,
                                              bool allPath) {
@@ -485,7 +527,6 @@ bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices
     // insert edges into seams
     OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
     std::set<EdgeHandle> &seams = m_mesh->property(seamsHandle);
-
     int count = 0;
     for (std::vector<std::pair<double, std::vector<VertexHandle> > >::iterator it = result.begin(); it != result.end(); it++, count++) {
         // Break if we reach limitNum
@@ -510,6 +551,13 @@ bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices
         
         QString msg = QString("Weight of path #%1 from %2 to %3: %4").arg(count+1).arg((path.begin())->idx()).arg((path.end()-1)->idx()).arg(it->first);
         emit log(LOGINFO, msg);
+    }
+    
+    // Add texture seams that are not possible to be generated in the above proccess
+    for (EdgeHandle eh : m_mesh->edges()) {
+        if (is_different_texture(m_mesh, eh)) {
+            seams.insert(eh);
+        }
     }
     
     return true;

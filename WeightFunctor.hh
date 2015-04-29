@@ -31,7 +31,7 @@ public:
     WeightFunctor(TriMesh *mesh,
                   VertexHandle &currentV,
                   const boost::iterator_property_map<std::vector<VertexHandle>::iterator, TriMesh_id_map>
-                  &predecessor_pmap);
+                  *predecessor_pmap);
     
     double operator()(HalfedgeHandle heh) const;
     double operator()(std::vector<HalfedgeHandle> segment);

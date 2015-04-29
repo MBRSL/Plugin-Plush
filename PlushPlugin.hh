@@ -77,11 +77,14 @@ private:
     TriMeshObject *m_triMeshObj;
     
     QSpinBox *geodesicNumPaths;
-    QPushButton *geodesicCalcButton;
     QPushButton *geodesicShowSingleButton;
     QPushButton *geodesicShowAllButton;
     QCheckBox *geodesicElimination;
-    
+
+    QCheckBox *mergeIsStep;
+    QDoubleSpinBox *mergeThreshold;
+    QPushButton *mergeSegmentButton;
+
     bool showAllPath;
     /// Flag for thread stopping
     bool isJobStopped;
@@ -103,6 +106,7 @@ private slots:
     
     void showGeodesicButtonClicked();
     void calcGeodesicButtonClicked();
+    void mergeSegmentButtonClicked();
     
     void loadSelectionButtonClicked();
     void saveSelectionButtonClicked();
@@ -118,6 +122,7 @@ private slots:
     void calcCurvatureThread();
     void calcGeodesicThread();
     void calcFlattenedGraphThread();
+    void calcMergeSementThread();
     
     void slotKeyEvent( QKeyEvent* _event );
     
@@ -137,6 +142,8 @@ private slots:
     
     /// Receive message from m_patternGenerator and then re-emit
     void receiveLog(int, QString);
+    
+    void receiveUpdate();
 
 public slots:
     QString version() { return QString("1.0"); };

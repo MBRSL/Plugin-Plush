@@ -76,10 +76,10 @@ bool PlushPatternGenerator::calcSelection(std::vector<VertexHandle> &targetVerti
         sorted_conformal_factors[v.idx()].first = v;
         sorted_conformal_factors[v.idx()].second = conformal_factors[v.idx()];
     }
-    auto comparator = [](const std::pair<VertexHandle, double> &left, const std::pair<VertexHandle, double> &right) ->bool {
-        return left.second > right.second;
-    };
-    std::sort(sorted_conformal_factors.begin(), sorted_conformal_factors.end(), comparator);
+//    auto comparator = [](const std::pair<VertexHandle, double> &left, const std::pair<VertexHandle, double> &right) ->bool {
+//        return left.second > right.second;
+//    };
+//    std::sort(sorted_conformal_factors.begin(), sorted_conformal_factors.end(), comparator);
     
     // Maximum suppression
     for (size_t i = 0; i < sorted_conformal_factors.size() && targetVertices.size() < sqrt(m_mesh->n_vertices()); i++) {

@@ -16,22 +16,22 @@ bool PlushPatternGenerator::calcCurvature() {
     isJobCanceled = false;
     
     // Gause curvature
-    for (VertexHandle v : m_mesh->vertices()) {
-        m_mesh->property(maxCurvatureHandle, v) =  curvature::gauss_curvature(*m_mesh, v);
-    }
+//    for (VertexHandle v : m_mesh->vertices()) {
+//        m_mesh->property(maxCurvatureHandle, v) =  curvature::gauss_curvature(*m_mesh, v);
+//    }
 
     // Mean
-//    for (VertexHandle v : m_mesh->vertices()) {
-//        ACG::Vec3d curva(0.0,0.0,0.0);
-//        double area = 0.0;
-//        curvature::discrete_mean_curv_op<TriMesh,ACG::Vec3d,double>(*m_mesh, v, curva, area);
-//        double curv  = curva.norm();
-//        
-//        if ( (curva | m_mesh->normal(v)) <0 )
-//            curv = -curv;
-//        
-//        m_mesh->property(maxCurvatureHandle, v) =  curv;
-//    }
+    for (VertexHandle v : m_mesh->vertices()) {
+        ACG::Vec3d curva(0.0,0.0,0.0);
+        double area = 0.0;
+        curvature::discrete_mean_curv_op<TriMesh,ACG::Vec3d,double>(*m_mesh, v, curva, area);
+        double curv  = curva.norm();
+        
+        if ((curva | m_mesh->normal(v)) < 0)
+            curv = -curv;
+        
+        m_mesh->property(maxCurvatureHandle, v) =  curv;
+    }
 
     // Prepare file for saving data
     QFile file(m_meshName + "_curvature.txt");

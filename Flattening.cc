@@ -172,7 +172,8 @@ bool PlushPatternGenerator::calcLPFB(TriMesh *mesh, std::map<VertexHandle, OpenM
     Ipopt::SmartPtr<Ipopt::TNLP> mynlp = new LPFB_NLP(mesh, boundaryPosition);
     Ipopt::SmartPtr<Ipopt::IpoptApplication> app = IpoptApplicationFactory();
     
-    app->Options()->SetNumericValue("tol", 1e-10);
+    app->Options()->SetNumericValue("tol", 1e-5);
+    app->Options()->SetNumericValue("max_iter", 200);
     app->Options()->SetStringValue("mu_strategy", "adaptive");
     app->Options()->SetStringValue("linear_solver", "ma57");
     // This let us not implementing eval_h()
@@ -204,43 +205,42 @@ bool PlushPatternGenerator::calcLPFB(TriMesh *mesh, std::map<VertexHandle, OpenM
     // be deleted.
 }
 
+void PlushPatternGenerator::calcDistortion(std::vector<TriMesh> *flattenedMeshes) {
+    for (TriMesh &flattenedMesh : *flattenedMeshes) {
+        calcDistortion(flattenedMesh);
+    }
+}
+
 /**
  This function calculate the distortion between flattened meshes and original mesh.
  The result is stored at distortionHandle of m_mesh.
  @param <#parameter#>
  */
-void PlushPatternGenerator::calcDistortion(std::vector<TriMesh> *flattenedMeshes) {
-    for (size_t i = 0; i < flattenedMeshes->size(); i++) {
-        TriMesh &flattenedMesh = flattenedMeshes->at(i);
-        
-        // For each face, calculate area difference
-        // For each vertex, calculate averaged neighboring area difference
-        OpenMesh::VPropHandleT<VertexHandle> inverseMapping = getInverseMappingHandle(&flattenedMesh);
-        for (VertexIter v_it = flattenedMesh.vertices_begin(); v_it != flattenedMesh.vertices_end(); v_it++) {
-            VertexHandle originalV = flattenedMesh.property(inverseMapping, *v_it);
-            double sumAreaDiff = 0;
-            
-            for (TriMesh::VertexFaceIter vf_it = flattenedMesh.vf_iter(*v_it); vf_it; vf_it++) {
-                HalfedgeHandle heh = flattenedMesh.halfedge_handle(*vf_it);
-                double area = flattenedMesh.calc_sector_area(heh);
-                VertexHandle originalFV1 = flattenedMesh.property(inverseMapping, flattenedMesh.from_vertex_handle(heh));
-                VertexHandle originalFV2 = flattenedMesh.property(inverseMapping, flattenedMesh.to_vertex_handle(heh));
-                VertexHandle originalFV3 = flattenedMesh.property(inverseMapping, flattenedMesh.to_vertex_handle(flattenedMesh.next_halfedge_handle(heh)));
+void PlushPatternGenerator::calcDistortion(TriMesh &flattenedMesh) {
+    // For each face, calculate area difference
+    // For each vertex, calculate averaged neighboring area difference
+    OpenMesh::VPropHandleT<VertexHandle> inverseMapping = getInverseMappingHandle(&flattenedMesh);
+    for (FaceHandle f : flattenedMesh.faces()) {
+        HalfedgeHandle heh = flattenedMesh.halfedge_handle(f);
+        double area = flattenedMesh.calc_sector_area(heh);
 
-                FaceHandle originalF;
-                bool faceExist = getFace(m_mesh, originalF, originalFV1, originalFV2, originalFV3);
-                assert(faceExist);
-                HalfedgeHandle original_heh = m_mesh->halfedge_handle(originalF);
-                double originalArea = m_mesh->calc_sector_area(original_heh);
+        TriMesh::ConstFaceVertexIter cfv_it = flattenedMesh.cfv_iter(f);
+        VertexHandle original_v1 = get_original_handle(&flattenedMesh, *cfv_it++);
+        VertexHandle original_v2 = get_original_handle(&flattenedMesh, *cfv_it++);
+        VertexHandle original_v3 = get_original_handle(&flattenedMesh, *cfv_it++);
 
-                double areaDiff = min(1.0, pow((area-originalArea) / originalArea, 3));
-                m_mesh->property(distortionFHandle, originalF) = areaDiff;
-                sumAreaDiff += areaDiff;
-            }
-            sumAreaDiff /= flattenedMesh.valence(*v_it)-1;
-            m_mesh->property(distortionVHandle, originalV) = sumAreaDiff;
-        }
+        FaceHandle original_f = get_original_handle(&flattenedMesh, f);
+        HalfedgeHandle original_heh = m_mesh->halfedge_handle(original_f);
+        double original_area = m_mesh->calc_sector_area(original_heh);
+
+        double area_diff = (area-original_area) / original_area;
+        m_mesh->property(distortionFHandle, original_f) = area_diff;
+        m_mesh->property(distortionVHandle, original_v1) += area_diff;
+        m_mesh->property(distortionVHandle, original_v2) += area_diff;
+        m_mesh->property(distortionVHandle, original_v3) += area_diff;
     }
+    
+    // Do not divide distortionVHandle due to boundary incompleteness in sub mesh
 }
 
 bool PlushPatternGenerator::packFlattenedGraph(std::vector<TriMesh> *flattenedMeshes, const int nColumns) {

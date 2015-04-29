@@ -3,7 +3,7 @@
 WeightFunctor::WeightFunctor(TriMesh *mesh,
                              VertexHandle &currentV,
                              const boost::iterator_property_map<std::vector<VertexHandle>::iterator, TriMesh_id_map>
-                             &predecessor_pmap) :
+                             *predecessor_pmap) :
 m_mesh(mesh), m_predecessor_pmap(predecessor_pmap), m_currentV(currentV), m_maxEdgeLength(0) {
     for (EdgeIter e_it = m_mesh->edges_begin(); e_it != m_mesh->edges_end(); e_it++) {
         HalfedgeHandle he = m_mesh->halfedge_handle(*e_it, 0);
@@ -23,11 +23,10 @@ double WeightFunctor::distanceWeight(TriMesh::Point p1, TriMesh::Point p2) const
 double WeightFunctor::textureWeight(HalfedgeHandle heh) const {
     // if the two faces along this edge are different color, set weight of this edge to almost 0
     // we encourage path go through the boundary of different colors
-    if (!m_mesh->is_boundary(heh) && !m_mesh->is_boundary(m_mesh->opposite_halfedge_handle(heh))
-        &&  m_mesh->color(m_mesh->face_handle(heh)) != m_mesh->color(m_mesh->opposite_face_handle(heh))) {
-        return 1e-9;
-    } else {
+    if (PlushPatternGenerator::is_different_texture(m_mesh, m_mesh->edge_handle(heh))) {
         return 1;
+    } else {
+        return 1e-9;
     }
 }
 

@@ -1,5 +1,7 @@
 #include "PlushPlugin.hh"
 
+#include <ACG/Scenegraph/TextNode.hh>
+#include <ACG/Utils/ColorCoder.hh>
 #include <MeshTools/MeshSelectionT.hh>
 #include <ObjectTypes/PolyLine/PolyLine.hh>
 
@@ -22,28 +24,40 @@ void PlushPlugin::initializePlugin()
     // Create button that can be toggled
     // to (de)activate plugin's picking mode
     QGroupBox *geodesicGroup = new QGroupBox(tr("Geodesic paths"));
-    QLabel *geodesicNumberLabel = new QLabel(tr("#"));
     geodesicNumPaths = new QSpinBox();
     geodesicNumPaths->setMinimum(0);
-    geodesicNumPaths->setValue(999);
     geodesicElimination = new QCheckBox(tr("Eliminate crossover paths"));
-    geodesicElimination->setChecked(true);
+//    geodesicElimination->setChecked(true);
     geodesicShowSingleButton = new QPushButton(tr("Show single path"));
     geodesicShowAllButton = new QPushButton(tr("Show all path"));
-    geodesicCalcButton = new QPushButton(tr("Calculate"));
+    QPushButton *geodesicCalcButton = new QPushButton(tr("Calculate"));
+    mergeIsStep = new QCheckBox();
+    mergeThreshold = new QDoubleSpinBox();
+    mergeThreshold->setDecimals(5);
+    mergeThreshold->setMinimum(0.00001);
+    mergeThreshold->setMaximum(1);
+    mergeThreshold->setValue(0.3);
+    mergeThreshold->setSingleStep(0.005);
+    mergeSegmentButton = new QPushButton(tr("Merge"));
     QVBoxLayout *geodesicLayout = new QVBoxLayout;
     QHBoxLayout *geodesicRow1Layout = new QHBoxLayout;
     QHBoxLayout *geodesicRow2Layout = new QHBoxLayout;
     QHBoxLayout *geodesicRow3Layout = new QHBoxLayout;
-    geodesicRow1Layout->addWidget(geodesicNumberLabel);
+    QHBoxLayout *geodesicRow4Layout = new QHBoxLayout;
+    geodesicRow1Layout->addWidget(new QLabel(tr("#")));
     geodesicRow1Layout->addWidget(geodesicNumPaths);
     geodesicRow1Layout->addWidget(geodesicElimination);
     geodesicRow2Layout->addWidget(geodesicShowSingleButton);
     geodesicRow2Layout->addWidget(geodesicShowAllButton);
     geodesicRow3Layout->addWidget(geodesicCalcButton);
+    geodesicRow4Layout->addWidget(new QLabel(tr("#")));
+    geodesicRow4Layout->addWidget(mergeIsStep);
+    geodesicRow4Layout->addWidget(mergeThreshold);
+    geodesicRow4Layout->addWidget(mergeSegmentButton);
     geodesicLayout->addLayout(geodesicRow1Layout);
     geodesicLayout->addLayout(geodesicRow2Layout);
     geodesicLayout->addLayout(geodesicRow3Layout);
+    geodesicLayout->addLayout(geodesicRow4Layout);
     geodesicGroup->setLayout(geodesicLayout);
     
     QGroupBox *flatteningGroup = new QGroupBox(tr("Flattening"));
@@ -92,6 +106,7 @@ void PlushPlugin::initializePlugin()
     connect(geodesicShowSingleButton, SIGNAL(clicked()), this, SLOT(showGeodesicButtonClicked()));
     connect(geodesicShowAllButton, SIGNAL(clicked()), this, SLOT(showGeodesicButtonClicked()));
     connect(geodesicCalcButton, SIGNAL(clicked()), this, SLOT(calcGeodesicButtonClicked()));
+    connect(mergeSegmentButton, SIGNAL(clicked()), this, SLOT(mergeSegmentButtonClicked()));
     connect(loadSelectionButton, SIGNAL(clicked()), this, SLOT(loadSelectionButtonClicked()));
     connect(saveSelectionButton, SIGNAL(clicked()), this, SLOT(saveSelectionButtonClicked()));
     connect(clearSelectionButton, SIGNAL(clicked()), this, SLOT(clearSelectionButtonClicked()));
@@ -128,6 +143,7 @@ void PlushPlugin::fileOpened(int _id) {
             // Load selection
             int selectedCount = loadSelection(mesh, meshName);
             geodesicNumPaths->setMaximum(selectedCount*(selectedCount-1)/2);
+            geodesicNumPaths->setValue(selectedCount*(selectedCount-1)/2);
             
             // When user click on "cancel" button, cancel this job
             connect(this, SIGNAL(cancelingJob()), m_patternGenerator, SLOT(cancelJob()));
@@ -253,6 +269,26 @@ void PlushPlugin::calcGeodesicButtonClicked() {
     thread->startProcessing();
 }
 
+void PlushPlugin::mergeSegmentButtonClicked() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+    
+    m_currentJobId = "merge";
+    OpenFlipperThread *thread = new OpenFlipperThread(m_currentJobId);
+    connect(thread, SIGNAL(finished(QString)), this, SIGNAL(finishJob(QString)));
+    connect(thread, SIGNAL(function(QString)), this, SLOT(calcMergeSementThread()), Qt::DirectConnection);
+    connect(m_patternGenerator, SIGNAL(updateView()), this, SLOT(receiveUpdate()));
+    connect(m_patternGenerator, SIGNAL(log(QString)), this, SIGNAL(log(QString)));
+    
+    // Custom handler to set m_currentJobId to "" after finishing job.
+    connect(thread, SIGNAL(finished(QString)), this, SLOT(finishedJobHandler()));
+    
+    emit startJob(m_currentJobId, "merging sub meshes", 0, 100, false);
+    thread->start();
+    thread->startProcessing();
+}
+
 void PlushPlugin::calcFlattenedGraphButtonClicked() {
     std::set<EdgeHandle> *seams = m_patternGenerator->getSeams();
     if (!seams) {
@@ -297,13 +333,13 @@ void PlushPlugin::showGeodesicButtonClicked() {
     
     MeshSelection::clearEdgeSelection(mesh);
     m_patternGenerator->calcSeams(selectedVertices, geodesicNumPaths->value(), geodesicElimination->isChecked(), showAllPath);
-    m_patternGenerator->calcCircularSeams(mesh);
-    std::vector<TriMesh> *subMeshes = m_patternGenerator->getFlattenedMeshes();
-    if (subMeshes) {
-        for (size_t i = 0; i < subMeshes->size(); i++) {
-            m_patternGenerator->calcCircularSeams(&subMeshes->at(i));
-        }
-    }
+//    m_patternGenerator->calcCircularSeams(mesh);
+//    std::vector<TriMesh> *subMeshes = m_patternGenerator->getFlattenedMeshes();
+//    if (subMeshes) {
+//        for (size_t i = 0; i < subMeshes->size(); i++) {
+//            m_patternGenerator->calcCircularSeams(&subMeshes->at(i));
+//        }
+//    }
     std::set<EdgeHandle> *seams = m_patternGenerator->getSeams();
     if (seams) {
         std::vector<int> edgeList;
@@ -342,6 +378,8 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
     // Add new object and copy m_flattenedGraph into it
     int n = flattenedMeshes->size();
     int *newTriMeshIds = new int[n];
+    
+    ACG::ColorCoder color_coder(0, 715, false);
     
     std::vector<int> seamsId;
     for (int i = 0; i < n; i++) {
@@ -408,18 +446,39 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
             assert(edgeExist);
             seamsId.push_back(original_he.idx());
         }
-        MeshSelection::selectEdges(subMesh, subSeamsId);
+//        MeshSelection::selectEdges(subMesh, subSeamsId);
 
-        MeshSelection::selectBoundaryEdges(subMesh);
+//        MeshSelection::selectBoundaryEdges(subMesh);
 
         subMesh->request_face_normals();
         subMesh->update_face_normals();
-    
+        subMesh->request_edge_colors();
+        
+        // Assigning edge color for boundary
+        for (EdgeHandle eh : subMesh->edges()) {
+            EdgeHandle original_eh = m_patternGenerator->get_original_handle(subMesh, eh);
+            int segment_no = m_triMeshObj->mesh()->property(PlushPatternGenerator::segment_no_handle, original_eh);
+            
+            TriMesh::Color color = color_coder.color_float4(segment_no);
+            
+            if (subMesh->is_boundary(eh)) {
+                subMesh->set_color(eh, color);
+            } else {
+                subMesh->set_color(eh, TriMesh::Color(0, 0, 0, 0));
+            }
+        }
+        object->materialNode()->set_line_smooth(true);
+        object->materialNode()->set_round_points(true);
+        object->materialNode()->enable_blending();
+//        ACG::SceneGraph::TextNode *textNode = new ACG::SceneGraph::TextNode(0, "XD");
+//        object->addAdditionalNode(textNode, "Simple Plush", "text");
+//        
         // Replace old sub mesh with new sub mesh to m_flattenedGraph
         flattenedMeshes->at(i) = *subMesh;
     }
     MeshSelection::selectEdges(m_triMeshObj->mesh(), seamsId);
-    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION_VERTICES);
+    PluginFunctions::setDrawMode(ACG::SceneGraph::DrawModes::EDGES_COLORED);
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
 }
 
 void PlushPlugin::saveSelectionButtonClicked() {
@@ -492,6 +551,13 @@ void PlushPlugin::calcFlattenedGraphThread() {
     m_patternGenerator->calcFlattenedGraph();
 }
 
+void PlushPlugin::calcMergeSementThread() {
+//    MeshSelection::clearEdgeSelection(m_triMeshObj->mesh());
+    m_patternGenerator->optimize_patches(mergeThreshold->value(), mergeIsStep->isChecked());
+    
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
+}
+
 void PlushPlugin::canceledJob(QString _job) {
     emit cancelingJob();
 }
@@ -517,22 +583,27 @@ void PlushPlugin::receiveLog(int type, QString msg) {
     }
 }
 
+void PlushPlugin::receiveUpdate() {
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
+}
+
 void PlushPlugin::slotKeyEvent( QKeyEvent* _event ) {
     // Switch pressed keys
     int currentEdgeNo = geodesicNumPaths->value();
     switch (_event->key())
     {
         case Qt::Key_X:
-            if (currentEdgeNo < geodesicNumPaths->maximum()) {
-                geodesicNumPaths->setValue(currentEdgeNo+1);
-            }
-            geodesicShowSingleButton->click();
+//            if (currentEdgeNo < geodesicNumPaths->maximum()) {
+//                geodesicNumPaths->setValue(currentEdgeNo+1);
+//            }
+//            geodesicShowSingleButton->click();
             break;
         case Qt::Key_Z:
-            if (currentEdgeNo > 0) {
-                geodesicNumPaths->setValue(currentEdgeNo-1);
-            }
-            geodesicShowSingleButton->click();
+//            if (currentEdgeNo > 0) {
+//                geodesicNumPaths->setValue(currentEdgeNo-1);
+//            }
+//            geodesicShowSingleButton->click();
+            mergeSegmentButton->click();
             break;
         default:
             break;
