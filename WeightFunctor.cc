@@ -1,7 +1,7 @@
 #include "WeightFunctor.hh"
 
 WeightFunctor::WeightFunctor(TriMesh *mesh,
-                             VertexHandle *currentV,
+                             VertexHandle &currentV,
                              const boost::iterator_property_map<std::vector<VertexHandle>::iterator, TriMesh_id_map>
                              &predecessor_pmap) :
 m_mesh(mesh), m_predecessor_pmap(predecessor_pmap), m_currentV(currentV), m_maxEdgeLength(0) {
@@ -90,7 +90,14 @@ double WeightFunctor::smoothnessWeight(VertexHandle v1,
                                        VertexHandle v2,
                                        TriMesh::Point p1,
                                        TriMesh::Point p2) const {
-    VertexHandle predecessor = m_predecessor_pmap[v1];
+    VertexHandle predecessor;
+    if (m_predecessor_pmap != NULL) {
+        predecessor = (*m_predecessor_pmap)[v1];
+    } else if (m_mesh->is_valid_handle(m_prevV)) {
+        predecessor = m_prevV;
+    } else {
+        assert("You should at least have valid m_predecessor_pmap or m_prevV to calculate smoothness weight");
+    }
     if (predecessor == v1) {
         // we reach the begining, assign weight to 1 (max) to ensure that
         // when combining path, total weight would not increase
@@ -108,11 +115,13 @@ double WeightFunctor::operator()(HalfedgeHandle heh) const {
     VertexHandle v1 = m_mesh->from_vertex_handle(heh);
     VertexHandle v2 = m_mesh->to_vertex_handle(heh);
 
-    assert (v1 == *m_currentV || v2 == *m_currentV);
-    
-    if (v2 == *m_currentV) {
-        v2 = v1;
-        v1 = *m_currentV;
+    if (m_mesh->is_valid_handle(m_currentV)) {
+        assert (v1 == m_currentV || v2 == m_currentV);
+        
+        if (v2 == m_currentV) {
+            v2 = v1;
+            v1 = m_currentV;
+        }
     }
     
     TriMesh::Point p1 = m_mesh->point(v1);
@@ -140,9 +149,30 @@ double WeightFunctor::operator()(HalfedgeHandle heh) const {
     
     // re-calculate smoothness weight every time because it depends on path.
     // it can not be saved and reuse
-    double pathCoefficient = 0.5;
-    double pathWeight = pathCoefficient * smoothnessWeight(v1, v2, p1, p2);
-    coefficients += pathCoefficient;
-    
+    double pathCoefficient = 0;
+    double pathWeight = 0;
+    if (m_predecessor_pmap != NULL || m_mesh->is_valid_handle(m_prevV)) {
+        pathCoefficient = 2;
+        pathWeight = pathCoefficient * smoothnessWeight(v1, v2, p1, p2);
+        coefficients += pathCoefficient;
+    }
     return (edgeWeight + pathWeight) / coefficients;
+}
+
+/**
+ Return the averaged sum of weights of given segment.
+ @param <#parameter#>
+ @return <#retval#>
+ @retval <#meaning#>
+ */
+double WeightFunctor::operator()(std::vector<HalfedgeHandle> segment) {
+    double sum = 0;
+    for (HalfedgeHandle heh : segment) {
+        m_currentV = m_mesh->from_vertex_handle(heh);
+        
+        sum += operator()(heh);
+        
+        m_prevV = m_currentV;
+    }
+    return sum/segment.size();
 }

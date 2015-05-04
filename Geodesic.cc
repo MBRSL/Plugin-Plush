@@ -49,10 +49,10 @@ void PlushPatternGenerator::calcGeodesic(std::vector<VertexHandle> targetVertice
         // HACK: This is a local variable "shared" by both (functional)weightmap & visitor
         //       so that we can first assign it in visitor and then access it in weightmap
         VertexHandle currentV = sourceHandle;
-        Dijkstra_visitor visitor(&currentV);
+        Dijkstra_visitor visitor(currentV);
         WeightFunctor weightFunctor(m_mesh,
-                                    &currentV,
-                                    predecessor_pmap);
+                                    currentV,
+                                    &predecessor_pmap);
         auto weight_pmap = boost::make_function_property_map< HalfedgeHandle,
                                                             double,
                                                             WeightFunctor > (weightFunctor);
