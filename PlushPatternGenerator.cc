@@ -184,7 +184,12 @@ std::set<EdgeHandle>* PlushPatternGenerator::getSeams() {
 
 double PlushPatternGenerator::getSumInnerAngle(const TriMesh *mesh, HalfedgeHandle heh1, HalfedgeHandle heh2) {
     assert(mesh->to_vertex_handle(heh1) == mesh->from_vertex_handle(heh2));
-    assert(!mesh->is_boundary(heh1) && !mesh->is_boundary(heh2));
+
+    if (mesh->is_boundary(heh1) || mesh->is_boundary(heh2)) {
+        HalfedgeHandle tmp = heh1;
+        heh1 = mesh->opposite_halfedge_handle(heh2);
+        heh2 = mesh->opposite_halfedge_handle(tmp);
+    }
 
     double sumInnerAngle = 0;
     

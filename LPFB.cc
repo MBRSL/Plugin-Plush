@@ -161,7 +161,6 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *bound
                 for (size_t edgeNo = 0; edgeNo < m_boundary3D.size(); edgeNo++) {
                     assert(m_mesh->to_vertex_handle(m_boundary3D[edgeNo])
                         == m_mesh->from_vertex_handle(m_boundary3D[(edgeNo+1)%m_boundary3D.size()]));
-                    assert(!m_mesh->is_boundary(m_boundary3D[edgeNo]));
                 }
                 break;
             }
