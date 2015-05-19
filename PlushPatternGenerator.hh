@@ -10,6 +10,7 @@
 
 #include <Eigen/sparse>
 
+#include <ObjectTypes/PolyLine/PolyLine.hh>
 #include <MeshTools/MeshSelectionT.hh>
 
 #include <QObject>
@@ -151,6 +152,17 @@ public:
     HalfedgeHandle get_original_handle(TriMesh *mesh, const HalfedgeHandle eh) const;
     FaceHandle get_original_handle(TriMesh *mesh, const FaceHandle fh) const;
     
+    void get_intersection_points(std::set<EdgeHandle> *seams,
+                                 std::set<VertexHandle> &intersection_points);
+    void get_segments_from_seams(std::vector< std::vector<EdgeHandle> > &segments);
+    void get_segments_from_seams(std::vector< std::vector<HalfedgeHandle> > &segments);
+    void get_segments_from_seams(std::vector< std::vector<HalfedgeHandle> > &segments,
+                                 std::set<VertexHandle> intersection_points);
+
+    bool calcLocalSeams(TriMesh *mesh, double developable_threshold);
+    
+    void show_intersection_points();
+
 private:
     TriMesh *m_mesh;
     QString m_meshName;
@@ -166,13 +178,6 @@ private:
                             int limitNum,
                             bool elimination,
                             bool allPaths);
-
-    void get_intersection_points(std::set<EdgeHandle> *seams,
-                                 std::set<VertexHandle> &intersection_points);
-    void get_segments_from_seams(std::vector< std::vector<EdgeHandle> > &segments);
-    void get_segments_from_seams(std::vector< std::vector<HalfedgeHandle> > &segments);
-    void get_segments_from_seams(std::vector< std::vector<HalfedgeHandle> > &segments,
-                                 std::set<VertexHandle> intersection_points);
     ///@}
     
     /// @name Sub mesh

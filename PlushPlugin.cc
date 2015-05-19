@@ -97,13 +97,21 @@ void PlushPlugin::initializePlugin()
     skeletonWeightGroup->setLayout(skeletonWeightLayout);
     
     QGroupBox *visualization_group = new QGroupBox(tr("Visualization"));
+    QPushButton *vis_intersection_points_button = new QPushButton(tr("Intersection points"));
+    QPushButton *vis_seam_segments_button = new QPushButton(tr("Seam segments"));
+    QPushButton *vis_skeleton_button = new QPushButton(tr("Skeleton"));
     QPushButton *vis_save_home_view_button = new QPushButton(tr("save view"));
     QPushButton *vis_load_home_view_button = new QPushButton(tr("load view"));
     QVBoxLayout *vis_layout = new QVBoxLayout;
     QHBoxLayout *vis_layout_row1 = new QHBoxLayout;
-    vis_layout_row1->addWidget(vis_save_home_view_button);
-    vis_layout_row1->addWidget(vis_load_home_view_button);
+    QHBoxLayout *vis_layout_row2 = new QHBoxLayout;
+    vis_layout_row1->addWidget(vis_intersection_points_button);
+    vis_layout_row1->addWidget(vis_seam_segments_button);
+    vis_layout_row1->addWidget(vis_skeleton_button);
+    vis_layout_row2->addWidget(vis_save_home_view_button);
+    vis_layout_row2->addWidget(vis_load_home_view_button);
     vis_layout->addLayout(vis_layout_row1);
+    vis_layout->addLayout(vis_layout_row2);
     visualization_group->setLayout(vis_layout);
 
     layout->addWidget(geodesicGroup);
@@ -125,6 +133,9 @@ void PlushPlugin::initializePlugin()
     connect(calcFlattenButton, SIGNAL(clicked()), this, SLOT(calcFlattenedGraphButtonClicked()));
     connect(showFlattenButton, SIGNAL(clicked()), this, SLOT(showFlattenedGrpahButtonClicked()));
     connect(calcCurvatureButton, SIGNAL(clicked()), this, SLOT(calcCurvatureButtonClicked()));
+    connect(vis_intersection_points_button, SIGNAL(clicked()), this, SLOT(vis_intersection_points_button_clicked()));
+    connect(vis_seam_segments_button, SIGNAL(clicked()), this, SLOT(vis_seam_segments_button_clicked()));
+    connect(vis_skeleton_button, SIGNAL(clicked()), this, SLOT(vis_skeleton_button_clicked()));
     connect(vis_save_home_view_button, SIGNAL(clicked()), this, SLOT(vis_save_home_view_button_clicked()));
     connect(vis_load_home_view_button, SIGNAL(clicked()), this, SLOT(vis_load_home_view_button_clicked()));
 
@@ -157,7 +168,7 @@ void PlushPlugin::fileOpened(int _id) {
             int selectedCount = loadSelection(mesh, meshName);
             geodesicNumPaths->setMaximum(selectedCount*(selectedCount-1)/2);
             geodesicNumPaths->setValue(selectedCount*(selectedCount-1)/2);
-            
+
             // When user click on "cancel" button, cancel this job
             connect(this, SIGNAL(cancelingJob()), m_patternGenerator, SLOT(cancelJob()));
             // Get progress info from m_patternGenerator, then re-emit it to OpenFlipper system inside receiveJobState
@@ -390,6 +401,68 @@ void PlushPlugin::vis_load_home_view_button_clicked() {
 
     PluginFunctions::setEncodedExaminerView(view);
     emit updateView();
+}
+
+void PlushPlugin::vis_intersection_points_button_clicked() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+    
+    TriMesh *mesh = m_triMeshObj->mesh();
+    std::set<VertexHandle> intersection_points;
+    std::set<EdgeHandle> *seams = m_patternGenerator->getSeams();
+    m_patternGenerator->get_intersection_points(seams, intersection_points);
+    for (VertexHandle v : intersection_points) {
+        mesh->status(v).set_feature(true);
+    }
+    emit updatedObject(m_triMeshObj->id(), UPDATE_ALL);
+}
+
+void PlushPlugin::vis_seam_segments_button_clicked() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+    
+    TriMesh *mesh = m_triMeshObj->mesh();
+    m_triMeshObj->materialNode()->enable_alpha_test(0.1);
+    m_triMeshObj->materialNode()->set_line_smooth(true);
+    m_triMeshObj->materialNode()->set_line_width(3);
+    
+    std::vector< std::vector<HalfedgeHandle> > heh_segments;
+    m_patternGenerator->get_segments_from_seams(heh_segments);
+    
+    MeshSelection::clearVertexSelection(mesh);
+    MeshSelection::clearEdgeSelection(mesh);
+
+    int num = heh_segments.size();
+    ACG::ColorCoder color_coder(0, num, false);
+    for (EdgeHandle eh : mesh->edges()) {
+        mesh->set_color(eh, TriMesh::Color(1,1,1,0));
+    }
+    for (auto group : heh_segments) {
+        TriMesh::Color color = color_coder.color_float4(rand() % num);
+        for (HalfedgeHandle heh : group) {
+            mesh->set_color(mesh->edge_handle(heh), color);
+        }
+    }
+    PluginFunctions::setDrawMode(ACG::SceneGraph::DrawModes::EDGES_COLORED | ACG::SceneGraph::DrawModes::SOLID_FLAT_SHADED);
+    emit updatedObject(m_triMeshObj->id(), UPDATE_COLOR | UPDATE_SELECTION);
+}
+
+void PlushPlugin::vis_skeleton_button_clicked() {
+    // Visualize skeleton
+    Skeleton *skeleton = m_triMeshObj->mesh()->property(PlushPatternGenerator::skeletonHandle);
+    for (Bone bone : skeleton->bones) {
+        int polyLineObjId;
+        emit addEmptyObject(DATA_POLY_LINE, polyLineObjId);
+        PolyLineObject *object = 0;
+        PluginFunctions::getObject(polyLineObjId, object);
+        PolyLine *polyLine = object->line();
+        polyLine->add_point(bone.getA());
+        polyLine->add_point(bone.getB());
+    }
+    PluginFunctions::setDrawMode(ACG::SceneGraph::DrawModes::WIREFRAME);
+    emit updatedObject(m_triMeshObj->id(), UPDATE_ALL);
 }
 
 void PlushPlugin::showFlattenedGrpahButtonClicked() {
@@ -634,17 +707,17 @@ void PlushPlugin::slotKeyEvent( QKeyEvent* _event ) {
     switch (_event->key())
     {
         case Qt::Key_X:
-//            if (currentEdgeNo < geodesicNumPaths->maximum()) {
-//                geodesicNumPaths->setValue(currentEdgeNo+1);
-//            }
-//            geodesicShowSingleButton->click();
+            if (currentEdgeNo < geodesicNumPaths->maximum()) {
+                geodesicNumPaths->setValue(currentEdgeNo+1);
+            }
+            geodesicShowSingleButton->click();
             break;
         case Qt::Key_Z:
-//            if (currentEdgeNo > 0) {
-//                geodesicNumPaths->setValue(currentEdgeNo-1);
-//            }
-//            geodesicShowSingleButton->click();
-            mergeSegmentButton->click();
+            if (currentEdgeNo > 0) {
+                geodesicNumPaths->setValue(currentEdgeNo-1);
+            }
+            geodesicShowSingleButton->click();
+//            mergeSegmentButton->click();
             break;
         default:
             break;
