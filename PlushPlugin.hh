@@ -82,6 +82,9 @@ private:
     QPushButton *seamShowSingleButton;
     QPushButton *seamShowAllButton;
     QPushButton *seamLocalButton;
+    QPushButton *seamMergeButton;
+    QCheckBox *seamMergeIsStep;
+    QDoubleSpinBox *seamMergeThreshold;
     
     // geodesic
     QDoubleSpinBox *geodesic_distance_coef;
@@ -109,6 +112,7 @@ private slots:
     void seamShowButtonClicked();
     void seamSaveButtonClicked();
     void seamLoadButtonClicked();
+    void seamMergeButtonClicked();
     
     void calcGeodesicButtonClicked();
     
@@ -127,6 +131,7 @@ private slots:
     void calcCurvatureThread();
     void calcGeodesicThread();
     void calcFlattenedGraphThread();
+    void calcMergeSementThread();
     
     void slotKeyEvent( QKeyEvent* _event );
     

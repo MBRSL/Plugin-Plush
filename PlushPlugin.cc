@@ -36,10 +36,19 @@ void PlushPlugin::initializePlugin()
     seamLocalButton = new QPushButton(tr("Local seams"));
     QPushButton *seamLoadButton = new QPushButton(tr("Load"));
     QPushButton *seamSaveButton = new QPushButton(tr("Save"));
+    seamMergeIsStep = new QCheckBox();
+    seamMergeThreshold = new QDoubleSpinBox();
+    seamMergeThreshold->setDecimals(5);
+    seamMergeThreshold->setMinimum(0.00001);
+    seamMergeThreshold->setMaximum(1);
+    seamMergeThreshold->setValue(0.3);
+    seamMergeThreshold->setSingleStep(0.005);
+    seamMergeButton = new QPushButton(tr("Merge"));
     QVBoxLayout *seamLayout = new QVBoxLayout;
     QHBoxLayout *seamRow1Layout = new QHBoxLayout;
     QHBoxLayout *seamRow2Layout = new QHBoxLayout;
     QHBoxLayout *seamRow3Layout = new QHBoxLayout;
+    QHBoxLayout *seamRow4Layout = new QHBoxLayout;
     seamRow1Layout->addWidget(new QLabel(tr("#")));
     seamRow1Layout->addWidget(seamNumPaths);
     seamRow1Layout->addWidget(seamElimination);
@@ -48,9 +57,14 @@ void PlushPlugin::initializePlugin()
     seamRow2Layout->addWidget(seamLocalButton);
     seamRow3Layout->addWidget(seamLoadButton);
     seamRow3Layout->addWidget(seamSaveButton);
+    seamRow4Layout->addWidget(new QLabel(tr("Is step")));
+    seamRow4Layout->addWidget(seamMergeIsStep);
+    seamRow4Layout->addWidget(seamMergeThreshold);
+    seamRow4Layout->addWidget(seamMergeButton);
     seamLayout->addLayout(seamRow1Layout);
     seamLayout->addLayout(seamRow2Layout);
     seamLayout->addLayout(seamRow3Layout);
+    seamLayout->addLayout(seamRow4Layout);
     seamGroup->setLayout(seamLayout);
     
     QGroupBox *geodesicGroup = new QGroupBox(tr("Geodesic"));
@@ -126,6 +140,7 @@ void PlushPlugin::initializePlugin()
     connect(seamLocalButton, SIGNAL(clicked()), this, SLOT(seamShowButtonClicked()));
     connect(seamLoadButton, SIGNAL(clicked()), this, SLOT(seamLoadButtonClicked()));
     connect(seamSaveButton, SIGNAL(clicked()), this, SLOT(seamSaveButtonClicked()));
+    connect(seamMergeButton, SIGNAL(clicked()), this, SLOT(seamMergeButtonClicked()));
     
     connect(geodesicCalcButton, SIGNAL(clicked()), this, SLOT(calcGeodesicButtonClicked()));
     connect(loadSelectionButton, SIGNAL(clicked()), this, SLOT(loadSelectionButtonClicked()));
@@ -174,6 +189,8 @@ void PlushPlugin::fileOpened(int _id) {
             connect(m_patternGenerator, SIGNAL(setJobState(int)), this, SLOT(receiveJobState(int)));
             // Propagate messages from m_patternGenerator to OpenFlipper
             connect(m_patternGenerator, SIGNAL(log(int, QString)), this, SLOT(receiveLog(int, QString)));
+            
+            connect(m_patternGenerator, SIGNAL(updateView()), this, SLOT(receiveUpdate()));
         }
     }
 }
@@ -302,7 +319,6 @@ void PlushPlugin::seamLoadButtonClicked() {
     if (!checkIfGeneratorExist()) {
         return;
     }
-    
     m_patternGenerator->load_seams();
 }
 
@@ -312,6 +328,26 @@ void PlushPlugin::seamSaveButtonClicked() {
     }
     
     m_patternGenerator->save_seams();
+}
+
+void PlushPlugin::seamMergeButtonClicked() {
+    m_triMeshObj->setObjectDrawMode(ACG::SceneGraph::DrawModes::EDGES_COLORED | ACG::SceneGraph::DrawModes::SOLID_FLAT_SHADED);
+    m_triMeshObj->materialNode()->enable_alpha_test(0.1);
+    if (seamMergeIsStep->isChecked()) {
+        calcMergeSementThread();
+    } else {
+        m_currentJobId = "merge";
+        OpenFlipperThread *thread = new OpenFlipperThread(m_currentJobId);
+        connect(thread, SIGNAL(finished(QString)), this, SIGNAL(finishJob(QString)));
+        connect(thread, SIGNAL(function(QString)), this, SLOT(calcMergeSementThread()), Qt::DirectConnection);
+        
+        // Custom handler to set m_currentJobId to "" after finishing job.
+        connect(thread, SIGNAL(finished(QString)), this, SLOT(finishedJobHandler()));
+        
+        emit startJob(m_currentJobId, "merging sub meshes", 0, 100, false);
+        thread->start();
+        thread->startProcessing();
+    }
 }
 
 void PlushPlugin::calcFlattenedGraphButtonClicked() {
@@ -404,6 +440,15 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
     int n = flattenedMeshes->size();
     int *newTriMeshIds = new int[n];
     
+    ACG::ColorCoder color_coder(0, 255, false);
+    
+    QFont font("Arial Black", QFont::Bold);
+    font.setPointSize(30);
+
+    ACG::Vec3d mesh_bbMin, mesh_bbMax;
+    MeshInfo::getBoundingBox(m_triMeshObj->mesh(), mesh_bbMin, mesh_bbMax);
+    double mesh_length = (mesh_bbMax-mesh_bbMin).norm();
+
     std::vector<int> seamsId;
     for (int i = 0; i < n; i++) {
         emit addEmptyObject(DATA_TRIANGLE_MESH, newTriMeshIds[i]);
@@ -469,18 +514,114 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
             assert(edgeExist);
             seamsId.push_back(original_he.idx());
         }
-        MeshSelection::selectEdges(subMesh, subSeamsId);
-
-        MeshSelection::selectBoundaryEdges(subMesh);
 
         subMesh->request_face_normals();
         subMesh->update_face_normals();
-    
+        subMesh->request_edge_colors();
+        
+        // Assigning edge color for boundary
+        for (EdgeHandle eh : subMesh->edges()) {
+            if (subMesh->is_boundary(eh)) {
+                EdgeHandle original_eh = m_patternGenerator->get_original_handle(subMesh, eh);
+                int segment_no = m_triMeshObj->mesh()->property(PlushPatternGenerator::segment_no_handle, original_eh);
+                
+                TriMesh::Color color = color_coder.color_float4(segment_no);
+
+                subMesh->set_color(eh, color);
+            } else {
+                subMesh->set_color(eh, TriMesh::Color(1, 1, 1, 0));
+            }
+        }
+        object->materialNode()->set_line_smooth(true);
+        object->materialNode()->enable_alpha_test(0.1);
+        // numbers on sub meshes
+//        ACG::SceneGraph::TransformNode *sub_mesh_text_transform_node;
+//        std::stringstream sub_mesh_text_transform_node_name;
+//        sub_mesh_text_transform_node_name << "sub_mesh_text_transform_" << i;
+//        if (!object->getAdditionalNode(sub_mesh_text_transform_node, "Plush", sub_mesh_text_transform_node_name.str().c_str())) {
+//            sub_mesh_text_transform_node = new ACG::SceneGraph::TransformNode(object->manipulatorNode(),
+//                                                                   sub_mesh_text_transform_node_name.str());
+//            object->addAdditionalNode(sub_mesh_text_transform_node, "Plush", sub_mesh_text_transform_node_name.str().c_str());
+//        }
+//        ACG::Vec3d sub_mesh_min, sub_mesh_max;
+//        MeshInfo::getBoundingBox(subMesh, sub_mesh_min, sub_mesh_max);
+//        sub_mesh_text_transform_node->loadIdentity();
+//        sub_mesh_text_transform_node->translate(sub_mesh_min);
+//        
+//        ACG::SceneGraph::TextNode *sub_mesh_text_node;
+//        std::stringstream sub_mesh_text_node_name;
+//        sub_mesh_text_node_name << "sub_mesh_patch_number_" << i;
+//        if (!object->getAdditionalNode(sub_mesh_text_node, "Plush", sub_mesh_text_node_name.str().c_str())) {
+//            sub_mesh_text_node = new ACG::SceneGraph::TextNode(sub_mesh_text_transform_node,
+//                                                    "<TextNode>",
+//                                                    ACG::SceneGraph::TextNode::SCREEN_ALIGNED,
+//                                                    false);
+//            object->addAdditionalNode(sub_mesh_text_node, "Plush", sub_mesh_text_node_name.str().c_str());
+//        }
+//        
+//        sub_mesh_text_node->setFont(font);
+//        sub_mesh_text_node->setText(std::to_string(i+1));
+//        sub_mesh_text_node->setSize(0.5);
+//
+//        // numbers on original meshes
+//        ACG::SceneGraph::TransformNode *text_transform_node;
+//        std::stringstream text_transform_node_name;
+//        text_transform_node_name << "text_transform_" << i;
+//        if (!m_triMeshObj->getAdditionalNode(text_transform_node, "Plush", text_transform_node_name.str().c_str())) {
+//            text_transform_node = new ACG::SceneGraph::TransformNode(m_triMeshObj->manipulatorNode(),
+//                                                                   text_transform_node_name.str());
+//            m_triMeshObj->addAdditionalNode(text_transform_node, "Plush" , text_transform_node_name.str().c_str());
+//        }
+//        ACG::Vec3d avg_point(0,0,0);
+//        ACG::Vec3d avg_normal(0,0,0);
+//        for (VertexHandle v : oldSubMesh.vertices()) {
+//            VertexHandle original_v = m_patternGenerator->get_original_handle(&oldSubMesh, v);
+//            avg_point += m_triMeshObj->mesh()->point(original_v);
+//            avg_normal += m_triMeshObj->mesh()->normal(original_v);
+//        }
+//        avg_point /= subMesh->n_vertices();
+////        avg_normal[2] = 0;
+//        avg_normal.normalize();
+//
+//        double min_distance = std::numeric_limits<double>::max();
+//        ACG::Vec3d closed_point(0,0,0);
+//        for (VertexHandle v : oldSubMesh.vertices()) {
+//            VertexHandle original_v = m_patternGenerator->get_original_handle(&oldSubMesh, v);
+//            ACG::Vec3d p = m_triMeshObj->mesh()->point(original_v);
+//            if ((p-avg_point).norm() < min_distance) {
+//                min_distance = (p-avg_point).norm();
+//                closed_point = p;
+//            }
+//        }
+//        
+//        text_transform_node->loadIdentity();
+//        if (avg_normal[0] < 0 || avg_normal[1] < 0) {
+//            text_transform_node->translate(closed_point + avg_normal * mesh_length * 0.01 * (abs(avg_normal[0])+abs(avg_normal[1])));
+//        } else {
+//            text_transform_node->translate(closed_point);
+//        }
+//        
+//        ACG::SceneGraph::TextNode *text_node;
+//        std::stringstream text_node_name;
+//        text_node_name << "patch_number_" << i;
+//        if (!m_triMeshObj->getAdditionalNode(text_node, "Plush", text_node_name.str().c_str())) {
+//            text_node = new ACG::SceneGraph::TextNode(text_transform_node,
+//                                                     "<TextNode>",
+//                                                     ACG::SceneGraph::TextNode::SCREEN_ALIGNED_STATIC_SIZE,
+//                                                     false);
+//            m_triMeshObj->addAdditionalNode(text_node, "Plush", text_node_name.str().c_str());
+//        }
+//        
+//        text_node->setFont(font);
+//        text_node->setText(std::to_string(i+1));
+//        text_node->setPixelSize(20);
+        
         // Replace old sub mesh with new sub mesh to m_flattenedGraph
         flattenedMeshes->at(i) = *subMesh;
     }
     MeshSelection::selectEdges(m_triMeshObj->mesh(), seamsId);
-    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION_VERTICES);
+    PluginFunctions::setDrawMode(ACG::SceneGraph::DrawModes::EDGES_COLORED);
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
 }
 
 void PlushPlugin::saveSelectionButtonClicked() {
@@ -551,6 +692,13 @@ void PlushPlugin::calcGeodesicThread() {
 
 void PlushPlugin::calcFlattenedGraphThread() {
     m_patternGenerator->calcFlattenedGraph();
+}
+
+void PlushPlugin::calcMergeSementThread() {
+//    MeshSelection::clearEdgeSelection(m_triMeshObj->mesh());
+    m_patternGenerator->optimize_patches(seamMergeThreshold->value(), seamMergeIsStep->isChecked());
+    
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
 }
 
 void PlushPlugin::canceledJob(QString _job) {

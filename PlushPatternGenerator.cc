@@ -2,6 +2,10 @@
 
 #include <queue>
 
+OpenMesh::EPropHandleT<int> PlushPatternGenerator::segment_no_handle;
+
+OpenMesh::MPropHandleT<int> PlushPatternGenerator::merge_iterations_handle;
+
 OpenMesh::MPropHandleT< std::map< std::vector<HalfedgeHandle>, double> > PlushPatternGenerator::joint_boundary_area_handle;
 OpenMesh::MPropHandleT< std::map< std::vector<HalfedgeHandle>, double> > PlushPatternGenerator::joint_boundary_distortion_handle;
 OpenMesh::VPropHandleT<double> PlushPatternGenerator::maxCurvatureHandle;
@@ -53,6 +57,9 @@ PlushPatternGenerator::~PlushPatternGenerator() {
 }
 
 void PlushPatternGenerator::initProperties() {
+    m_mesh->add_property(segment_no_handle, "Segment number");
+    m_mesh->add_property(merge_iterations_handle, "Merge iterations");
+    
     m_mesh->add_property(joint_boundary_area_handle, "Sum of area for joint boundary");
     m_mesh->add_property(joint_boundary_distortion_handle, "Distortion for joint boundary");
     m_mesh->add_property(maxCurvatureHandle, "Max Curvature");
@@ -72,9 +79,18 @@ void PlushPatternGenerator::initProperties() {
     for (EdgeIter e_it = m_mesh->edges_begin(); e_it != m_mesh->edges_end(); e_it++) {
         m_mesh->property(edgeWeightHandle, *e_it) = -1;
     }
+    
+    m_mesh->request_edge_colors();
+    for (EdgeHandle eh : m_mesh->edges()) {
+        m_mesh->set_color(eh, TriMesh::Color(1,1,1,0));
+    }
 }
 
 void PlushPatternGenerator::uninitProperties() {
+    m_mesh->remove_property(segment_no_handle);
+    
+    m_mesh->remove_property(merge_iterations_handle);
+
     m_mesh->remove_property(joint_boundary_area_handle);
     m_mesh->remove_property(joint_boundary_distortion_handle);
     m_mesh->remove_property(maxCurvatureHandle);

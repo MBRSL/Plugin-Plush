@@ -38,9 +38,18 @@ public:
     static const int LOGERR = 0;
     static const int LOGINFO = 1;
     ///@}
-    
+
+    /// @name Merging property handle
+    ///@{
+    static OpenMesh::MPropHandleT<int> merge_iterations_handle;
+
     static OpenMesh::MPropHandleT< std::map< std::vector<HalfedgeHandle>, double> > joint_boundary_area_handle;
     static OpenMesh::MPropHandleT< std::map< std::vector<HalfedgeHandle>, double> > joint_boundary_distortion_handle;
+    
+    static OpenMesh::EPropHandleT<int> segment_no_handle;
+    ///@}
+
+
     /// @name Curvature property handle
     ///@{
     /// Curvature value/direction of each vertex. It's empty before curvature calculation.
@@ -120,6 +129,7 @@ public:
     void calcGeodesic(std::vector<VertexHandle> targetVertices);
     bool loadGeodesic();
     bool saveGeodesic(std::vector<VertexHandle> selectedVertices);
+    void optimize_patches(double threshold, bool step);
 
     bool calcSeams(std::vector<VertexHandle> selectedVertices,
                    double developable_threshold = 0.1,
@@ -147,6 +157,14 @@ public:
     EdgeHandle get_original_handle(TriMesh *mesh, const EdgeHandle eh) const;
     HalfedgeHandle get_original_handle(TriMesh *mesh, const HalfedgeHandle eh) const;
     FaceHandle get_original_handle(TriMesh *mesh, const FaceHandle fh) const;
+    
+    void get_intersection_points(std::set<EdgeHandle> *seams,
+                                 std::set<VertexHandle> &intersection_points);
+    void get_segments_from_seams(std::vector< std::vector<EdgeHandle> > &segments);
+    void get_segments_from_seams(std::vector< std::vector<HalfedgeHandle> > &segments);
+    void get_segments_from_seams(std::vector< std::vector<HalfedgeHandle> > &segments,
+                                 std::set<VertexHandle> intersection_points);
+
     bool calcLocalSeams(TriMesh *mesh, double developable_threshold);
 private:
     TriMesh *m_mesh;
@@ -185,6 +203,13 @@ private:
     ///@{
     void get_closed_boundaries_of_seams(std::vector< std::vector<HalfedgeHandle> > *closed_seams, std::set<EdgeHandle> *seams);
     
+    bool get_adjacent_boundary(HalfedgeHandle start_heh,
+                            std::set<EdgeHandle> &seams,
+                            std::vector<HalfedgeHandle> &adj_boundary);
+    bool get_joint_boundary(std::vector<HalfedgeHandle> &adj_boundary1,
+                            std::vector<HalfedgeHandle> &adj_boundary2,
+                            std::set<EdgeHandle> &seams,
+                            std::vector<HalfedgeHandle> &joint_boundary);
     ///@}
     /// @name Flattening
     ///@{
@@ -200,6 +225,8 @@ private:
     void initProperties();
     void uninitProperties();
     
+    std::vector<HalfedgeHandle> prevBoundary;
+    std::vector<HalfedgeHandle> prevSegment;
     
     /// Utils
     template<class T>

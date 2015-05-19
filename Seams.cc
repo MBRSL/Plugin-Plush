@@ -118,6 +118,7 @@ bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices
                                       bool allPath) {
     std::map< std::vector<HalfedgeHandle>, double > &joint_boundary_distortion = m_mesh->property(joint_boundary_distortion_handle);
     joint_boundary_distortion.clear();
+    m_mesh->property(merge_iterations_handle) = 0;
 
     std::vector<TriMesh> subMeshes;
 
