@@ -29,6 +29,8 @@ signals:
     /// Use this signal to inform user current job progress.
     void setJobState(int val);
     
+    void updateView();
+    
 public:
     /// Used for log
     ///@{
@@ -121,15 +123,36 @@ public:
     /// Flatten 3D loops into 2D loops using LPFB.
     bool calcFlattenedGraph();
     
+    void set_geodesic_coeffifients(double distanceCoefficient,
+                                   double textureCoefficient,
+                                   double curvatureCoefficient,
+                                   double skeletonCoefficient,
+                                   double pathCoefficient);
+    
     std::vector<TriMesh>* getFlattenedMeshes();
     std::set<EdgeHandle>* getSeams();
     
+    VertexHandle get_original_handle(TriMesh *mesh, const VertexHandle vh) const;
+    EdgeHandle get_original_handle(TriMesh *mesh, const EdgeHandle eh) const;
+    HalfedgeHandle get_original_handle(TriMesh *mesh, const HalfedgeHandle eh) const;
+    FaceHandle get_original_handle(TriMesh *mesh, const FaceHandle fh) const;
 private:
     TriMesh *m_mesh;
     QString m_meshName;
     
     bool isJobCanceled;
     
+    /// @name Geodesic coefficients
+    ///@{
+    double m_distanceCoefficient = 0.2;
+    double m_textureCoefficient = 1;
+    double m_curvatureCoefficient = 0.4;
+    double m_skeletonCoefficient = 0.7;
+    double m_pathCoefficient = 0.2;
+    ///@}
+    
+    /// @name Seams
+    ///@{
     bool isIntersected(std::vector<VertexHandle> path1, std::vector<VertexHandle> path2);
     
     bool splitWithBoundary(std::vector<TriMesh> *subMeshes, std::set<EdgeHandle> *seams);
@@ -140,6 +163,7 @@ private:
     bool calcInteriorPoints(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition);
     /// Calculate the distortion between original 3D mesh and flattened graph, the result is stored in distortionHandle
     void calcDistortion(std::vector<TriMesh> *flattenedMeshes);
+    void calcDistortion(TriMesh &flattenedMeshes);
     /// Organize 2D loops to prevent overlapping while minimize bounding area.
     bool packFlattenedGraph(std::vector<TriMesh> *flattenedMeshes, const int nColumns=4);
     ///@}
@@ -147,10 +171,6 @@ private:
     void initProperties();
     void uninitProperties();
     
-    VertexHandle get_original_handle(TriMesh *mesh, const VertexHandle vh) const;
-    EdgeHandle get_original_handle(TriMesh *mesh, const EdgeHandle eh) const;
-    HalfedgeHandle get_original_handle(TriMesh *mesh, const HalfedgeHandle eh) const;
-    FaceHandle get_original_handle(TriMesh *mesh, const FaceHandle fh) const;
     
     /// Utils
     template<class T>

@@ -15,14 +15,35 @@
 
 #include <QTextStream>
 
+void PlushPatternGenerator::set_geodesic_coeffifients( double distanceCoefficient,
+                                                       double textureCoefficient,
+                                                       double curvatureCoefficient,
+                                                       double skeletonCoefficient,
+                                                       double pathCoefficient) {
+    assert(distanceCoefficient >= 0);
+    assert(textureCoefficient >= 0);
+    assert(curvatureCoefficient >= 0);
+    assert(skeletonCoefficient >= 0);
+    assert(pathCoefficient >= 0);
+    
+    m_distanceCoefficient = distanceCoefficient;
+    m_textureCoefficient = textureCoefficient;
+    m_curvatureCoefficient = curvatureCoefficient;
+    m_skeletonCoefficient = skeletonCoefficient;
+    m_pathCoefficient = pathCoefficient;
+}
 void PlushPatternGenerator::calcGeodesic(std::vector<VertexHandle> targetVertices)
 {
     isJobCanceled = false;
     
+    // Clear previous result
     std::map<std::pair<VertexHandle, VertexHandle>, double> &geodesicDistance = m_mesh->property(geodesicDistanceHandle);
     std::map<std::pair<VertexHandle, VertexHandle>, std::vector<VertexHandle> > &geodesicPath = m_mesh->property(geodesicPathHandle);
     geodesicDistance.clear();
     geodesicPath.clear();
+    for (EdgeHandle eh : m_mesh->edges()) {
+        m_mesh->property(PlushPatternGenerator::edgeWeightHandle, eh) = -1;
+    }
 
     for (size_t i = 0; i < targetVertices.size(); i++) {
         if (isJobCanceled) {
@@ -52,7 +73,13 @@ void PlushPatternGenerator::calcGeodesic(std::vector<VertexHandle> targetVertice
         Dijkstra_visitor visitor(currentV);
         WeightFunctor weightFunctor(m_mesh,
                                     currentV,
-                                    &predecessor_pmap);
+                                    &predecessor_pmap,
+                                    m_distanceCoefficient,
+                                    m_textureCoefficient,
+                                    m_curvatureCoefficient,
+                                    m_skeletonCoefficient,
+                                    m_pathCoefficient
+                                    );
         auto weight_pmap = boost::make_function_property_map< HalfedgeHandle,
                                                             double,
                                                             WeightFunctor > (weightFunctor);
@@ -85,6 +112,7 @@ void PlushPatternGenerator::calcGeodesic(std::vector<VertexHandle> targetVertice
             
             if (path.size() <= 0) {
                 // Unreachable
+                assert("Unreachable! Is this model a one connected component?");
                 return;
             } else {
                 // Add source to path

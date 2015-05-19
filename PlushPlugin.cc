@@ -1,6 +1,11 @@
 #include "PlushPlugin.hh"
 
+#include <ACG/Scenegraph/TextNode.hh>
+#include <ACG/Utils/ColorCoder.hh>
+
 #include <MeshTools/MeshSelectionT.hh>
+#include <MeshTools/MeshInfoT.hh>
+
 #include <ObjectTypes/PolyLine/PolyLine.hh>
 
 PlushPlugin::PlushPlugin()
@@ -21,29 +26,53 @@ void PlushPlugin::initializePlugin()
     
     // Create button that can be toggled
     // to (de)activate plugin's picking mode
-    QGroupBox *geodesicGroup = new QGroupBox(tr("Geodesic paths"));
-    QLabel *geodesicNumberLabel = new QLabel(tr("#"));
-    geodesicNumPaths = new QSpinBox();
-    geodesicNumPaths->setMinimum(0);
-    geodesicNumPaths->setValue(999);
-    geodesicElimination = new QCheckBox(tr("Eliminate crossover paths"));
-    geodesicElimination->setChecked(true);
-    geodesicShowSingleButton = new QPushButton(tr("Show single path"));
-    geodesicShowAllButton = new QPushButton(tr("Show all path"));
-    geodesicCalcButton = new QPushButton(tr("Calculate"));
-    QVBoxLayout *geodesicLayout = new QVBoxLayout;
-    QHBoxLayout *geodesicRow1Layout = new QHBoxLayout;
-    QHBoxLayout *geodesicRow2Layout = new QHBoxLayout;
-    QHBoxLayout *geodesicRow3Layout = new QHBoxLayout;
-    geodesicRow1Layout->addWidget(geodesicNumberLabel);
-    geodesicRow1Layout->addWidget(geodesicNumPaths);
-    geodesicRow1Layout->addWidget(geodesicElimination);
-    geodesicRow2Layout->addWidget(geodesicShowSingleButton);
-    geodesicRow2Layout->addWidget(geodesicShowAllButton);
-    geodesicRow3Layout->addWidget(geodesicCalcButton);
-    geodesicLayout->addLayout(geodesicRow1Layout);
-    geodesicLayout->addLayout(geodesicRow2Layout);
-    geodesicLayout->addLayout(geodesicRow3Layout);
+    QGroupBox *seamGroup = new QGroupBox(tr("Seams"));
+    seamNumPaths = new QSpinBox();
+    seamNumPaths->setMinimum(0);
+    seamElimination = new QCheckBox(tr("Eliminate crossover paths"));
+//    geodesicElimination->setChecked(true);
+    seamShowSingleButton = new QPushButton(tr("Single seam"));
+    seamShowAllButton = new QPushButton(tr("All seams"));
+    seamLocalButton = new QPushButton(tr("Local seams"));
+    QPushButton *seamLoadButton = new QPushButton(tr("Load"));
+    QPushButton *seamSaveButton = new QPushButton(tr("Save"));
+    QVBoxLayout *seamLayout = new QVBoxLayout;
+    QHBoxLayout *seamRow1Layout = new QHBoxLayout;
+    QHBoxLayout *seamRow2Layout = new QHBoxLayout;
+    seamRow1Layout->addWidget(new QLabel(tr("#")));
+    seamRow1Layout->addWidget(seamNumPaths);
+    seamRow1Layout->addWidget(seamElimination);
+    seamRow2Layout->addWidget(seamShowSingleButton);
+    seamRow2Layout->addWidget(seamShowAllButton);
+    seamRow2Layout->addWidget(seamLocalButton);
+    seamLayout->addLayout(seamRow1Layout);
+    seamLayout->addLayout(seamRow2Layout);
+    seamGroup->setLayout(seamLayout);
+    
+    QGroupBox *geodesicGroup = new QGroupBox(tr("Geodesic"));
+    geodesic_distance_coef = new QDoubleSpinBox();
+    geodesic_curvature_coef = new QDoubleSpinBox();
+    geodesic_skeleton_coef = new QDoubleSpinBox();
+    geodesic_smoothness_coef = new QDoubleSpinBox();
+    geodesic_distance_coef->setValue(1.0);
+    geodesic_curvature_coef->setValue(1.2);
+    geodesic_skeleton_coef->setValue(0.2);
+    geodesic_smoothness_coef->setValue(0.0);
+    geodesic_distance_coef->setSingleStep(0.1);
+    geodesic_curvature_coef->setSingleStep(0.1);
+    geodesic_skeleton_coef->setSingleStep(0.1);
+    geodesic_smoothness_coef->setSingleStep(0.1);
+    QPushButton *geodesicCalcButton = new QPushButton(tr("Calculate"));
+    QGridLayout *geodesicLayout = new QGridLayout;
+    geodesicLayout->addWidget(new QLabel(tr("distance")), 0, 0);
+    geodesicLayout->addWidget(new QLabel(tr("skeleton")), 0, 2);
+    geodesicLayout->addWidget(new QLabel(tr("curvature")), 1, 0);
+    geodesicLayout->addWidget(new QLabel(tr("smoothness")), 1, 2);
+    geodesicLayout->addWidget(geodesic_distance_coef, 0, 1);
+    geodesicLayout->addWidget(geodesic_skeleton_coef, 0, 3);
+    geodesicLayout->addWidget(geodesic_curvature_coef, 1, 1);
+    geodesicLayout->addWidget(geodesic_smoothness_coef, 1, 3);
+    geodesicLayout->addWidget(geodesicCalcButton, 2, 0, 1, 4);
     geodesicGroup->setLayout(geodesicLayout);
     
     QGroupBox *flatteningGroup = new QGroupBox(tr("Flattening"));
@@ -81,16 +110,19 @@ void PlushPlugin::initializePlugin()
     QHBoxLayout *skeletonWeightLayout = new QHBoxLayout;
     skeletonWeightLayout->addWidget(calcSkeletonWeightButton);
     skeletonWeightGroup->setLayout(skeletonWeightLayout);
-    
+    layout->addWidget(seamGroup);
     layout->addWidget(geodesicGroup);
     layout->addWidget(selectionGroup);
     layout->addWidget(flatteningGroup);
     layout->addWidget(curvatureGroup);
     layout->addWidget(skeletonWeightGroup);
     
-    connect(calcSkeletonWeightButton, SIGNAL(clicked()), this, SLOT(calcSkeletonWeightButtonClicked()));
-    connect(geodesicShowSingleButton, SIGNAL(clicked()), this, SLOT(showGeodesicButtonClicked()));
-    connect(geodesicShowAllButton, SIGNAL(clicked()), this, SLOT(showGeodesicButtonClicked()));
+    connect(seamShowSingleButton, SIGNAL(clicked()), this, SLOT(seamShowButtonClicked()));
+    connect(seamShowAllButton, SIGNAL(clicked()), this, SLOT(seamShowButtonClicked()));
+    connect(seamLocalButton, SIGNAL(clicked()), this, SLOT(seamShowButtonClicked()));
+    connect(seamLoadButton, SIGNAL(clicked()), this, SLOT(seamLoadButtonClicked()));
+    connect(seamSaveButton, SIGNAL(clicked()), this, SLOT(seamSaveButtonClicked()));
+    
     connect(geodesicCalcButton, SIGNAL(clicked()), this, SLOT(calcGeodesicButtonClicked()));
     connect(loadSelectionButton, SIGNAL(clicked()), this, SLOT(loadSelectionButtonClicked()));
     connect(saveSelectionButton, SIGNAL(clicked()), this, SLOT(saveSelectionButtonClicked()));
@@ -99,6 +131,9 @@ void PlushPlugin::initializePlugin()
     connect(calcFlattenButton, SIGNAL(clicked()), this, SLOT(calcFlattenedGraphButtonClicked()));
     connect(showFlattenButton, SIGNAL(clicked()), this, SLOT(showFlattenedGrpahButtonClicked()));
     connect(calcCurvatureButton, SIGNAL(clicked()), this, SLOT(calcCurvatureButtonClicked()));
+    
+    connect(calcSkeletonWeightButton, SIGNAL(clicked()), this, SLOT(calcSkeletonWeightButtonClicked()));
+
     
     emit addToolbox(tr("Plush"), toolBox);
 
@@ -127,8 +162,8 @@ void PlushPlugin::fileOpened(int _id) {
             
             // Load selection
             int selectedCount = loadSelection(mesh, meshName);
-            geodesicNumPaths->setMaximum(selectedCount*(selectedCount-1)/2);
-            
+            seamNumPaths->setMaximum(selectedCount*(selectedCount-1)/2);
+            seamNumPaths->setValue(selectedCount*(selectedCount-1)/2);
             // When user click on "cancel" button, cancel this job
             connect(this, SIGNAL(cancelingJob()), m_patternGenerator, SLOT(cancelJob()));
             // Get progress info from m_patternGenerator, then re-emit it to OpenFlipper system inside receiveJobState
@@ -239,6 +274,12 @@ void PlushPlugin::calcGeodesicButtonClicked() {
     if (!checkIfGeneratorExist()) {
         return;
     }
+    
+    m_patternGenerator->set_geodesic_coeffifients(geodesic_distance_coef->value(),
+                                                  0,
+                                                  geodesic_curvature_coef->value(),
+                                                  geodesic_skeleton_coef->value(),
+                                                  geodesic_smoothness_coef->value());
 
     m_currentJobId = "calcGeodesic";
     OpenFlipperThread *thread = new OpenFlipperThread(m_currentJobId);
@@ -273,37 +314,37 @@ void PlushPlugin::calcFlattenedGraphButtonClicked() {
     thread->startProcessing();
 }
 
-void PlushPlugin::showGeodesicButtonClicked() {
+void PlushPlugin::seamShowButtonClicked() {
     if (!checkIfGeneratorExist()) {
         return;
     }
     
-    if (sender() == geodesicShowSingleButton) {
-        showAllPath = false;
-    } else {
-        showAllPath = true;
-    }
-    
     TriMesh *mesh = m_triMeshObj->mesh();
-    
-    std::vector<int> selectedVerticesId;
-    selectedVerticesId = MeshSelection::getVertexSelection(mesh);
-    geodesicNumPaths->setMaximum(selectedVerticesId.size()*(selectedVerticesId.size()-1)/2);
-    
-    std::vector<VertexHandle> selectedVertices;
-    for (size_t i = 0; i < selectedVerticesId.size(); i++) {
-        selectedVertices.push_back(mesh->vertex_handle(selectedVerticesId[i]));
-    }
-    
-    MeshSelection::clearEdgeSelection(mesh);
-    m_patternGenerator->calcSeams(selectedVertices, geodesicNumPaths->value(), geodesicElimination->isChecked(), showAllPath);
-    m_patternGenerator->calcCircularSeams(mesh);
-    std::vector<TriMesh> *subMeshes = m_patternGenerator->getFlattenedMeshes();
-    if (subMeshes) {
-        for (size_t i = 0; i < subMeshes->size(); i++) {
-            m_patternGenerator->calcCircularSeams(&subMeshes->at(i));
+
+    if (sender() == seamShowSingleButton || sender() == seamShowAllButton) {
+        std::vector<int> selectedVerticesId;
+        selectedVerticesId = MeshSelection::getVertexSelection(mesh);
+        seamNumPaths->setMaximum(selectedVerticesId.size()*(selectedVerticesId.size()-1)/2);
+        
+        std::vector<VertexHandle> selectedVertices;
+        for (size_t i = 0; i < selectedVerticesId.size(); i++) {
+            selectedVertices.push_back(mesh->vertex_handle(selectedVerticesId[i]));
         }
+        
+        if (sender() == seamShowSingleButton) {
+            showAllPath = false;
+        } else {
+            showAllPath = true;
+        }
+        MeshSelection::clearEdgeSelection(mesh);
+        m_patternGenerator->calcSeams(selectedVertices,
+                                      seamNumPaths->value(),
+                                      seamElimination->isChecked(),
+                                      showAllPath);
+    } else {
+        return;
     }
+    
     std::set<EdgeHandle> *seams = m_patternGenerator->getSeams();
     if (seams) {
         std::vector<int> edgeList;
@@ -439,7 +480,7 @@ void PlushPlugin::loadSelectionButtonClicked() {
     QString meshName = QFileInfo(m_triMeshObj->name()).baseName();
     int selectedCount = loadSelection(m_triMeshObj->mesh(), meshName);
 
-    geodesicNumPaths->setMaximum(selectedCount*(selectedCount-1)/2);
+    seamNumPaths->setMaximum(selectedCount*(selectedCount-1)/2);
 }
 
 void PlushPlugin::clearSelectionButtonClicked() {
@@ -476,7 +517,7 @@ void PlushPlugin::calcGeodesicThread() {
     
     std::vector<int> selectedVerticesId;
     selectedVerticesId = MeshSelection::getVertexSelection(mesh);
-    geodesicNumPaths->setMaximum(selectedVerticesId.size()*(selectedVerticesId.size()-1)/2);
+    seamNumPaths->setMaximum(selectedVerticesId.size()*(selectedVerticesId.size()-1)/2);
     
     std::vector<VertexHandle> selectedVertices;
     for (size_t i = 0; i < selectedVerticesId.size(); i++) {
@@ -517,22 +558,26 @@ void PlushPlugin::receiveLog(int type, QString msg) {
     }
 }
 
+void PlushPlugin::receiveUpdate() {
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION | UPDATE_COLOR);
+}
+
 void PlushPlugin::slotKeyEvent( QKeyEvent* _event ) {
     // Switch pressed keys
-    int currentEdgeNo = geodesicNumPaths->value();
+    int currentEdgeNo = seamNumPaths->value();
     switch (_event->key())
     {
         case Qt::Key_X:
-            if (currentEdgeNo < geodesicNumPaths->maximum()) {
-                geodesicNumPaths->setValue(currentEdgeNo+1);
+            if (currentEdgeNo < seamNumPaths->maximum()) {
+                seamNumPaths->setValue(currentEdgeNo+1);
             }
-            geodesicShowSingleButton->click();
+            seamShowSingleButton->click();
             break;
         case Qt::Key_Z:
             if (currentEdgeNo > 0) {
-                geodesicNumPaths->setValue(currentEdgeNo-1);
+                seamNumPaths->setValue(currentEdgeNo-1);
             }
-            geodesicShowSingleButton->click();
+            seamShowSingleButton->click();
             break;
         default:
             break;

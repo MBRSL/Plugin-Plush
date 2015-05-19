@@ -3,8 +3,22 @@
 WeightFunctor::WeightFunctor(TriMesh *mesh,
                              VertexHandle &currentV,
                              const boost::iterator_property_map<std::vector<VertexHandle>::iterator, TriMesh_id_map>
-                             &predecessor_pmap) :
-m_mesh(mesh), m_predecessor_pmap(predecessor_pmap), m_currentV(currentV), m_maxEdgeLength(0) {
+                                 *predecessor_pmap,
+                             double distanceCoefficient,
+                             double textureCoefficient,
+                             double curvatureCoefficient,
+                             double skeletonCoefficient,
+                             double pathCoefficient) :
+m_mesh(mesh),
+m_currentV(currentV),
+m_predecessor_pmap(predecessor_pmap),
+m_maxEdgeLength(0),
+m_distanceCoefficient(distanceCoefficient),
+m_textureCoefficient(textureCoefficient),
+m_curvatureCoefficient(curvatureCoefficient),
+m_skeletonCoefficient(skeletonCoefficient),
+m_pathCoefficient(pathCoefficient)
+{
     for (EdgeIter e_it = m_mesh->edges_begin(); e_it != m_mesh->edges_end(); e_it++) {
         HalfedgeHandle he = m_mesh->halfedge_handle(*e_it, 0);
         TriMesh::Point p1 = m_mesh->point(m_mesh->from_vertex_handle(he));
@@ -49,10 +63,12 @@ double WeightFunctor::skeletonWeight(VertexHandle v1,
                                      TriMesh::Point p1,
                                      TriMesh::Point p2) const {
     Skeleton *skeleton = m_mesh->property(PlushPatternGenerator::skeletonHandle);
+    if (!skeleton) {
+        return 1;
+    }
     
     // Calculate corresponding averaged bone direction for each vertex
     OpenMesh::Vec3d avgBoneDirection(0,0,0);
-    double sumOfSqr1 = 0, sumOfSqr2 = 0;
     int i = 0;
     for (std::vector<Bone>::iterator bone_it = skeleton->bones.begin(); bone_it != skeleton->bones.end(); bone_it++, i++) {
         OpenMesh::Vec3d dir = (bone_it->getA() - bone_it->getB()).normalize();
@@ -61,26 +77,29 @@ double WeightFunctor::skeletonWeight(VertexHandle v1,
         
         assert(!isnan(weight1) && !isnan(weight2));
         avgBoneDirection += dir * (weight1 + weight2)/2;
-        
-        sumOfSqr1 += weight1 * weight1;
-        sumOfSqr2 += weight2 * weight2;
     }
+    avgBoneDirection.normalize();
     
-    // Calculate standard deviation
-    double mean = 1.0/skeleton->bones.size();    // All coefficient sums to 1
-    double std1 = sqrt(sumOfSqr1/skeleton->bones.size() - mean * mean);
-    double std2 = sqrt(sumOfSqr2/skeleton->bones.size() - mean * mean);
+    i = 0;
+    double sumOfAngleDiffSqr = 0;
+    for (std::vector<Bone>::iterator bone_it = skeleton->bones.begin(); bone_it != skeleton->bones.end(); bone_it++, i++) {
+        OpenMesh::Vec3d dir = (bone_it->getA() - bone_it->getB()).normalize();
+        double weight1 = m_mesh->property(PlushPatternGenerator::bonesWeightHandle, v1)[i];
+        double weight2 = m_mesh->property(PlushPatternGenerator::bonesWeightHandle, v2)[i];
+        
+        assert(!isnan(weight1) && !isnan(weight2));
+        double cosAngle = abs(dir | avgBoneDirection);
+        sumOfAngleDiffSqr += cosAngle * (weight1 + weight2)/2;
+    }
+    // Prevent from floating precision error
+    sumOfAngleDiffSqr = min(sumOfAngleDiffSqr, 1.0);
     
     // If there are many influential bones (std is low) for this edge, it's probably near the body part.
     // In such case, skeleton information is not reliable. So we give it a lower influential.
-    
-    // If one std is low, then this edge is not reliable no matter the other one.
-    double std = min(std1, std2);
-    double maximumOfStd = sqrt(mean - mean * mean);
-    double influential = pow(std/maximumOfStd, 6);
+    double influence = sumOfAngleDiffSqr;
     
     double cosAngle = ((p1-p2)|avgBoneDirection)/((p1-p2).norm()*avgBoneDirection.norm());
-    double weight = influential * (1-fabs(cosAngle));
+    double weight = 1 - influence * fabs(cosAngle);
     
     assert(0 <= weight && weight <= 1);
     return weight;
@@ -128,35 +147,26 @@ double WeightFunctor::operator()(HalfedgeHandle heh) const {
     TriMesh::Point p2 = m_mesh->point(v2);
     
     double coefficients = 0;
-    double edgeWeight = 0;
-    
-    double distanceCoefficient = 1;
-    double textureCoefficient = 1;
-    double curvatureCoefficient = 5;
-    double skeletonCoefficient = 1;
-    coefficients += distanceCoefficient + textureCoefficient + curvatureCoefficient + skeletonCoefficient;
+    double edgeWeight = 1;
     
     if (m_mesh->property(PlushPatternGenerator::edgeWeightHandle, eh) >= 0) {
         edgeWeight = m_mesh->property(PlushPatternGenerator::edgeWeightHandle, eh);
     } else {
-        edgeWeight += distanceCoefficient * distanceWeight(p1, p2);
-        edgeWeight += textureCoefficient * textureWeight(heh);
-        edgeWeight += curvatureCoefficient * curvatureWeight(v1, v2);
-        edgeWeight += skeletonCoefficient * skeletonWeight(v1, v2, p1, p2);
+        edgeWeight *= pow(distanceWeight(p1, p2), m_distanceCoefficient);
+//        edgeWeight *= pow(textureWeight(heh), m_textureCoefficient);
+        edgeWeight *= pow(curvatureWeight(v1, v2), m_curvatureCoefficient);
+        edgeWeight *= pow(skeletonWeight(v1, v2, p1, p2), m_skeletonCoefficient);
         
         m_mesh->property(PlushPatternGenerator::edgeWeightHandle, eh) = edgeWeight;
     }
     
     // re-calculate smoothness weight every time because it depends on path.
     // it can not be saved and reuse
-    double pathCoefficient = 0;
-    double pathWeight = 0;
+    double pathWeight = 1;
     if (m_predecessor_pmap != NULL || m_mesh->is_valid_handle(m_prevV)) {
-        pathCoefficient = 2;
-        pathWeight = pathCoefficient * smoothnessWeight(v1, v2, p1, p2);
-        coefficients += pathCoefficient;
+        pathWeight = pow(smoothnessWeight(v1, v2, p1, p2), m_pathCoefficient);
     }
-    return (edgeWeight + pathWeight) / coefficients;
+    return edgeWeight * pathWeight;
 }
 
 /**

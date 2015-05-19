@@ -76,12 +76,19 @@ private:
     /// This obj contains the mesh used by pattern generator. It self contains info such as id and filename in OpenFlipper
     TriMeshObject *m_triMeshObj;
     
-    QSpinBox *geodesicNumPaths;
-    QPushButton *geodesicCalcButton;
-    QPushButton *geodesicShowSingleButton;
-    QPushButton *geodesicShowAllButton;
-    QCheckBox *geodesicElimination;
+    // seams
+    QCheckBox *seamElimination;
+    QSpinBox *seamNumPaths;
+    QPushButton *seamShowSingleButton;
+    QPushButton *seamShowAllButton;
+    QPushButton *seamLocalButton;
     
+    // geodesic
+    QDoubleSpinBox *geodesic_distance_coef;
+    QDoubleSpinBox *geodesic_skeleton_coef;
+    QDoubleSpinBox *geodesic_curvature_coef;
+    QDoubleSpinBox *geodesic_smoothness_coef;
+
     bool showAllPath;
     /// Flag for thread stopping
     bool isJobStopped;
@@ -99,9 +106,8 @@ private slots:
     void initializePlugin();
     void pluginsInitialized();
     
-    void calcSkeletonWeightButtonClicked();
+    void seamShowButtonClicked();
     
-    void showGeodesicButtonClicked();
     void calcGeodesicButtonClicked();
     
     void loadSelectionButtonClicked();
@@ -113,7 +119,8 @@ private slots:
     void calcFlattenedGraphButtonClicked();
     
     void calcCurvatureButtonClicked();
-
+    
+    void calcSkeletonWeightButtonClicked();
     // Starter function for thread
     void calcCurvatureThread();
     void calcGeodesicThread();
@@ -137,6 +144,8 @@ private slots:
     
     /// Receive message from m_patternGenerator and then re-emit
     void receiveLog(int, QString);
+    
+    void receiveUpdate();
 
 public slots:
     QString version() { return QString("1.0"); };
