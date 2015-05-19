@@ -127,6 +127,11 @@ private slots:
     void calcCurvatureButtonClicked();
     
     void calcSkeletonWeightButtonClicked();
+    
+    void vis_intersection_points_button_clicked();
+    void vis_seam_segments_button_clicked();
+    void vis_skeleton_button_clicked();
+
     // Starter function for thread
     void calcCurvatureThread();
     void calcGeodesicThread();

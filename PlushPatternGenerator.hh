@@ -10,6 +10,7 @@
 
 #include <Eigen/sparse>
 
+#include <ObjectTypes/PolyLine/PolyLine.hh>
 #include <MeshTools/MeshSelectionT.hh>
 
 #include <QObject>
@@ -166,6 +167,9 @@ public:
                                  std::set<VertexHandle> intersection_points);
 
     bool calcLocalSeams(TriMesh *mesh, double developable_threshold);
+    
+    void show_intersection_points();
+
 private:
     TriMesh *m_mesh;
     QString m_meshName;

@@ -8,6 +8,21 @@
 
 #include <ObjectTypes/PolyLine/PolyLine.hh>
 
+#include <sys/time.h>
+double get_wall_time(){
+    struct timeval time;
+    if (gettimeofday(&time,NULL)){
+        //  Handle error
+        return 0;
+    }
+    return (double)time.tv_sec + (double)time.tv_usec * .000001;
+}
+double get_cpu_time(){
+    return (double)clock() / CLOCKS_PER_SEC;
+}
+
+double cpu0, cpu1;
+
 PlushPlugin::PlushPlugin()
 {
     requiredPlugins = new std::vector<char*>();
@@ -128,12 +143,24 @@ void PlushPlugin::initializePlugin()
     QHBoxLayout *skeletonWeightLayout = new QHBoxLayout;
     skeletonWeightLayout->addWidget(calcSkeletonWeightButton);
     skeletonWeightGroup->setLayout(skeletonWeightLayout);
+    
+    QGroupBox *visualization_group = new QGroupBox(tr("Visualization"));
+    QPushButton *vis_intersection_points_button = new QPushButton(tr("Intersection points"));
+    QPushButton *vis_seam_segments_button = new QPushButton(tr("Seam segments"));
+    QPushButton *vis_skeleton_button = new QPushButton(tr("Skeleton"));
+    QHBoxLayout *visualization_layout = new QHBoxLayout;
+    visualization_layout->addWidget(vis_intersection_points_button);
+    visualization_layout->addWidget(vis_seam_segments_button);
+    visualization_layout->addWidget(vis_skeleton_button);
+    visualization_group->setLayout(visualization_layout);
+
     layout->addWidget(seamGroup);
     layout->addWidget(geodesicGroup);
     layout->addWidget(selectionGroup);
     layout->addWidget(flatteningGroup);
     layout->addWidget(curvatureGroup);
     layout->addWidget(skeletonWeightGroup);
+    layout->addWidget(visualization_group);
     
     connect(seamShowSingleButton, SIGNAL(clicked()), this, SLOT(seamShowButtonClicked()));
     connect(seamShowAllButton, SIGNAL(clicked()), this, SLOT(seamShowButtonClicked()));
@@ -152,6 +179,10 @@ void PlushPlugin::initializePlugin()
     connect(calcCurvatureButton, SIGNAL(clicked()), this, SLOT(calcCurvatureButtonClicked()));
     
     connect(calcSkeletonWeightButton, SIGNAL(clicked()), this, SLOT(calcSkeletonWeightButtonClicked()));
+
+    connect(vis_intersection_points_button, SIGNAL(clicked()), this, SLOT(vis_intersection_points_button_clicked()));
+    connect(vis_seam_segments_button, SIGNAL(clicked()), this, SLOT(vis_seam_segments_button_clicked()));
+    connect(vis_skeleton_button, SIGNAL(clicked()), this, SLOT(vis_skeleton_button_clicked()));
 
     
     emit addToolbox(tr("Plush"), toolBox);
@@ -183,6 +214,7 @@ void PlushPlugin::fileOpened(int _id) {
             int selectedCount = loadSelection(mesh, meshName);
             seamNumPaths->setMaximum(selectedCount*(selectedCount-1)/2);
             seamNumPaths->setValue(selectedCount*(selectedCount-1)/2);
+
             // When user click on "cancel" button, cancel this job
             connect(this, SIGNAL(cancelingJob()), m_patternGenerator, SLOT(cancelJob()));
             // Get progress info from m_patternGenerator, then re-emit it to OpenFlipper system inside receiveJobState
@@ -331,6 +363,10 @@ void PlushPlugin::seamSaveButtonClicked() {
 }
 
 void PlushPlugin::seamMergeButtonClicked() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+    
     m_triMeshObj->setObjectDrawMode(ACG::SceneGraph::DrawModes::EDGES_COLORED | ACG::SceneGraph::DrawModes::SOLID_FLAT_SHADED);
     m_triMeshObj->materialNode()->enable_alpha_test(0.1);
     if (seamMergeIsStep->isChecked()) {
@@ -393,10 +429,18 @@ void PlushPlugin::seamShowButtonClicked() {
             showAllPath = true;
         }
         MeshSelection::clearEdgeSelection(mesh);
+        cpu0 = get_cpu_time();
         m_patternGenerator->calcSeams(selectedVertices,
+                                      seamMergeThreshold->value(),
                                       seamNumPaths->value(),
                                       seamElimination->isChecked(),
                                       showAllPath);
+        cpu1 = get_cpu_time();
+    } else if (sender() == seamLocalButton) {
+        cpu0 = get_cpu_time();
+        m_patternGenerator->calcLocalSeams(mesh, seamMergeThreshold->value());
+        cpu1 = get_cpu_time();
+        emit log(LOGINFO, QString("Time: %1").arg(cpu1-cpu0));
     } else {
         return;
     }
@@ -410,6 +454,68 @@ void PlushPlugin::seamShowButtonClicked() {
         MeshSelection::selectEdges(mesh, edgeList);
         emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
     }
+}
+
+void PlushPlugin::vis_intersection_points_button_clicked() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+    
+    TriMesh *mesh = m_triMeshObj->mesh();
+    std::set<VertexHandle> intersection_points;
+    std::set<EdgeHandle> *seams = m_patternGenerator->getSeams();
+    m_patternGenerator->get_intersection_points(seams, intersection_points);
+    for (VertexHandle v : intersection_points) {
+        mesh->status(v).set_feature(true);
+    }
+    emit updatedObject(m_triMeshObj->id(), UPDATE_ALL);
+}
+
+void PlushPlugin::vis_seam_segments_button_clicked() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+    
+    TriMesh *mesh = m_triMeshObj->mesh();
+    m_triMeshObj->materialNode()->enable_alpha_test(0.1);
+    m_triMeshObj->materialNode()->set_line_smooth(true);
+    m_triMeshObj->materialNode()->set_line_width(3);
+    
+    std::vector< std::vector<HalfedgeHandle> > heh_segments;
+    m_patternGenerator->get_segments_from_seams(heh_segments);
+    
+    MeshSelection::clearVertexSelection(mesh);
+    MeshSelection::clearEdgeSelection(mesh);
+
+    int num = heh_segments.size();
+    ACG::ColorCoder color_coder(0, num, false);
+    for (EdgeHandle eh : mesh->edges()) {
+        mesh->set_color(eh, TriMesh::Color(1,1,1,0));
+    }
+    for (auto group : heh_segments) {
+        TriMesh::Color color = color_coder.color_float4(rand() % num);
+        for (HalfedgeHandle heh : group) {
+            mesh->set_color(mesh->edge_handle(heh), color);
+        }
+    }
+    PluginFunctions::setDrawMode(ACG::SceneGraph::DrawModes::EDGES_COLORED | ACG::SceneGraph::DrawModes::SOLID_FLAT_SHADED);
+    emit updatedObject(m_triMeshObj->id(), UPDATE_COLOR | UPDATE_SELECTION);
+}
+
+void PlushPlugin::vis_skeleton_button_clicked() {
+    // Visualize skeleton
+    Skeleton *skeleton = m_triMeshObj->mesh()->property(PlushPatternGenerator::skeletonHandle);
+    for (Bone bone : skeleton->bones) {
+        int polyLineObjId;
+        emit addEmptyObject(DATA_POLY_LINE, polyLineObjId);
+        PolyLineObject *object = 0;
+        PluginFunctions::getObject(polyLineObjId, object);
+        PolyLine *polyLine = object->line();
+        polyLine->add_point(bone.getA());
+        polyLine->add_point(bone.getB());
+    }
+    PluginFunctions::setDrawMode(ACG::SceneGraph::DrawModes::WIREFRAME);
+    emit updatedObject(m_triMeshObj->id(), UPDATE_ALL);
 }
 
 void PlushPlugin::showFlattenedGrpahButtonClicked() {
@@ -684,7 +790,11 @@ void PlushPlugin::calcGeodesicThread() {
     for (size_t i = 0; i < selectedVerticesId.size(); i++) {
         selectedVertices.push_back(mesh->vertex_handle(selectedVerticesId[i]));
     }
+    cpu0 = get_cpu_time();
     m_patternGenerator->calcGeodesic(selectedVertices);
+    cpu1 = get_cpu_time();
+    emit log(LOGINFO, QString("Time: %1").arg(cpu1-cpu0));
+
     m_patternGenerator->saveGeodesic(selectedVertices);
 
     emit log(LOGINFO, "Geodesic calculation done.");
@@ -696,7 +806,10 @@ void PlushPlugin::calcFlattenedGraphThread() {
 
 void PlushPlugin::calcMergeSementThread() {
 //    MeshSelection::clearEdgeSelection(m_triMeshObj->mesh());
+    cpu0 = get_cpu_time();
     m_patternGenerator->optimize_patches(seamMergeThreshold->value(), seamMergeIsStep->isChecked());
+    cpu1 = get_cpu_time();
+    emit log(LOGINFO, QString("Time: %1").arg(cpu1-cpu0));
     
     emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
 }

@@ -607,3 +607,12 @@ bool PlushPatternGenerator::splitWithBoundary(std::vector<TriMesh> *subMeshes, s
     assert(visited.size() == m_mesh->n_faces());
     return true;
 }
+
+void PlushPatternGenerator::show_intersection_points() {
+    std::set<VertexHandle> intersection_points;
+    std::set<EdgeHandle> *seams = getSeams();
+    get_intersection_points(seams, intersection_points);
+    for (VertexHandle v : intersection_points) {
+        m_mesh->status(v).set_feature(true);
+    }
+}
