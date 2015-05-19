@@ -107,6 +107,8 @@ private slots:
     void pluginsInitialized();
     
     void seamShowButtonClicked();
+    void seamSaveButtonClicked();
+    void seamLoadButtonClicked();
     
     void calcGeodesicButtonClicked();
     

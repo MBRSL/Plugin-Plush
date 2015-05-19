@@ -17,6 +17,7 @@
 #include <MeshTools/MeshSelectionT.hh>
 #include <queue>
 
+#include <QTextStream>
 /**
  @brief Detect if there are any intersections between two paths.
  This function returns true if
@@ -110,6 +111,69 @@ bool PlushPatternGenerator::isIntersected(std::vector<VertexHandle> pathA, std::
     return false;
 }
 
+bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices,
+                                      double developable_threshold,
+                                      int limitNum,
+                                      bool elimination,
+                                      bool allPath) {
+    std::map< std::vector<HalfedgeHandle>, double > &joint_boundary_distortion = m_mesh->property(joint_boundary_distortion_handle);
+    joint_boundary_distortion.clear();
+
+    std::vector<TriMesh> subMeshes;
+
+    std::set<EdgeHandle> *seams = getSeams();
+    if (seams) {
+        seams->clear();
+    }
+    
+//    calcCircularSeams(m_mesh, developable_threshold, false);
+    calcStructralSeams(m_mesh, selectedVertices, limitNum, elimination, allPath);
+//    calcLocalSeams(m_mesh, developable_threshold);
+    return true;
+}
+
+/**
+ @brief Generate local seams for non-developable sub-meshes
+
+ The result is append to seamsHandle property of m_mesh.
+ @param <#parameter#>
+ @return <#retval#>
+ @retval <#meaning#>
+ */
+bool PlushPatternGenerator::calcLocalSeams(TriMesh *sub_mesh, double developable_threshold) {
+    unsigned int num_prev_seam = 0;
+    std::set<EdgeHandle> *seams = getSeams();
+    std::vector<TriMesh> sub_meshes;
+    std::set<std::vector<HalfedgeHandle> > calculated;
+    
+    do {
+        num_prev_seam = seams->size();
+        
+        std::vector< std::vector<HalfedgeHandle> > closed_seams;
+        get_closed_boundaries_of_seams(&closed_seams, seams);
+        
+        for (std::vector<HalfedgeHandle> closed_seam : closed_seams) {
+            if (calculated.find(closed_seam) != calculated.end()) {
+                continue;
+            }
+            calculated.insert(closed_seam);
+            
+            TriMesh sub_mesh;
+            extract_mesh_with_boundary(&sub_mesh, m_mesh->face_handle(*closed_seam.begin()), seams);
+            
+            std::map<VertexHandle, OpenMesh::Vec3d> boundaryPosition;
+            calcLPFB(&sub_mesh, &boundaryPosition);
+            calcInteriorPoints(&sub_mesh, &boundaryPosition);
+            calcDistortion(sub_mesh);
+            
+            calcCircularSeams(&sub_mesh, developable_threshold, true);
+        }
+        seams = getSeams();
+    } while (seams->size() != num_prev_seam);
+    
+    return true;
+}
+
 /**
  @brief Generate circular seams that are not possible to get with calcSeams.
  The step of this function:
@@ -124,7 +188,7 @@ bool PlushPatternGenerator::isIntersected(std::vector<VertexHandle> pathA, std::
  @return <#retval#>
  @retval <#meaning#>
  */
-bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
+bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh, double threshold, bool is_local_seam) {
     OpenMesh::VPropHandleT<VertexHandle> inverseMapping = getInverseMappingHandle(mesh);
     // Calculate mean & std
     double sum_curvature = 0;
@@ -141,13 +205,31 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
     }
     double mean = sum_curvature/count;
     double std = sqrt(sum_curvature_sqr/mesh->n_vertices() - mean*mean);
-    double threshold = mean/2;
+    if (!is_local_seam) {
+        threshold = mean/2;
+    }
     
     double avg_edge_length = 0;
     for (EdgeHandle eh : mesh->edges()) {
         avg_edge_length += mesh->calc_edge_length(eh);
     }
     avg_edge_length /= mesh->n_edges();
+
+    // Select vertices with curvature greater than threshold
+    auto curvatureFilterFunctor = [&](VertexHandle v) -> bool {
+        VertexHandle original_v = get_original_handle(mesh, v);
+        double curvature = m_mesh->property(maxCurvatureHandle, original_v);
+        return curvature < threshold;
+    };
+
+    auto distortionFilterFunctor = [&](VertexHandle v) -> bool {
+        double distortion = 0;
+        for (const FaceHandle cvf : mesh->vf_range(v)) {
+            FaceHandle original_f = get_original_handle(mesh, cvf);
+            distortion += m_mesh->property(distortionFHandle, original_f);
+        }
+        return abs(distortion/mesh->valence(v)) > threshold;
+    };
 
     struct Filter {
     private:
@@ -160,16 +242,15 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
             return m_functor(v);
         }
     };
-    
-    // Select vertices with curvature greater than threshold
-    auto curvatureFilterFunctor = [&](VertexHandle v) -> bool {
-        VertexHandle original_v = get_original_handle(mesh, v);
-        double curvature = m_mesh->property(maxCurvatureHandle, original_v);
-        return curvature < threshold;
-    };
-    Filter curvatureFilter(mesh, curvatureFilterFunctor);
+
+    Filter filter;
+    if (is_local_seam) {
+        filter = Filter(mesh, distortionFilterFunctor);
+    } else {
+        filter = Filter(mesh, curvatureFilterFunctor);
+    }
     typedef boost::filtered_graph<TriMesh, boost::keep_all, Filter> Filtered_graph;
-    Filtered_graph curvature_filtered_mesh(*mesh, boost::keep_all(), curvatureFilter);
+    Filtered_graph curvature_filtered_mesh(*mesh, boost::keep_all(), filter);
     
     typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
     VertexHandle, HalfedgeHandle > Graph;
@@ -207,55 +288,42 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
     // For each component
     for (auto component_it = components.begin(); component_it != components.end(); component_it++) {
         std::set<VertexHandle> component = *component_it;
-        
+
+        std::vector< std::set<VertexHandle> > boundariesVertices(2);
+
         // Use expand-shrink to form a much complete selection without holes
         const int nRings = 5;
         expandVertice(mesh, component, nRings);
-        shrinkVertice(mesh, component, nRings-2);
-        
-        // Split boundary vertices into connected components
-        int nVertices = 0;
-        auto boundaryFilterFunctor = [&](VertexHandle v) -> bool {
-            if (component.find(v) != component.end()) {
-                for (VertexHandle cvv : mesh->vv_range(v)) {
-                    // Any vertex connecting to non-component vertex is treat as boundary vertex
-                    if (component.find(cvv) == component.end()) {
-                        nVertices++;
-                        return true;
-                    }
+        for (VertexHandle v : component) {
+            for (const VertexHandle cvv : mesh->vv_range(v)) {
+                // Any vertex connecting to non-component vertex is treat as boundary vertex
+                if (component.find(cvv) == component.end()) {
+                    boundariesVertices[0].insert(v);
                 }
             }
-            return false;
-        };
-
-        Filter boundaryFilter(mesh, boundaryFilterFunctor);
-        Filtered_graph boundary_filtered_mesh(*mesh, boost::keep_all(), boundaryFilter);
-        
-        std::map<int, int> boundaryMap;
-        Graph boundary_graph;
-        graph_copier.m_g_dst = &boundary_graph;
-        boost::copy_graph(boundary_filtered_mesh, boundary_graph,
-                          boost::vertex_copy(graph_copier)
-                          .edge_copy(graph_copier));
-        int nBoundaries = boost::connected_components(boundary_graph, boost::make_assoc_property_map(boundaryMap));
-        
-        // Boundary more than two forms a ring
-        // Currently ignore component with less than two boundaries.
-        if (nBoundaries < 2) {
-            continue;
         }
-
+        std::set<VertexHandle> component_shrinked = component;
+        shrinkVertice(mesh, component_shrinked, nRings);
+        boundariesVertices[1].insert(component_shrinked.begin(), component_shrinked.end());
+        
         // Visualize
-//        for (VertexHandle v : component) {
-//            mesh->status(v).set_selected(true);
+//        if (is_local_seam) {
+//            for (VertexHandle v : component) {
+//                VertexHandle original_v = get_original_handle(mesh, v);
+//                m_mesh->status(original_v).set_selected(true);
+//            }
+//            for (VertexHandle v : boundariesVertices[1]) {
+//                VertexHandle original_v = get_original_handle(mesh, v);
+//                m_mesh->status(original_v).set_selected(true);
+//            }
 //        }
-        
-        std::vector< std::set<VertexHandle> > boundariesVertices;
-        boundariesVertices.resize(nBoundaries);
-        for (size_t i = 0; i < num_vertices(boundary_graph); i++) {
-            VertexHandle v = boundary_graph[i];
-            boundariesVertices[boundaryMap[i]].insert(v);
-        }
+
+//        std::vector< std::set<VertexHandle> > boundariesVertices;
+//        boundariesVertices.resize(nBoundaries);
+//        for (size_t i = 0; i < num_vertices(boundary_graph); i++) {
+//            VertexHandle v = boundary_graph[i];
+//            boundariesVertices[boundaryMap[i]].insert(v);
+//        }
         
         // Find faces corresponds to boundariesVertices, also categorize all faces into first two boundary
         std::vector<FaceHandle> facesCandidates;
@@ -333,23 +401,48 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
                         Id target = idMapping[neighborF];
                         
                         double weight = 1e9;
-                        const double
-                        alpha = 0.8;
-//                        double angWij = pow((1-(1-abs(cos(theta)))*convexityFac),2);
-//                        double angWij = pow(cos(theta),2);
                         
                         VertexHandle v1 = mesh->from_vertex_handle(cfh);
                         VertexHandle v2 = mesh->to_vertex_handle(cfh);
-                        double curvature1 = m_mesh->property(maxCurvatureHandle, get_original_handle(mesh, v1));
-                        double curvature2 = m_mesh->property(maxCurvatureHandle, get_original_handle(mesh, v2));
-                        if (curvature1 < 0 && curvature2 < 0) {
-                            double curvatureWeight = abs((2 * mean)/(curvature1 + curvature2));
-                            
-                            double theta = mesh->calc_dihedral_angle(cfh);
-                            double angleWeight = abs(cos(theta));
-                            
-//                            double edge_length_weight = mesh->calc_edge_length(*cfh_it)/avg_edge_length;
-                            weight = alpha * curvatureWeight + (1-alpha) * angleWeight;
+                        if (is_local_seam) {
+                            double distortion1 = 0;
+                            for (const VertexHandle cvv : mesh->vv_range(v1)) {
+                                double distortion_cvv = 0;
+                                for (const FaceHandle cvf : mesh->vf_range(cvv)) {
+                                    distortion_cvv += m_mesh->property(distortionFHandle, get_original_handle(mesh, cvf));
+                                }
+                                distortion1 += distortion_cvv/mesh->valence(cvv);
+                            }
+                            distortion1 /= m_mesh->valence(get_original_handle(mesh, v1));
+                            distortion1 += m_mesh->property(distortionVHandle, get_original_handle(mesh, v1));
+                            double distortion2 = 0;
+                            for (const VertexHandle cvv : mesh->vv_range(v2)) {
+                                double distortion_cvv = 0;
+                                for (const FaceHandle cvf : mesh->vf_range(cvv)) {
+                                    FaceHandle original_f = get_original_handle(mesh, cvf);
+                                    distortion_cvv += m_mesh->property(distortionFHandle, get_original_handle(mesh, cvf));
+                                }
+                                distortion2 += distortion_cvv/mesh->valence(cvv);
+                            }
+                            distortion2 /= m_mesh->valence(get_original_handle(mesh, v2));
+                            distortion2 += m_mesh->property(distortionVHandle, get_original_handle(mesh, v2));
+                            weight = 1/(1 + abs(distortion1) + abs(distortion2));
+                        } else {
+                            const double alpha = 0.8;
+//                        double angWij = pow((1-(1-abs(cos(theta)))*convexityFac),2);
+//                        double angWij = pow(cos(theta),2);
+
+                            double curvature1 = m_mesh->property(maxCurvatureHandle, get_original_handle(mesh, v1));
+                            double curvature2 = m_mesh->property(maxCurvatureHandle, get_original_handle(mesh, v2));
+                            if (curvature1 < 0 && curvature2 < 0) {
+                                double curvatureWeight = abs((2 * mean)/(curvature1 + curvature2));
+                                
+                                double theta = mesh->calc_dihedral_angle(cfh);
+                                double angleWeight = abs(cos(theta));
+                                
+    //                            double edge_length_weight = mesh->calc_edge_length(*cfh_it)/avg_edge_length;
+                                weight = alpha * curvatureWeight + (1-alpha) * angleWeight;
+                            }
                         }
                         addBidirectionalEdge(source, target, weight);
                     }
@@ -423,7 +516,8 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh) {
  *  @param allPath (Debugging) If false, only used (limitNum)-th path for spanningTree.
  *  @return False if error occured.
  */
-bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices,
+bool PlushPatternGenerator::calcStructralSeams(TriMesh *mesh,
+                                               std::vector<VertexHandle> selectedVertices,
                                              int limitNum,
                                              bool elimination,
                                              bool allPath) {
@@ -485,7 +579,6 @@ bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices
     // insert edges into seams
     OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
     std::set<EdgeHandle> &seams = m_mesh->property(seamsHandle);
-
     int count = 0;
     for (std::vector<std::pair<double, std::vector<VertexHandle> > >::iterator it = result.begin(); it != result.end(); it++, count++) {
         // Break if we reach limitNum
@@ -511,6 +604,58 @@ bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices
         QString msg = QString("Weight of path #%1 from %2 to %3: %4").arg(count+1).arg((path.begin())->idx()).arg((path.end()-1)->idx()).arg(it->first);
         emit log(LOGINFO, msg);
     }
+    
+    // Add texture seams that are not possible to be generated in the above proccess
+//    for (EdgeHandle eh : m_mesh->edges()) {
+//        if (is_different_texture(m_mesh, eh)) {
+//            seams.insert(eh);
+//        }
+//    }
+    
+    return true;
+}
+
+bool PlushPatternGenerator::load_seams() {
+    QFile file(m_meshName + "_seams.txt");
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        emit log(LOGERR, QString("Unable to read file %1").arg(m_meshName + "_seams.txt"));
+        return 0;
+    }
+    
+    QTextStream in(&file);
+
+    OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = PlushPatternGenerator::getSeamsHandle(m_mesh);
+    std::set<EdgeHandle> &seams = m_mesh->property(seamsHandle);
+
+    QString eh_str;
+    while(!in.atEnd()) {
+        eh_str = in.readLine();
+        bool ok;
+        int eh_id = eh_str.toInt(&ok);
+        if (ok) {
+            EdgeHandle eh = m_mesh->edge_handle(eh_id);
+            m_mesh->status(eh).set_selected(true);
+            seams.insert(eh);
+        }
+    }
+    
+    emit updateView();
+    return true;
+}
+
+bool PlushPatternGenerator::save_seams() {
+    OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = PlushPatternGenerator::getSeamsHandle(m_mesh);
+    std::set<EdgeHandle> &seams = m_mesh->property(seamsHandle);
+    
+    // Prepare file for saving data
+    QFile file(m_meshName + "_seams.txt");
+    file.open(QIODevice::WriteOnly | QIODevice::Text);
+    QTextStream out(&file);
+    
+    for (EdgeHandle eh : seams) {
+        out << eh.idx() << "\n";
+    }
+    file.close();
     
     return true;
 }

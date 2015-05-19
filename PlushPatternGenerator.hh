@@ -38,6 +38,8 @@ public:
     static const int LOGINFO = 1;
     ///@}
     
+    static OpenMesh::MPropHandleT< std::map< std::vector<HalfedgeHandle>, double> > joint_boundary_area_handle;
+    static OpenMesh::MPropHandleT< std::map< std::vector<HalfedgeHandle>, double> > joint_boundary_distortion_handle;
     /// @name Curvature property handle
     ///@{
     /// Curvature value/direction of each vertex. It's empty before curvature calculation.
@@ -98,6 +100,9 @@ public:
     PlushPatternGenerator(TriMesh *mesh, QString meshName);
     ~PlushPatternGenerator();
     
+    bool load_seams();
+    bool save_seams();
+
     void loadCurvature();
     
     bool loadSkeleton();
@@ -111,10 +116,12 @@ public:
     void calcGeodesic(std::vector<VertexHandle> targetVertices);
     bool loadGeodesic();
     bool saveGeodesic(std::vector<VertexHandle> selectedVertices);
-    
-    bool calcSeams(std::vector<VertexHandle> selectedVertices, int limitNum = 0, bool elimination = false, bool allPaths = true);
-    bool calcCircularSeams(TriMesh *mesh);
-    
+
+    bool calcSeams(std::vector<VertexHandle> selectedVertices,
+                   double developable_threshold = 0.1,
+                   int limitNum = 0,
+                   bool elimination = false,
+                   bool allPaths = true);
     bool calcSkeletonWeight();
     
     // Used in selection
@@ -136,6 +143,7 @@ public:
     EdgeHandle get_original_handle(TriMesh *mesh, const EdgeHandle eh) const;
     HalfedgeHandle get_original_handle(TriMesh *mesh, const HalfedgeHandle eh) const;
     FaceHandle get_original_handle(TriMesh *mesh, const FaceHandle fh) const;
+    bool calcLocalSeams(TriMesh *mesh, double developable_threshold);
 private:
     TriMesh *m_mesh;
     QString m_meshName;
@@ -154,9 +162,26 @@ private:
     /// @name Seams
     ///@{
     bool isIntersected(std::vector<VertexHandle> path1, std::vector<VertexHandle> path2);
+    bool calcCircularSeams(TriMesh *mesh, double threshold, bool is_local_seam);
+    bool calcStructralSeams(TriMesh *mesh,
+                            std::vector<VertexHandle> selectedVertices,
+                            int limitNum,
+                            bool elimination,
+                            bool allPaths);
+    ///@}
     
+    /// @name Sub mesh
+    ///@{
     bool splitWithBoundary(std::vector<TriMesh> *subMeshes, std::set<EdgeHandle> *seams);
+    bool extract_mesh_with_boundary(TriMesh *new_mesh, FaceHandle root_face, std::set<EdgeHandle> *seams);
+    bool extract_mesh_with_boundary(TriMesh *new_mesh, FaceHandle root_face, std::vector<HalfedgeHandle> *seams);
+    ///@}
+
+    /// @name Boundary
+    ///@{
+    void get_closed_boundaries_of_seams(std::vector< std::vector<HalfedgeHandle> > *closed_seams, std::set<EdgeHandle> *seams);
     
+    ///@}
     /// @name Flattening
     ///@{
     bool calcLPFB(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition);

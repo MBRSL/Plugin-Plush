@@ -39,14 +39,18 @@ void PlushPlugin::initializePlugin()
     QVBoxLayout *seamLayout = new QVBoxLayout;
     QHBoxLayout *seamRow1Layout = new QHBoxLayout;
     QHBoxLayout *seamRow2Layout = new QHBoxLayout;
+    QHBoxLayout *seamRow3Layout = new QHBoxLayout;
     seamRow1Layout->addWidget(new QLabel(tr("#")));
     seamRow1Layout->addWidget(seamNumPaths);
     seamRow1Layout->addWidget(seamElimination);
     seamRow2Layout->addWidget(seamShowSingleButton);
     seamRow2Layout->addWidget(seamShowAllButton);
     seamRow2Layout->addWidget(seamLocalButton);
+    seamRow3Layout->addWidget(seamLoadButton);
+    seamRow3Layout->addWidget(seamSaveButton);
     seamLayout->addLayout(seamRow1Layout);
     seamLayout->addLayout(seamRow2Layout);
+    seamLayout->addLayout(seamRow3Layout);
     seamGroup->setLayout(seamLayout);
     
     QGroupBox *geodesicGroup = new QGroupBox(tr("Geodesic"));
@@ -292,6 +296,22 @@ void PlushPlugin::calcGeodesicButtonClicked() {
     emit startJob(m_currentJobId, "calculate geodesic of whole mesh", 0, 100, true);
     thread->start();
     thread->startProcessing();
+}
+
+void PlushPlugin::seamLoadButtonClicked() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+    
+    m_patternGenerator->load_seams();
+}
+
+void PlushPlugin::seamSaveButtonClicked() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+    
+    m_patternGenerator->save_seams();
 }
 
 void PlushPlugin::calcFlattenedGraphButtonClicked() {
