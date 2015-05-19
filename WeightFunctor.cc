@@ -37,8 +37,7 @@ double WeightFunctor::distanceWeight(TriMesh::Point p1, TriMesh::Point p2) const
 double WeightFunctor::textureWeight(HalfedgeHandle heh) const {
     // if the two faces along this edge are different color, set weight of this edge to almost 0
     // we encourage path go through the boundary of different colors
-    if (!m_mesh->is_boundary(heh) && !m_mesh->is_boundary(m_mesh->opposite_halfedge_handle(heh))
-        &&  m_mesh->color(m_mesh->face_handle(heh)) != m_mesh->color(m_mesh->opposite_face_handle(heh))) {
+    if (PlushPatternGenerator::is_different_texture(m_mesh, m_mesh->edge_handle(heh))) {
         return 1e-9;
     } else {
         return 1;

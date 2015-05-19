@@ -25,6 +25,7 @@ signals:
     
     /// Emitted when error occurred, or other informations.
     void log(int logType, QString msg);
+    void log(QString msg);
     
     /// Use this signal to inform user current job progress.
     void setJobState(int val);
@@ -94,6 +95,9 @@ public:
     static void shrinkVertice(const TriMesh *mesh, std::set<VertexHandle> &verticesSelection, int n);
     
     static double calcArea(OpenMesh::Vec3d p1, OpenMesh::Vec3d p2, OpenMesh::Vec3d p3);
+    
+    static bool is_different_texture(TriMesh *mesh, EdgeHandle eh);
+    static bool is_different_texture(TriMesh *mesh, HalfedgeHandle eh);
     
     enum InteriorParameterizationMethod { Barycentric, Conformal, MeanValue };
     

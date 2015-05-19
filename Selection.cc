@@ -71,34 +71,32 @@ bool PlushPatternGenerator::calcSelection(std::vector<VertexHandle> &targetVerti
         m_mesh->property(distortionVHandle, v) = conformal_factors[v.idx()];
     }
     
-    std::vector< std::pair<VertexHandle, double> > sorted_conformal_factors(conformal_factors.size());
-    for (VertexHandle v : m_mesh->vertices()) {
-        sorted_conformal_factors[v.idx()].first = v;
-        sorted_conformal_factors[v.idx()].second = conformal_factors[v.idx()];
-    }
-    auto comparator = [](const std::pair<VertexHandle, double> &left, const std::pair<VertexHandle, double> &right) ->bool {
-        return left.second > right.second;
-    };
-    std::sort(sorted_conformal_factors.begin(), sorted_conformal_factors.end(), comparator);
-    
-    // Maximum suppression
-    for (size_t i = 0; i < sorted_conformal_factors.size() && targetVertices.size() < sqrt(m_mesh->n_vertices()); i++) {
-        VertexHandle v = sorted_conformal_factors[i].first;
-        double conformal_factor = sorted_conformal_factors[i].second;
+    // Local extrema search
+    for (int i = 0; i < conformal_factors.size() && targetVertices.size() < sqrt(m_mesh->n_vertices()); i++) {
+        VertexHandle v = m_mesh->vertex_handle(i);
+        double conformal_factor = conformal_factors[i];
         // Test for neigbor in 3-rings
         bool isMaximal = true;
+        bool isMinimal = true;
         for (VertexHandle cvv : m_mesh->vv_range(v)) {
             for (VertexHandle cvv2 : m_mesh->vv_range(cvv)) {
                 for (VertexHandle cvv3 : m_mesh->vv_range(cvv2)) {
-                    if (m_mesh->property(distortionVHandle, cvv3) > conformal_factor) {
-                        isMaximal = false;
-                        break;
+                    if (cvv3 != v) {
+                        if (m_mesh->property(distortionVHandle, cvv3) > conformal_factor) {
+                            isMaximal = false;
+                        } else {
+                            isMinimal = false;
+                        }
+                        
+                        if (!isMaximal && !isMinimal) {
+                            goto stop_extrema_search;
+                        }
                     }
                 }
             }
         }
-        
-        if (isMaximal) {
+        stop_extrema_search:
+        if (isMaximal || isMinimal) {
             targetVertices.push_back(v);
         }
     }

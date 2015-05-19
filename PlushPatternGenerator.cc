@@ -18,11 +18,11 @@ OpenMesh::FPropHandleT<double> PlushPatternGenerator::distortionFHandle;
 OpenMesh::VPropHandleT<double> PlushPatternGenerator::distortionVHandle;
 
 OpenMesh::VPropHandleT<VertexHandle> PlushPatternGenerator::getInverseMappingHandle(TriMesh *mesh) {
-    OpenMesh::VPropHandleT<VertexHandle> inverseMappingHandle;
-    if (!mesh->get_property_handle(inverseMappingHandle, "inverseMapping")) {
-        mesh->add_property(inverseMappingHandle, "inverseMapping");
+    OpenMesh::VPropHandleT<VertexHandle> inverse_mappingHandle;
+    if (!mesh->get_property_handle(inverse_mappingHandle, "inverse_mapping")) {
+        mesh->add_property(inverse_mappingHandle, "inverse_mapping");
     }
-    return inverseMappingHandle;
+    return inverse_mappingHandle;
 }
 
 OpenMesh::MPropHandleT< std::set<EdgeHandle> > PlushPatternGenerator::getSeamsHandle(TriMesh *mesh) {
@@ -280,6 +280,21 @@ double PlushPatternGenerator::calcArea(OpenMesh::Vec3d p1, OpenMesh::Vec3d p2, O
     return (v12 % v13).norm() / 2;
 }
 
+bool PlushPatternGenerator::is_different_texture(TriMesh *mesh, HalfedgeHandle heh) {
+    return is_different_texture(mesh, mesh->edge_handle(heh));
+}
+
+bool PlushPatternGenerator::is_different_texture(TriMesh *mesh, EdgeHandle eh) {
+    HalfedgeHandle heh = mesh->halfedge_handle(eh, 0);
+    assert(mesh->has_face_colors());
+    if (mesh->is_boundary(eh)
+    ||  mesh->color(mesh->face_handle(heh)) == mesh->color(mesh->opposite_face_handle(heh))) {
+        return false;
+    } else {
+        return true;
+    }
+}
+
 /** Expand selection by n-ring connectivity **/
 void PlushPatternGenerator::expandVertice(const TriMesh *mesh, const VertexHandle centerV, std::set<VertexHandle> &verticesSelection, int n, double maxDistance) {
     TriMesh::Point p = mesh->point(centerV);
@@ -351,6 +366,7 @@ bool PlushPatternGenerator::getBoundaryOfOpenedMesh(std::vector< std::vector<Hal
             std::reverse(boundary.begin(), boundary.end());
             for (size_t i = 0; i < boundary.size(); i++) {
                 boundary[i] = mesh->opposite_halfedge_handle(boundary[i]);
+                assert(!mesh->is_boundary(boundary[i]));
             }
         }
         boundaries.push_back(boundary);
@@ -359,9 +375,9 @@ bool PlushPatternGenerator::getBoundaryOfOpenedMesh(std::vector< std::vector<Hal
 }
 
 /**
- * @brief This function returns a set of rings of halfedges. These rings are separated by given edges.
- * @param loops Result loops will be stored here.
- * @param jointVertices (This parameter should be compute internally) The set of intersection point of m_spanningTree.
+ * @brief This function returns a set of rings of halfedges. These rings are separated by given seams.
+ * @param closed_seams Result loops will be stored here.
+ * @param seams given as separatror.
  */
 void PlushPatternGenerator::get_closed_boundaries_of_seams(std::vector< std::vector<HalfedgeHandle> > *closed_seams,
                                                            std::set<EdgeHandle> *seams) {
@@ -424,7 +440,6 @@ bool PlushPatternGenerator::extract_mesh_with_boundary(TriMesh *new_mesh, FaceHa
         eh_global_seams.insert(m_mesh->edge_handle(heh));
     }
     extract_mesh_with_boundary(new_mesh, root_face, &eh_global_seams);
-    return true;
 }
 /**
  Create a new sub mesh from m_mesh. The new sub mesh is a connected component containing root_face and bounded by given boundary.

@@ -77,12 +77,6 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *bound
             sourceBoundaryVertices.insert(m_mesh->from_vertex_handle(*e_it));
         }
 
-        std::vector<Graph::vertex_descriptor> predecessor_map(num_vertices(multi_source_graph));
-        auto predecessor_pmap = boost::make_iterator_property_map(predecessor_map.begin(), get(boost::vertex_index, multi_source_graph));
-        
-        std::vector<double> distance_map(num_vertices(multi_source_graph));
-        auto distance_pmap = boost::make_iterator_property_map(distance_map.begin(), get(boost::vertex_index, multi_source_graph));
-
         // we solve multi-source shoretest path problem by manually construct a new graph
         // with new additional vertex as starting point and inserting 0-weight edges
         // from starting point to other point on source boundary
@@ -96,6 +90,12 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *bound
             }
         }
 
+        std::vector<Graph::vertex_descriptor> predecessor_map(num_vertices(multi_source_graph));
+        auto predecessor_pmap = boost::make_iterator_property_map(predecessor_map.begin(), get(boost::vertex_index, multi_source_graph));
+        
+        std::vector<double> distance_map(num_vertices(multi_source_graph));
+        auto distance_pmap = boost::make_iterator_property_map(distance_map.begin(), get(boost::vertex_index, multi_source_graph));
+        
         boost::dijkstra_shortest_paths(multi_source_graph, startingV,
                                        boost::predecessor_map(predecessor_pmap)
                                        .distance_map(distance_pmap)
@@ -123,8 +123,11 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *bound
         Graph::vertex_descriptor currentV = minDstV, nextV = predecessor_map[minDstV];
         while (nextV != startingV) {
             assert(std::find(sourceBoundaryVertices.begin(), sourceBoundaryVertices.end(), m_mesh->vertex_handle(currentV)) == sourceBoundaryVertices.end());
+            
+            VertexHandle v_from = get(boost::vertex_owner, multi_source_graph, currentV);
+            VertexHandle v_to = get(boost::vertex_owner, multi_source_graph, nextV);
             HalfedgeHandle heh;
-            bool edgeExist = PlushPatternGenerator::getHalfedge(m_mesh, heh, currentV, nextV);
+            bool edgeExist = PlushPatternGenerator::getHalfedge(m_mesh, heh, v_from, v_to);
             assert(edgeExist);
             
             virtualCut.push_back(heh);

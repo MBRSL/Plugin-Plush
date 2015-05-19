@@ -72,15 +72,15 @@ void Weight::setMatrix(TriMesh *mesh, const vector<Bone> &bones,
 	i = 0;
 	for (FaceIter f_it = mesh->faces_begin(); f_it != mesh->faces_end(); f_it++, i++)
 	{
-        OpenMesh::Vec3d normal = mesh->property(mesh->face_normals_pph(), *f_it);
-        double triArea = sqrt(normal | normal);
-
-        HalfedgeHandle he = mesh->halfedge_handle(*f_it);
+//        OpenMesh::Vec3d normal = mesh->normal(*f_it);
+//        double triArea = sqrt(normal | normal);
+        HalfedgeHandle heh = mesh->halfedge_handle(*f_it);
+        double triArea = mesh->calc_sector_area(heh);
         
 		for (int j = 0; j < 3; j++)
 		{
-			D(mesh->to_vertex_handle(he).idx()) += triArea; // d(i) = area
-			he = mesh->next_halfedge_handle(he);
+			D(mesh->to_vertex_handle(heh).idx()) += triArea; // d(i) = area
+			heh = mesh->next_halfedge_handle(heh);
 		}
 	}
 	// end set D = diagonal matrix, d(i) = 1/area
