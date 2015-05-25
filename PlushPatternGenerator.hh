@@ -232,7 +232,8 @@ private:
                 originalV[count++] = mesh->property(inverseMapping, *cfv_it);
             }
             FaceHandle originalF;
-            assert(getFace(m_mesh, originalF, originalV[0], originalV[1], originalV[2]));
+            bool found = getFace(m_mesh, originalF, originalV[0], originalV[1], originalV[2]);
+            assert(found);
             facesId.push_back(originalF.idx());
         }
         MeshSelection::selectFaces(m_mesh, facesId);
@@ -254,7 +255,8 @@ private:
             VertexHandle originalV1 = mesh->property(inverseMapping, mesh->from_vertex_handle(heh));
             VertexHandle originalV2 = mesh->property(inverseMapping, mesh->to_vertex_handle(heh));
             EdgeHandle original_eh;
-            assert(getEdge(m_mesh, original_eh, originalV1, originalV2));
+            bool found = getEdge(m_mesh, original_eh, originalV1, originalV2);
+            assert(found);
             edgesId.push_back(original_eh.idx());
         }
         MeshSelection::selectEdges(m_mesh, edgesId);
