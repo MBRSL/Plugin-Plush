@@ -257,7 +257,8 @@ EdgeHandle PlushPatternGenerator::get_original_handle(TriMesh *mesh, const EdgeH
         VertexHandle v1 = mesh->property(inverse_mapping, mesh->from_vertex_handle(heh));
         VertexHandle v2 = mesh->property(inverse_mapping, mesh->to_vertex_handle(heh));
         EdgeHandle original_eh;
-        assert(getEdge(m_mesh, original_eh, v1, v2));
+        bool found = getEdge(m_mesh, original_eh, v1, v2);
+        assert(found);
         return original_eh;
     }
 }
@@ -270,7 +271,8 @@ HalfedgeHandle PlushPatternGenerator::get_original_handle(TriMesh *mesh, const H
         VertexHandle v1 = mesh->property(inverse_mapping, mesh->from_vertex_handle(heh));
         VertexHandle v2 = mesh->property(inverse_mapping, mesh->to_vertex_handle(heh));
         HalfedgeHandle original_heh;
-        assert(getHalfedge(m_mesh, original_heh, v1, v2));
+        bool found = getHalfedge(m_mesh, original_heh, v1, v2);
+        assert(found);
         return original_heh;
     }
 }
@@ -285,7 +287,8 @@ FaceHandle PlushPatternGenerator::get_original_handle(TriMesh *mesh, const FaceH
         VertexHandle v2 = mesh->property(inverse_mapping, *cfv_it++);
         VertexHandle v3 = mesh->property(inverse_mapping, *cfv_it++);
         FaceHandle original_fh;
-        assert(getFace(m_mesh, original_fh, v1, v2, v3));
+        bool found = getFace(m_mesh, original_fh, v1, v2, v3);
+        assert(found);
         return original_fh;
     }
 }
