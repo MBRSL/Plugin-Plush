@@ -71,8 +71,11 @@ private:
     std::vector<double> m_innerAngle3D;
     std::vector<double> m_edgeLengths;
     std::vector<HalfedgeHandle> m_boundary3D;
-    std::vector< std::pair<int, int> > m_innerBoundaryStartingPair;
-    std::vector< std::pair<int, int> > m_coincidePair;
+    /// Same as m_coincidentPair except that it only contains pairs of boundary points. No virtual cuts points.
+    /// This is used for calculating angle constraints
+    std::vector< std::pair<int, int> > m_boundaryCoincidentPair;
+    /// Records pairs of coincident points. Including points on virtual cut.
+    std::vector< std::pair<int, int> > m_coincidentPair;
 };
 
 

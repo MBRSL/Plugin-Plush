@@ -172,7 +172,7 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *bound
     
     // Calculating coincide pairs
     // At least the base boundary should be connected
-    m_coincidePair.push_back(std::make_pair(0, m_boundary3D.size()));
+    m_coincidentPair.push_back(std::make_pair(0, m_boundary3D.size()));
     // Other inner boundaries
     std::map<VertexHandle, int> vertexPosition;
     bool cycle = false;
@@ -182,9 +182,9 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *bound
         // If this vertex is visited before, there is a loop. And we need to add it to coincide pairs
         if (vertexPosition.find(v) != vertexPosition.end()) {
             int prevPosition = vertexPosition[v];
-            m_coincidePair.push_back(std::make_pair(prevPosition, position));
+            m_coincidentPair.push_back(std::make_pair(prevPosition, position));
             if (!cycle) {
-                m_innerBoundaryStartingPair.push_back(std::make_pair(prevPosition, position));
+                m_boundaryCoincidentPair.push_back(std::make_pair(prevPosition, position));
             }
             // We need to delete it first before update it.
             vertexPosition.erase(v);
@@ -194,6 +194,8 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *bound
         }
         vertexPosition.emplace(v, position);
     }
+    // There is at least one coincident pair on boundary
+    m_boundaryCoincidentPair.push_back(std::make_pair(0, m_boundary3D.size()));
     
     // Calculate inner angles & edges length for later use.
     int n = m_boundary3D.size();
@@ -216,21 +218,27 @@ bool LPFB_NLP::get_nlp_info(Index& n, Index& m, Index& nnz_jac_g,
     // variables
     n = m_boundary3D.size();
     
-    // constraints
-    m = 1 + + m_innerBoundaryStartingPair.size() + m_coincidePair.size() * 2;
+    // Constraints
+    m = 0;
+    // Angle constraints
+    m += m_boundaryCoincidentPair.size();
+    // Position constraints
+    m += m_coincidentPair.size() * 2;
     
-    // jacobian
-    nnz_jac_g = n;
-    for (size_t innerBoundaryNo = 0; innerBoundaryNo < m_innerBoundaryStartingPair.size(); innerBoundaryNo++) {
-        int startingIdx = m_innerBoundaryStartingPair[innerBoundaryNo].first;
-        int endingIdx = m_innerBoundaryStartingPair[innerBoundaryNo].second;
+    // Jacobian
+    nnz_jac_g = 0;
+    // Angle constraints
+    for (size_t boundary_no = 0; boundary_no < m_boundaryCoincidentPair.size(); boundary_no++) {
+        int startingIdx = m_boundaryCoincidentPair[boundary_no].first;
+        int endingIdx = m_boundaryCoincidentPair[boundary_no].second;
 
-        nnz_jac_g += endingIdx - startingIdx + 1;
+        nnz_jac_g += endingIdx - startingIdx;
     }
-    for (size_t pairNo = 0; pairNo < m_coincidePair.size(); pairNo++) {
-        int endingIdx = m_coincidePair[pairNo].second;
+    // Position constraints
+    for (size_t pairNo = 0; pairNo < m_coincidentPair.size(); pairNo++) {
+        int endingIdx = m_coincidentPair[pairNo].second;
         
-        nnz_jac_g += 2*endingIdx;
+        nnz_jac_g += 2 * endingIdx;
     }
     
     // the hessian is dense
@@ -247,10 +255,9 @@ bool LPFB_NLP::get_bounds_info(Index n, Number* x_l, Number* x_u,
                                 Index m, Number* g_l, Number* g_u)
 {
     // lower/upper bounds
-    // We set the range little wider than [0, 2*M_PI]
     for (Index i = 0; i < n; i++) {
-        x_l[i] = -1 * M_PI;
-        x_u[i] = 3 * M_PI;
+        x_l[i] = 0;
+        x_u[i] = 2 * M_PI;
     }
     
     // All constraints should be 0
@@ -314,27 +321,26 @@ bool LPFB_NLP::eval_g(Index n, const Number* x, bool new_x, Index m, Number* g)
         posY[k+1] = posY[k] + m_edgeLengths[k] * sin(phi_k);
     }
     Index constraintIdx = 0;
-    g[constraintIdx++] = sumAngle;
-
-    for (size_t innerBoundaryNo = 0; innerBoundaryNo < m_innerBoundaryStartingPair.size(); innerBoundaryNo++) {
-        int startingIdx = m_innerBoundaryStartingPair[innerBoundaryNo].first;
-        int endingIdx = m_innerBoundaryStartingPair[innerBoundaryNo].second;
+    
+    // Angle constraints, inner turning angle sums up to 2PI
+    for (size_t boundary_no = 0; boundary_no < m_boundaryCoincidentPair.size(); boundary_no++) {
+        int startingIdx = m_boundaryCoincidentPair[boundary_no].first;
+        int endingIdx = m_boundaryCoincidentPair[boundary_no].second;
         
         double sumInnerAngle = 0;
-        for (int i = startingIdx; i <= endingIdx; i++) {
+        int nInnerAngles = 0;
+        for (int i = startingIdx; i < endingIdx; i++, nInnerAngles++) {
             sumInnerAngle += x[i];
         }
-        int nInnerAngles = endingIdx - startingIdx;
         
-        g[constraintIdx++] = (nInnerAngles + 2) * M_PI - sumInnerAngle;
+        g[constraintIdx++] = (nInnerAngles - 2) * M_PI - sumInnerAngle;
     }
 
-    for (size_t pairNo = 0; pairNo < m_coincidePair.size(); pairNo++) {
-        int startingIdx = m_coincidePair[pairNo].first;
-        int endingIdx = m_coincidePair[pairNo].second;
+    // Position constraints
+    for (size_t pairNo = 0; pairNo < m_coincidentPair.size(); pairNo++) {
+        int startingIdx = m_coincidentPair[pairNo].first;
+        int endingIdx = m_coincidentPair[pairNo].second;
         
-        double v1 = posX[endingIdx];
-        double v2 = posX[startingIdx];
         g[constraintIdx++] = posX[endingIdx] - posX[startingIdx];
         g[constraintIdx++] = posY[endingIdx] - posY[startingIdx];
     }
@@ -353,43 +359,33 @@ bool LPFB_NLP::eval_jac_g(Index n, const Number* x, bool new_x,
         // return the structure of the jacobian
         // this particular jacobian is dense
         
-        // First constraints
-        // N variables
+        // Angle constraints
         Index idx = 0;
         Index constraintIdx = 0;
-        for (Index j = 0; j < n; j++) {
-            iRow[idx] = constraintIdx;
-            jCol[idx] = j;
-            idx++;
-        }
-        constraintIdx++;
-        
-        for (size_t innerBoundaryNo = 0; innerBoundaryNo < m_innerBoundaryStartingPair.size(); innerBoundaryNo++) {
-            int startingIdx = m_innerBoundaryStartingPair[innerBoundaryNo].first;
-            int endingIdx = m_innerBoundaryStartingPair[innerBoundaryNo].second;
 
-            for (Index j = startingIdx; j <= endingIdx; j++) {
+        for (size_t boundary_no = 0; boundary_no < m_boundaryCoincidentPair.size(); boundary_no++, constraintIdx++) {
+            int startingIdx = m_boundaryCoincidentPair[boundary_no].first;
+            int endingIdx = m_boundaryCoincidentPair[boundary_no].second;
+
+            for (Index j = startingIdx; j < endingIdx; j++, idx++) {
                 iRow[idx] = constraintIdx;
                 jCol[idx] = j;
-                idx++;
             }
-            constraintIdx++;
         }
-            
-        for (size_t pairNo = 0; pairNo < m_coincidePair.size(); pairNo++) {
-            Index endingIdx = m_coincidePair[pairNo].second;
-            for (Index j = 0; j < endingIdx; j++) {
+        
+        // Position constraints
+        for (size_t pairNo = 0; pairNo < m_coincidentPair.size(); pairNo++) {
+            Index endingIdx = m_coincidentPair[pairNo].second;
+            for (Index j = 0; j < endingIdx; j++, idx++) {
+                // X pos
                 iRow[idx] = constraintIdx;
                 jCol[idx] = j;
-                idx++;
+                // Y pos
+                iRow[idx+endingIdx] = constraintIdx+1;
+                jCol[idx+endingIdx] = j;
             }
-            constraintIdx++;
-            for (Index j = 0; j < endingIdx; j++) {
-                iRow[idx] = constraintIdx;
-                jCol[idx] = j;
-                idx++;
-            }
-            constraintIdx++;
+            constraintIdx += 2;
+            idx += endingIdx;
         }
         
         assert(idx == nele_jac);
@@ -407,41 +403,33 @@ bool LPFB_NLP::eval_jac_g(Index n, const Number* x, bool new_x,
             dPosY[k+1] = dPosY[k] + m_edgeLengths[k] * -cos(phi_k);
         }
 
-        // First constaints, inner turning angle sums up to 2PI
-        for (Index k = 0; k < n; k++) {
-            values[k] = -1;
-        }
-        Index idx = n;
-
+        // Angle constraints
+        Index idx = 0;
         
-        for (size_t innerBoundaryNo = 0; innerBoundaryNo < m_innerBoundaryStartingPair.size(); innerBoundaryNo++) {
-            int startingIdx = m_innerBoundaryStartingPair[innerBoundaryNo].first;
-            int endingIdx = m_innerBoundaryStartingPair[innerBoundaryNo].second;
+        for (size_t boundary_no = 0; boundary_no < m_boundaryCoincidentPair.size(); boundary_no++) {
+            int startingIdx = m_boundaryCoincidentPair[boundary_no].first;
+            int endingIdx = m_boundaryCoincidentPair[boundary_no].second;
             
-            for (Index j = startingIdx; j <= endingIdx; j++) {
+            for (Index j = startingIdx; j < endingIdx; j++) {
                 values[idx++] = -1;
             }
         }
 
-        // 2nd & 3rd constraints, closed loop position
-        for (size_t pairNo = 0; pairNo < m_coincidePair.size(); pairNo++) {
-            Index startingIdx = m_coincidePair[pairNo].first;
-            Index endingIdx = m_coincidePair[pairNo].second;
+        // Position constraints
+        for (size_t pairNo = 0; pairNo < m_coincidentPair.size(); pairNo++) {
+            Index startingIdx = m_coincidentPair[pairNo].first;
+            Index endingIdx = m_coincidentPair[pairNo].second;
 
             for (Index k = 0; k < endingIdx; k++, idx++) {
                 if (k < startingIdx) {
                     values[idx] = dPosX[endingIdx] - dPosX[startingIdx];
+                    values[idx+endingIdx] = dPosY[endingIdx] - dPosY[startingIdx];
                 } else {
                     values[idx] = dPosX[endingIdx] - dPosX[k];
+                    values[idx+endingIdx] = dPosY[endingIdx] - dPosY[k];
                 }
             }
-            for (Index k = 0; k < endingIdx; k++, idx++) {
-                if (k < startingIdx) {
-                    values[idx] = dPosY[endingIdx] - dPosY[startingIdx];
-                } else {
-                    values[idx] = dPosY[endingIdx] - dPosY[k];
-                }
-            }
+            idx += endingIdx;
         }
         delete[] dPosX;
         delete[] dPosY;
@@ -560,4 +548,8 @@ void LPFB_NLP::finalize_solution(SolverReturn status,
             m_boundaryPosition->emplace(v, OpenMesh::Vec3d(posX[k], posY[k], 0));
         }
     }
+    
+    delete[] phi_k;
+    delete[] posX;
+    delete[] posY;
 }
