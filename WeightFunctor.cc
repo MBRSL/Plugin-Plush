@@ -44,16 +44,20 @@ double WeightFunctor::textureWeight(HalfedgeHandle heh) const {
     }
 }
 
-double WeightFunctor::curvatureWeight(VertexHandle v1, VertexHandle v2) const {
-    double curvature1 = m_mesh->property(PlushPatternGenerator::maxCurvatureHandle, v1);
-    double curvature2 = m_mesh->property(PlushPatternGenerator::maxCurvatureHandle, v2);
-
-    // weight using curvature
-    // encourage path with +1 curvature, not 0
-    double weight = 1 / (1 + (abs(curvature1) + abs(curvature2)));
-    assert(0 <= weight && weight <= 1);
-    
-    return weight;
+//double WeightFunctor::curvatureWeight(VertexHandle v1, VertexHandle v2) const {
+//    double curvature1 = m_mesh->property(PlushPatternGenerator::maxCurvatureHandle, v1);
+//    double curvature2 = m_mesh->property(PlushPatternGenerator::maxCurvatureHandle, v2);
+//
+//    // weight using curvature
+//    // encourage path with +1 curvature, not 0
+//    double weight = 1 / (1 + (abs(curvature1) + abs(curvature2)));
+//    assert(0 <= weight && weight <= 1);
+//    
+//    return weight;
+//}
+double WeightFunctor::curvatureWeight(EdgeHandle eh) const {
+    double angle = m_mesh->calc_dihedral_angle(eh);
+    return 1 / (1 + abs(angle));
 }
 
 /// This measures the direction similarity between edge and corresponding bones
@@ -153,7 +157,8 @@ double WeightFunctor::operator()(HalfedgeHandle heh) const {
     } else {
         edgeWeight *= pow(distanceWeight(p1, p2), m_distanceCoefficient);
 //        edgeWeight *= pow(textureWeight(heh), m_textureCoefficient);
-        edgeWeight *= pow(curvatureWeight(v1, v2), m_curvatureCoefficient);
+//        edgeWeight *= pow(curvatureWeight(v1, v2), m_curvatureCoefficient);
+        edgeWeight *= pow(curvatureWeight(eh), m_curvatureCoefficient);
         edgeWeight *= pow(skeletonWeight(v1, v2, p1, p2), m_skeletonCoefficient);
         
         m_mesh->property(PlushPatternGenerator::edgeWeightHandle, eh) = edgeWeight;

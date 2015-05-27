@@ -21,7 +21,8 @@ private:
     double distanceWeight(TriMesh::Point p1, TriMesh::Point p2) const;
     double textureWeight(HalfedgeHandle heh) const;
     
-    double curvatureWeight(VertexHandle v1, VertexHandle v2) const;
+//    double curvatureWeight(VertexHandle v1, VertexHandle v2) const;
+    double curvatureWeight(EdgeHandle eh) const;
     
     double skeletonWeight(VertexHandle v1,
                           VertexHandle v2,
