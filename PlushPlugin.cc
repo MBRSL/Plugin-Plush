@@ -310,17 +310,7 @@ void PlushPlugin::calcCurvatureButtonClicked() {
         return;
     }
     
-    m_currentJobId = "calcCurvature";
-    OpenFlipperThread *thread = new OpenFlipperThread(m_currentJobId);
-    connect(thread, SIGNAL(finished(QString)), this, SIGNAL(finishJob(QString)));
-    connect(thread, SIGNAL(function(QString)), this, SLOT(calcCurvatureThread()), Qt::DirectConnection);
-    
-    // Custom handler to set m_currentJobId to "" after finishing job. Also updating screen.
-    connect(thread, SIGNAL(finished(QString)), this, SLOT(finishedJobHandler()));
-    
-    emit startJob(m_currentJobId, "calculate curvature of whole mesh", 0, 100, true);
-    thread->start();
-    thread->startProcessing();
+    m_patternGenerator->calcCurvature();
 }
 
 void PlushPlugin::calcGeodesicButtonClicked() {
@@ -482,7 +472,8 @@ void PlushPlugin::vis_seam_segments_button_clicked() {
     m_triMeshObj->materialNode()->set_line_width(3);
     
     std::vector< std::vector<HalfedgeHandle> > heh_segments;
-    m_patternGenerator->get_segments_from_seams(heh_segments);
+    std::set<EdgeHandle> *seams = m_patternGenerator->getSeams();
+    m_patternGenerator->get_segments_from_seams(heh_segments, seams);
     
     MeshSelection::clearVertexSelection(mesh);
     MeshSelection::clearEdgeSelection(mesh);
@@ -764,15 +755,6 @@ void PlushPlugin::calcSelectionButtonClicked() {
     }
     
     calcSelection(m_triMeshObj->mesh());
-}
-
-void PlushPlugin::calcCurvatureThread() {
-    if (!checkIfGeneratorExist()) {
-        return;
-    }
-    
-    m_patternGenerator->calcCurvature();
-    emit log(LOGINFO, "Curvature calculation done.");
 }
 
 void PlushPlugin::calcGeodesicThread() {

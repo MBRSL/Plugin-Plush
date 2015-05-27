@@ -183,9 +183,9 @@ LPFB_NLP::LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *bound
         if (vertexPosition.find(v) != vertexPosition.end()) {
             int prevPosition = vertexPosition[v];
             m_coincidentPair.push_back(std::make_pair(prevPosition, position));
-            if (!cycle) {
-                m_boundaryCoincidentPair.push_back(std::make_pair(prevPosition, position));
-            }
+//            if (!cycle) {
+//                m_boundaryCoincidentPair.push_back(std::make_pair(prevPosition, position));
+//            }
             // We need to delete it first before update it.
             vertexPosition.erase(v);
             cycle = true;

@@ -133,7 +133,6 @@ private slots:
     void vis_skeleton_button_clicked();
 
     // Starter function for thread
-    void calcCurvatureThread();
     void calcGeodesicThread();
     void calcFlattenedGraphThread();
     void calcMergeSementThread();

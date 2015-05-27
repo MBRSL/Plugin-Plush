@@ -6,6 +6,40 @@
 #include <boost/graph/depth_first_search.hpp>
 
 #include <queue>
+#include <unordered_set>
+
+//bool PlushPatternGenerator::is_loop(std::set<EdgeHandle> &boundary,
+//                                    std::set<EdgeHandle> &seams) {
+//    HalfedgeHandle start_heh = m_mesh->halfedge_handle(*boundary.begin(), 0);
+//    VertexHandle start_v = m_mesh->from_vertex_handle(start_heh);
+//    
+//    std::set<EdgeHandle> visited;
+//    std::queue<HalfedgeHandle> queue;
+//    queue.push(start_heh);
+//    
+//    do {
+//        HalfedgeHandle heh = queue.front();
+//        queue.pop();
+//        
+//        visited.insert(m_mesh->edge_handle(heh));
+//        VertexHandle v = m_mesh->to_vertex_handle(heh);
+//        // Return true if it meet the starting vertex
+//        if (v == start_v) {
+//            return true;
+//        }
+//        
+//        for (HalfedgeHandle neighbor_heh : m_mesh->voh_range(v)) {
+//            EdgeHandle neighbor_eh = m_mesh->edge_handle(neighbor_heh);
+//            if (seams.find(neighbor_eh) != seams.end()
+//            &&  visited.find(neighbor_eh) == visited.end()) {
+//                visited.insert(neighbor_eh);
+//                queue.push(neighbor_heh);
+//            }
+//        }
+//    } while (!queue.empty());
+//    
+//    return false;
+//}
 
 void PlushPatternGenerator::get_intersection_points(std::set<EdgeHandle> *seams,
                                                     std::set<VertexHandle> &intersection_points) {
@@ -30,9 +64,9 @@ void PlushPatternGenerator::get_intersection_points(std::set<EdgeHandle> *seams,
     }
 }
 
-void PlushPatternGenerator::get_segments_from_seams(std::vector< std::vector<EdgeHandle> > &segments) {
+void PlushPatternGenerator::get_segments_from_seams(std::vector< std::vector<EdgeHandle> > &segments, std::set<EdgeHandle> *seams) {
     std::vector< std::vector< HalfedgeHandle> > heh_segments;
-    get_segments_from_seams(heh_segments);
+    get_segments_from_seams(heh_segments, seams);
     for (auto heh_segment : heh_segments) {
         std::vector<EdgeHandle> segment;
         for (HalfedgeHandle heh : heh_segment) {
@@ -42,47 +76,64 @@ void PlushPatternGenerator::get_segments_from_seams(std::vector< std::vector<Edg
     }
 }
 
-void PlushPatternGenerator::get_segments_from_seams(std::vector< std::vector<HalfedgeHandle> > &segments) {
-    std::set<EdgeHandle> *seams = getSeams();
+void PlushPatternGenerator::get_segments_from_seams(std::vector< std::vector<HalfedgeHandle> > &segments, std::set<EdgeHandle> *seams) {
     std::set<VertexHandle> intersection_points;
     get_intersection_points(seams, intersection_points);
-    get_segments_from_seams(segments, intersection_points);
+    get_segments_from_seams(segments, intersection_points, seams);
 }
 /**
  Extract oriented path segments from seams. segments are divided by seam points with valance != 2.
+ The unused (isolated) intersection_points will be removed.
  @param <#parameter#>
  @return <#retval#>
  @retval <#meaning#>
  */
 void PlushPatternGenerator::get_segments_from_seams(std::vector< std::vector<HalfedgeHandle> > &segments,
-                                                    std::set<VertexHandle> intersection_points) {
-    std::set<EdgeHandle> *seams = getSeams();
-    
+                                                    std::set<VertexHandle> intersection_points,
+                                                    std::set<EdgeHandle> *seams) {
     // Use DFS to find segments
-    std::set<EdgeHandle> visited;
+    auto hasher = [](EdgeHandle eh) -> int {
+        return eh.idx();
+    };
+    std::unordered_set<EdgeHandle, decltype(hasher)> visited(0, hasher);
+
     
-    for (VertexHandle start_v : intersection_points) {
+    for (auto start_v_it = intersection_points.begin(); start_v_it != intersection_points.end(); start_v_it++) {
         // Loop until no new segment for this intersection point
         std::vector<HalfedgeHandle> segment;
         do {
             segment.clear();
-            VertexHandle v = start_v;
-            do {
-                for (const HalfedgeHandle cvoh : m_mesh->voh_range(v)) {
-                    EdgeHandle cve = m_mesh->edge_handle(cvoh);
-                    VertexHandle neighbor_v = m_mesh->to_vertex_handle(cvoh);
-                    if (seams->find(cve) != seams->end()
-                        &&  visited.find(cve) == visited.end()) {
-                        visited.insert(cve);
-                        
-                        segment.push_back(cvoh);
-                        
-                        v = neighbor_v;
-                        break;
-                    }
+            VertexHandle v = *start_v_it;
+            bool is_isolated_point = true;
+            for (const HalfedgeHandle cvoh : m_mesh->voh_range(v)) {
+                EdgeHandle cve = m_mesh->edge_handle(cvoh);
+                if (seams->find(cve) != seams->end()) {
+                    is_isolated_point = false;
+                    break;
                 }
-            } while (intersection_points.find(v) == intersection_points.end());
-            
+            }
+            // Remove isolated points
+            if (is_isolated_point) {
+                start_v_it = intersection_points.erase(start_v_it);
+                continue;
+            } else {
+                do {
+                    for (const HalfedgeHandle cvoh : m_mesh->voh_range(v)) {
+                        EdgeHandle cve = m_mesh->edge_handle(cvoh);
+                        if (seams->find(cve) != seams->end()
+                            &&  visited.find(cve) == visited.end()) {
+                            visited.insert(cve);
+                            
+                            segment.push_back(cvoh);
+                            
+                            VertexHandle neighbor_v = m_mesh->to_vertex_handle(cvoh);
+                            v = neighbor_v;
+                            is_isolated_point = false;
+                            break;
+                        }
+                    }
+                } while (intersection_points.find(v) == intersection_points.end());
+            }
             // When reaching intersection point, create a new segment
             if (!segment.empty()) {
                 segments.push_back(segment);
@@ -90,7 +141,7 @@ void PlushPatternGenerator::get_segments_from_seams(std::vector< std::vector<Hal
         } while (!segment.empty());
     }
     
-    // For the rest of the seams, they are indivisual loops.
+    // For the rest of the seams, they are individual loops.
     for (EdgeHandle eh : *seams) {
         std::vector<HalfedgeHandle> segment;
         
@@ -121,155 +172,88 @@ void PlushPatternGenerator::get_segments_from_seams(std::vector< std::vector<Hal
     // Check if result is valid
     assert(visited.size() == seams->size());
     
+#ifndef NDEBUG
     std::set<EdgeHandle> duplication_test;
     for (auto segment : segments) {
         for (HalfedgeHandle heh : segment) {
             EdgeHandle eh = m_mesh->edge_handle(heh);
-            if (duplication_test.find(eh) == visited.end()) {
+            if (duplication_test.find(eh) == duplication_test.end()) {
                 duplication_test.insert(eh);
             } else {
                 assert("Duplicated edge handle");
             }
         }
     }
+#endif
 }
 
-/// Find the two adjacent circular boundary along segment
+/**
+ Find the closed boundary containing root_heh.
+ @param root_heh The halfedge for identifying which closed boundary we need.
+ @param seams The set containing desired boundary.
+ @param boundary The resulting boundary will be stored here.
+ @return <#retval#>
+ @retval <#meaning#>
+ */
 bool PlushPatternGenerator::get_adjacent_boundary(HalfedgeHandle root_heh,
                                                   std::set<EdgeHandle> &seams,
-                                                  std::vector<HalfedgeHandle> &boundaries) {
-    std::queue<HalfedgeHandle> queue;
-    std::set<HalfedgeHandle> visited;
+                                                  std::set<HalfedgeHandle> &boundary) {
+    auto hasher = [](FaceHandle f) -> int {
+        return f.idx();
+    };
+    std::unordered_set<FaceHandle, decltype(hasher)> visited(0, hasher);
+    std::queue<FaceHandle> queue;
+    FaceHandle ff = m_mesh->face_handle(root_heh);
+    queue.push(m_mesh->face_handle(root_heh));
     
-    queue.push(root_heh);
-    visited.insert(root_heh);
-    
+    boundary.clear();
     while (!queue.empty()) {
-        HalfedgeHandle heh = queue.front();
+        FaceHandle current_f = queue.front();
         queue.pop();
+        visited.insert(current_f);
         
-        VertexHandle v = m_mesh->to_vertex_handle(heh);
-        HalfedgeHandle current_heh = heh;
-        do {
-            current_heh = m_mesh->opposite_halfedge_handle(
-                                                           m_mesh->next_halfedge_handle(current_heh));
-        } while (current_heh != heh && seams.find(m_mesh->edge_handle(current_heh)) == seams.end());
-        
-        // It seems that this is the end of an one-way seam. Don't worry, we'll continue by reversing direction
-        if (current_heh == heh) { }
-        
-        current_heh = m_mesh->opposite_halfedge_handle(current_heh);
-        if (visited.find(current_heh) == visited.end()) {
-            queue.push(current_heh);
-            visited.insert(current_heh);
+        for (const HalfedgeHandle cfh : m_mesh->fh_range(current_f)) {
+            EdgeHandle eh = m_mesh->edge_handle(cfh);
+            FaceHandle neighbor_f = m_mesh->opposite_face_handle(cfh);
+            if (seams.find(eh) != seams.end()) {
+                boundary.insert(cfh);
+            } else if (neighbor_f.is_valid()
+                    && visited.find(neighbor_f) == visited.end()) {
+                visited.insert(neighbor_f);
+                queue.push(neighbor_f);
+            }
         }
     }
     
-    if (visited.empty()) {
-        return false;
-    }
-    //    for (HalfedgeHandle heh : visited) {
-    //        VertexHandle v = m_mesh->from_vertex_handle(heh);
-    //        int valance = 0;
-    //        for (EdgeHandle cve : m_mesh->ve_range(v)) {
-    //            HalfedgeHandle cve_heh1 = m_mesh->halfedge_handle(cve, 0);
-    //            HalfedgeHandle cve_heh2 = m_mesh->halfedge_handle(cve, 1);
-    //            if (visited.find(cve_heh1) != visited.end()
-    //                ||  visited.find(cve_heh2) != visited.end()) {
-    //                valance++;
-    //            }
-    //        }
-    //        if (valance != 2) {
-    //            return false;
-    //        }
-    //    }
-    
-    // Forming a oriented vector of joint boundary
-    HalfedgeHandle starting_heh = *visited.begin();
-    HalfedgeHandle current_heh = starting_heh;
-    do {
-        boundaries.push_back(current_heh);
-        HalfedgeHandle next_heh = current_heh;
-        do {
-            next_heh = m_mesh->opposite_halfedge_handle(
-                                                        m_mesh->next_halfedge_handle(next_heh));
-        } while (next_heh != current_heh
-                 && visited.find(m_mesh->opposite_halfedge_handle(next_heh)) == visited.end());
-        
-        EdgeHandle eh = m_mesh->edge_handle(next_heh);
-        current_heh = m_mesh->opposite_halfedge_handle(next_heh);
-    } while (current_heh != starting_heh);
-    
-    return true;
+    return boundary.empty();
 }
 
-bool PlushPatternGenerator::get_joint_boundary(std::vector<HalfedgeHandle> &boundaries1,
-                                               std::vector<HalfedgeHandle> &boundaries2,
-                                               std::set<EdgeHandle> &seams,
-                                               std::vector<HalfedgeHandle> &joint_boundary) {
-    std::set<HalfedgeHandle> visited;
-    
-    visited.insert(boundaries1.begin(), boundaries1.end());
-    visited.insert(boundaries2.begin(), boundaries2.end());
-    
-    // Eliminate adjacent edges
-    bool changed = true;
-    while (changed) {
-        changed = false;
-        for (HalfedgeHandle heh : visited) {
-            if (visited.find(m_mesh->opposite_halfedge_handle(heh)) != visited.end()) {
-                visited.erase(heh);
-                visited.erase(m_mesh->opposite_halfedge_handle(heh));
-                changed = true;
-                break;
-            }
-        }
+bool PlushPatternGenerator::get_joint_boundary(std::set<HalfedgeHandle> &boundary1,
+                                               std::set<HalfedgeHandle> &boundary2,
+                                               std::vector<HalfedgeHandle> &joint_seam_segment,
+                                               std::set<HalfedgeHandle> &joint_boundary,
+                                               std::set<EdgeHandle> &seams) {
+    // Eliminate joint edges temporarily
+    for (HalfedgeHandle heh : joint_seam_segment) {
+        auto found_it = seams.find(m_mesh->edge_handle(heh));
+        assert(found_it != seams.end());
+        seams.erase(found_it);
     }
     
-    // Check if joint boundary forms a ring
-    if (visited.empty()) {
-        return false;
+    bool result = get_adjacent_boundary(*joint_seam_segment.begin(), seams, joint_boundary);
+
+    // Then restore them back after calculation
+    for (HalfedgeHandle heh : joint_seam_segment) {
+        seams.insert(m_mesh->edge_handle(heh));
     }
-    for (HalfedgeHandle heh : visited) {
-        VertexHandle v = m_mesh->from_vertex_handle(heh);
-        int valance = 0;
-        for (EdgeHandle cve : m_mesh->ve_range(v)) {
-            HalfedgeHandle cve_heh1 = m_mesh->halfedge_handle(cve, 0);
-            HalfedgeHandle cve_heh2 = m_mesh->halfedge_handle(cve, 1);
-            if (visited.find(cve_heh1) != visited.end()
-                ||  visited.find(cve_heh2) != visited.end()) {
-                valance++;
-            }
-        }
-        if (valance != 2) {
-            return false;
-        }
-    }
-    
-    // Forming a oriented vector of joint boundary
-    HalfedgeHandle starting_heh = *visited.begin();
-    HalfedgeHandle current_heh = starting_heh;
-    do {
-        joint_boundary.push_back(current_heh);
-        HalfedgeHandle next_heh = current_heh;
-        do {
-            next_heh = m_mesh->opposite_halfedge_handle(
-                                                        m_mesh->next_halfedge_handle(next_heh));
-        } while (next_heh != current_heh
-                 && visited.find(m_mesh->opposite_halfedge_handle(next_heh)) == visited.end());
-        
-        EdgeHandle eh = m_mesh->edge_handle(next_heh);
-        current_heh = m_mesh->opposite_halfedge_handle(next_heh);
-    } while (current_heh != starting_heh);
-    
-    return true;
+    return result;
 }
 
 void PlushPatternGenerator::optimize_patches(double threshold, bool step) {
     isJobCanceled = false;
     
-    std::map< std::vector<HalfedgeHandle>, double > &boundary_distortion = m_mesh->property(joint_boundary_distortion_handle);
-    std::map< std::vector<HalfedgeHandle>, double > &boundary_area = m_mesh->property(joint_boundary_area_handle);
+    std::map< std::set<HalfedgeHandle>, double > &boundary_distortion = m_mesh->property(joint_boundary_distortion_handle);
+    std::map< std::set<HalfedgeHandle>, double > &boundary_area = m_mesh->property(joint_boundary_area_handle);
     
     VertexHandle dummy;
     WeightFunctor weightFunctor(m_mesh, dummy, NULL,
@@ -282,13 +266,18 @@ void PlushPatternGenerator::optimize_patches(double threshold, bool step) {
     
     std::set<EdgeHandle> *seams = getSeams();
     
-    int removed_count = 0;
+    std::set<VertexHandle> &intersection_points = m_mesh->property(intersection_points_handle);
+    if (intersection_points.empty()) {
+        get_intersection_points(seams, intersection_points);
+    }
+    
     bool cant_be_merged_anymore = false;
     while (!cant_be_merged_anymore) {
         cant_be_merged_anymore = true;
         
         std::vector< std::vector<HalfedgeHandle> > heh_segments;
-        get_segments_from_seams(heh_segments);
+//        get_segments_from_seams(heh_segments, seams);
+        get_segments_from_seams(heh_segments, intersection_points, seams);
         
         // Sort from high to low
         typedef std::pair<std::vector<HalfedgeHandle>, double> Segment_pair;
@@ -325,114 +314,119 @@ void PlushPatternGenerator::optimize_patches(double threshold, bool step) {
             sorted_segments.pop();
             
             bool can_be_merge = true;
-            double A = 0, L2_M = 0;
-            
-            std::vector<HalfedgeHandle> boundaries[3];
-            // First two boundaries are the left & right boundary.
+//            double A = 0, L2_M = 0;
+            double max_area_diff[3];
+            double sum_area[3];
+            std::set<HalfedgeHandle> boundaries[3];
             get_adjacent_boundary(*segment.begin(), *seams, boundaries[0]);
             get_adjacent_boundary(m_mesh->opposite_halfedge_handle(*segment.begin()), *seams, boundaries[1]);
             
             // The third one is the joint boundary of the first two.
-            bool is_valid = get_joint_boundary(boundaries[0], boundaries[1], *seams, boundaries[2]);
-            
-            // It's possible that after merging, some segment becomes "isolated" and will not form a valid joint boundary
-            // In such case, just discard this segment
-            double max_area_diff[3];
-            double sum_area[3];
-            if (!is_valid) {
-                can_be_merge = true;
-            } else {
-                for (int i = 0; i < 3; i++) {
-                    if (boundary_distortion.find(boundaries[i]) == boundary_distortion.end()) {
-                        TriMesh adj_submesh;
-                        extract_mesh_with_boundary(&adj_submesh, m_mesh->face_handle(*boundaries[i].begin()), &boundaries[i]);
-                        std::map<VertexHandle, OpenMesh::Vec3d> boundaryPosition;
-                        calcLPFB(&adj_submesh, &boundaryPosition);
-                        calcInteriorPoints(&adj_submesh, &boundaryPosition);
-                        calcDistortion(adj_submesh);
-                        
-                        max_area_diff[i] = std::numeric_limits<double>::min();
-                        sum_area[i] = 0;
-                        for (FaceHandle f : adj_submesh.faces()) {
-                            sum_area[i] += adj_submesh.calc_sector_area(adj_submesh.halfedge_handle(f));
-                            
-                            FaceHandle original_f = get_original_handle(&adj_submesh, f);
-                            max_area_diff[i] = max(max_area_diff[i], abs(m_mesh->property(distortionFHandle, original_f)));
-                        }
-                        boundary_distortion[boundaries[i]] = max_area_diff[i];
-                        boundary_area[boundaries[i]] = sum_area[i];
-                    } else {
-                        max_area_diff[i] = boundary_distortion[boundaries[i]];
-                        sum_area[i] = boundary_area[boundaries[i]];
-                    }
-                }
-                //                    double sum_area_3D = 0;
-                //                    double sum_area_2D = 0;
-                //                    double sum_L2_Ti_mul_A_prime_Ti = 0;
-                //                    auto inverse_mapping = getInverseMappingHandle(&merged_mesh);
-                //                    for (FaceHandle f : merged_mesh.faces()) {
-                //                        FaceHandle original_f = get_original_handle(&merged_mesh, f);
-                //                        double area_3D = m_mesh->calc_sector_area(m_mesh->halfedge_handle(original_f));
-                //                        sum_area_3D += area_3D;
-                //                        double area_2D = merged_mesh.calc_sector_area(merged_mesh.halfedge_handle(f));
-                //                        sum_area_2D += area_2D;
-                //
-                //                        // Texture stretch from
-                //                        // P.V. Sander, J. Snyder, S.J. Gortler, and H. Hoppe,
-                //                        // “Texture Mapping Progressive Meshes,” Proc. ACM SIGGRAPH ’01, pp. 409-416, 2001
-                //                        TriMesh::ConstFaceVertexIter cfv_it = merged_mesh.cfv_iter(f);
-                //                        TriMesh::Point p1 = merged_mesh.point(*cfv_it);
-                //                        TriMesh::Point q1 = m_mesh->point(merged_mesh.property(inverse_mapping, *cfv_it++));
-                //                        TriMesh::Point p2 = merged_mesh.point(*cfv_it);
-                //                        TriMesh::Point q2 = m_mesh->point(merged_mesh.property(inverse_mapping, *cfv_it++));
-                //                        TriMesh::Point p3 = merged_mesh.point(*cfv_it);
-                //                        TriMesh::Point q3 = m_mesh->point(merged_mesh.property(inverse_mapping, *cfv_it++));
-                //
-                //                        OpenMesh::Vec3d Ss = (q1 * (p2[1] - p3[1]) + q2 * (p3[1] - p1[1]) + q3 * (p1[1] - p2[1]))/ (2 * area_2D);
-                //                        OpenMesh::Vec3d St = (q1 * (p3[0] - p2[0]) + q2 * (p1[0] - p3[0]) + q3 * (p2[0] - p1[0]))/ (2 * area_2D);
-                //                        double a = Ss | Ss;
-                //                        double c = St | St;
-                //                        double L2_Ti = sqrt((a + c)/2);
-                //                        sum_L2_Ti_mul_A_prime_Ti += L2_Ti * L2_Ti * area_3D;
-                //                    }
-                //                    L2_M = sqrt(sum_L2_Ti_mul_A_prime_Ti/sum_area_3D);
-                //                    A = abs(sum_area_2D - sum_area_3D)/sum_area_3D;
+            get_joint_boundary(boundaries[0], boundaries[1], segment, boundaries[2], *seams);
+
+            for (int i = 0; i < 3; i++) {
+                if (boundary_distortion.find(boundaries[i]) == boundary_distortion.end()) {
+                    TriMesh submesh;
+                    extract_mesh_with_boundary(&submesh, m_mesh->face_handle(*boundaries[i].begin()), &boundaries[i]);
+                    std::map<VertexHandle, OpenMesh::Vec3d> boundaryPosition;
+                    calcLPFB(&submesh, &boundaryPosition);
+                    calcInteriorPoints(&submesh, &boundaryPosition);
+                    calcDistortion(submesh);
                 
-                // Now we should have the distortion of these boundary
-                // The joint boundary is not developable if it satisfied all of the followings:
-                // 1. max_area_diff greater than threshold
-                // 2. The distortion doesn't increase too much (This usually happens when merging large patch with tiny patch)
-                if (max_area_diff[2] > threshold) {
-                    if (min(sum_area[0], sum_area[1])/max(sum_area[0], sum_area[1]) < 0.01) {
-                        can_be_merge = true;
-                        //                        for (HalfedgeHandle heh : segment) {
-                        //                            m_mesh->status(heh).set_selected(true);
-                        //                        }
-                    } else {
-                        can_be_merge = false;
+                    max_area_diff[i] = std::numeric_limits<double>::min();
+                    sum_area[i] = 0;
+                    for (FaceHandle f : submesh.faces()) {
+                        sum_area[i] += submesh.calc_sector_area(submesh.halfedge_handle(f));
+                        
+                        FaceHandle original_f = get_original_handle(&submesh, f);
+                        double distortion = m_mesh->property(distortionFHandle, original_f);
+                        max_area_diff[i] = max(max_area_diff[i], abs(distortion));
                     }
+                    boundary_distortion[boundaries[i]] = max_area_diff[i];
+                    boundary_area[boundaries[i]] = sum_area[i];
+                } else {
+                    max_area_diff[i] = boundary_distortion[boundaries[i]];
+                    sum_area[i] = boundary_area[boundaries[i]];
+                }
+            }
+            //                    double sum_area_3D = 0;
+            //                    double sum_area_2D = 0;
+            //                    double sum_L2_Ti_mul_A_prime_Ti = 0;
+            //                    auto inverse_mapping = getInverseMappingHandle(&merged_mesh);
+            //                    for (FaceHandle f : merged_mesh.faces()) {
+            //                        FaceHandle original_f = get_original_handle(&merged_mesh, f);
+            //                        double area_3D = m_mesh->calc_sector_area(m_mesh->halfedge_handle(original_f));
+            //                        sum_area_3D += area_3D;
+            //                        double area_2D = merged_mesh.calc_sector_area(merged_mesh.halfedge_handle(f));
+            //                        sum_area_2D += area_2D;
+            //
+            //                        // Texture stretch from
+            //                        // P.V. Sander, J. Snyder, S.J. Gortler, and H. Hoppe,
+            //                        // “Texture Mapping Progressive Meshes,” Proc. ACM SIGGRAPH ’01, pp. 409-416, 2001
+            //                        TriMesh::ConstFaceVertexIter cfv_it = merged_mesh.cfv_iter(f);
+            //                        TriMesh::Point p1 = merged_mesh.point(*cfv_it);
+            //                        TriMesh::Point q1 = m_mesh->point(merged_mesh.property(inverse_mapping, *cfv_it++));
+            //                        TriMesh::Point p2 = merged_mesh.point(*cfv_it);
+            //                        TriMesh::Point q2 = m_mesh->point(merged_mesh.property(inverse_mapping, *cfv_it++));
+            //                        TriMesh::Point p3 = merged_mesh.point(*cfv_it);
+            //                        TriMesh::Point q3 = m_mesh->point(merged_mesh.property(inverse_mapping, *cfv_it++));
+            //
+            //                        OpenMesh::Vec3d Ss = (q1 * (p2[1] - p3[1]) + q2 * (p3[1] - p1[1]) + q3 * (p1[1] - p2[1]))/ (2 * area_2D);
+            //                        OpenMesh::Vec3d St = (q1 * (p3[0] - p2[0]) + q2 * (p1[0] - p3[0]) + q3 * (p2[0] - p1[0]))/ (2 * area_2D);
+            //                        double a = Ss | Ss;
+            //                        double c = St | St;
+            //                        double L2_Ti = sqrt((a + c)/2);
+            //                        sum_L2_Ti_mul_A_prime_Ti += L2_Ti * L2_Ti * area_3D;
+            //                    }
+            //                    L2_M = sqrt(sum_L2_Ti_mul_A_prime_Ti/sum_area_3D);
+            //                    A = abs(sum_area_2D - sum_area_3D)/sum_area_3D;
+            
+            // Now we should have the distortion of these boundary
+            // The joint boundary is not developable if it satisfied all of the followings:
+            // 1. max_area_diff greater than threshold
+            // 2. The distortion doesn't increase too much (This usually happens when merging large patch with tiny patch)
+            if (max_area_diff[2] > threshold) {
+                if (min(sum_area[0], sum_area[1])/max(sum_area[0], sum_area[1]) < 0.01) {
+                    can_be_merge = true;
+                } else {
+                    can_be_merge = false;
                 }
             }
             
             iterations++;
             emit setJobState((double)iterations/num_original_segments * 100);
             
-            if (can_be_merge && is_valid) {
+            if (!can_be_merge) {
+                // Restore seams if not developable
+                for (HalfedgeHandle heh : segment) {
+                    seams->insert(m_mesh->edge_handle(heh));
+                }
+            } else {
+                // visualization
                 for (HalfedgeHandle heh : prevBoundary) {
                     EdgeHandle eh = m_mesh->edge_handle(heh);
+                    m_mesh->set_color(eh, TriMesh::Color(1,1,1,0));
                     m_mesh->status(eh).set_selected(true);
+//                    m_mesh->status(heh).set_selected(false);
                 }
                 for (HalfedgeHandle heh : prevSegment) {
                     EdgeHandle eh = m_mesh->edge_handle(heh);
                     m_mesh->set_color(eh, TriMesh::Color(1,1,1,0));
+                    m_mesh->status(eh).set_selected(false);
+                }
+
+                prevBoundary.clear();
+                if (boundaries[2].empty()) {
+                    emit log(LOGERR, "No boundary is found in submesh[2]");
+                    return;
                 }
                 for (HalfedgeHandle heh : boundaries[2]) {
                     EdgeHandle eh = m_mesh->edge_handle(heh);
                     m_mesh->set_color(eh, TriMesh::Color(0,1,0,1));
                     m_mesh->status(eh).set_selected(false);
+//                    m_mesh->status(heh).set_selected(true);
                 }
                 prevBoundary = boundaries[2];
-                prevSegment = segment;
                 
                 for (HalfedgeHandle heh : segment) {
                     EdgeHandle eh = m_mesh->edge_handle(heh);
@@ -440,13 +434,12 @@ void PlushPatternGenerator::optimize_patches(double threshold, bool step) {
                     m_mesh->set_color(eh, TriMesh::Color(0,0,1,1));
                     m_mesh->status(eh).set_selected(false);
                 }
+                prevSegment = segment;
                 
                 cant_be_merged_anymore = false;
-                emit updateView();
-                emit log(LOGINFO, QString::number(m_mesh->property(merge_iterations_handle)));
-                m_mesh->property(merge_iterations_handle)++;
                 
-                removed_count++;
+                emit updateView();
+                
                 if (step) {
                     return;
                 } else {
@@ -458,7 +451,7 @@ void PlushPatternGenerator::optimize_patches(double threshold, bool step) {
     
     // Assign color for segment
     std::vector< std::vector<HalfedgeHandle> > heh_segments;
-    get_segments_from_seams(heh_segments);
+    get_segments_from_seams(heh_segments, seams);
     
     int count = 0;
     for (auto heh_segment : heh_segments) {

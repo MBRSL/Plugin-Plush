@@ -42,11 +42,11 @@ public:
 
     /// @name Merging property handle
     ///@{
-    static OpenMesh::MPropHandleT<int> merge_iterations_handle;
+    static OpenMesh::MPropHandleT< std::map< std::set<HalfedgeHandle>, double> > joint_boundary_area_handle;
+    static OpenMesh::MPropHandleT< std::map< std::set<HalfedgeHandle>, double> > joint_boundary_distortion_handle;
 
-    static OpenMesh::MPropHandleT< std::map< std::vector<HalfedgeHandle>, double> > joint_boundary_area_handle;
-    static OpenMesh::MPropHandleT< std::map< std::vector<HalfedgeHandle>, double> > joint_boundary_distortion_handle;
-    
+    static OpenMesh::MPropHandleT< std::set<VertexHandle> > intersection_points_handle;
+
     static OpenMesh::EPropHandleT<int> segment_no_handle;
     ///@}
 
@@ -161,10 +161,11 @@ public:
     
     void get_intersection_points(std::set<EdgeHandle> *seams,
                                  std::set<VertexHandle> &intersection_points);
-    void get_segments_from_seams(std::vector< std::vector<EdgeHandle> > &segments);
-    void get_segments_from_seams(std::vector< std::vector<HalfedgeHandle> > &segments);
+    void get_segments_from_seams(std::vector< std::vector<EdgeHandle> > &segments, std::set<EdgeHandle> *seams);
+    void get_segments_from_seams(std::vector< std::vector<HalfedgeHandle> > &segments, std::set<EdgeHandle> *seams);
     void get_segments_from_seams(std::vector< std::vector<HalfedgeHandle> > &segments,
-                                 std::set<VertexHandle> intersection_points);
+                                 std::set<VertexHandle> intersection_points,
+                                 std::set<EdgeHandle> *seams);
 
     bool calcLocalSeams(TriMesh *mesh, double developable_threshold);
     
@@ -200,7 +201,7 @@ private:
     ///@{
     bool splitWithBoundary(std::vector<TriMesh> *subMeshes, std::set<EdgeHandle> *seams);
     bool extract_mesh_with_boundary(TriMesh *new_mesh, FaceHandle root_face, std::set<EdgeHandle> *seams);
-    bool extract_mesh_with_boundary(TriMesh *new_mesh, FaceHandle root_face, std::vector<HalfedgeHandle> *seams);
+    bool extract_mesh_with_boundary(TriMesh *new_mesh, FaceHandle root_face, std::set<HalfedgeHandle> *seams);
     ///@}
 
     /// @name Boundary
@@ -209,11 +210,17 @@ private:
     
     bool get_adjacent_boundary(HalfedgeHandle start_heh,
                             std::set<EdgeHandle> &seams,
-                            std::vector<HalfedgeHandle> &adj_boundary);
-    bool get_joint_boundary(std::vector<HalfedgeHandle> &adj_boundary1,
-                            std::vector<HalfedgeHandle> &adj_boundary2,
-                            std::set<EdgeHandle> &seams,
-                            std::vector<HalfedgeHandle> &joint_boundary);
+                            std::set<HalfedgeHandle> &adj_boundary);
+    bool get_joint_boundary(std::set<HalfedgeHandle> &adj_boundary1,
+                            std::set<HalfedgeHandle> &adj_boundary2,
+                            std::vector<HalfedgeHandle> &joint_seam_segment,
+                            std::set<HalfedgeHandle> &joint_boundary,
+                            std::set<EdgeHandle> &seams);
+    bool get_joint_submesh(std::vector<HalfedgeHandle> &joint_seam_segment,
+                           std::set<EdgeHandle> &seams);
+    
+    bool is_loop(std::set<EdgeHandle> &boundary,
+                 std::set<EdgeHandle> &seams);
     ///@}
     /// @name Flattening
     ///@{
@@ -229,7 +236,7 @@ private:
     void initProperties();
     void uninitProperties();
     
-    std::vector<HalfedgeHandle> prevBoundary;
+    std::set<HalfedgeHandle> prevBoundary;
     std::vector<HalfedgeHandle> prevSegment;
     
     /// Utils

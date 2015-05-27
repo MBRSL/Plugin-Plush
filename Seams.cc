@@ -116,9 +116,8 @@ bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices
                                       int limitNum,
                                       bool elimination,
                                       bool allPath) {
-    std::map< std::vector<HalfedgeHandle>, double > &joint_boundary_distortion = m_mesh->property(joint_boundary_distortion_handle);
+    auto &joint_boundary_distortion = m_mesh->property(joint_boundary_distortion_handle);
     joint_boundary_distortion.clear();
-    m_mesh->property(merge_iterations_handle) = 0;
 
     std::vector<TriMesh> subMeshes;
 
@@ -607,11 +606,11 @@ bool PlushPatternGenerator::calcStructralSeams(TriMesh *mesh,
     }
     
     // Add texture seams that are not possible to be generated in the above proccess
-//    for (EdgeHandle eh : m_mesh->edges()) {
-//        if (is_different_texture(m_mesh, eh)) {
-//            seams.insert(eh);
-//        }
-//    }
+    for (EdgeHandle eh : m_mesh->edges()) {
+        if (is_different_texture(m_mesh, eh)) {
+            seams.insert(eh);
+        }
+    }
     
     return true;
 }
