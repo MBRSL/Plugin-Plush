@@ -9,7 +9,8 @@ OpenMesh::MPropHandleT< std::set<VertexHandle> > PlushPatternGenerator::intersec
 
 OpenMesh::MPropHandleT< std::map< std::set<HalfedgeHandle>, double> > PlushPatternGenerator::joint_boundary_area_handle;
 OpenMesh::MPropHandleT< std::map< std::set<HalfedgeHandle>, double> > PlushPatternGenerator::joint_boundary_distortion_handle;
-OpenMesh::VPropHandleT<double> PlushPatternGenerator::maxCurvatureHandle;
+OpenMesh::VPropHandleT<double> PlushPatternGenerator::meanCurvatureHandle;
+OpenMesh::VPropHandleT<double> PlushPatternGenerator::gaussianCurvatureHandle;
 
 OpenMesh::EPropHandleT<double> PlushPatternGenerator::edgeWeightHandle;
 OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, double> > PlushPatternGenerator::geodesicDistanceHandle;
@@ -67,7 +68,8 @@ void PlushPatternGenerator::initProperties() {
     m_mesh->add_property(joint_boundary_area_handle, "Sum of area for joint boundary");
     m_mesh->add_property(joint_boundary_distortion_handle, "Distortion for joint boundary");
     
-    m_mesh->add_property(maxCurvatureHandle, "Max Curvature");
+    m_mesh->add_property(meanCurvatureHandle, "Mean Curvature");
+    m_mesh->add_property(gaussianCurvatureHandle, "Gaussian Curvature");
     
     m_mesh->add_property(edgeWeightHandle, "Edge weight");
     m_mesh->add_property(geodesicDistanceHandle, "Geodesic distance between vertices pair");
@@ -83,7 +85,8 @@ void PlushPatternGenerator::initProperties() {
     
     for (VertexHandle v : m_mesh->vertices()) {
         m_mesh->property(distortionVHandle, v) = 0;
-        m_mesh->property(maxCurvatureHandle, v) = 0;
+        m_mesh->property(meanCurvatureHandle, v) = 0;
+        m_mesh->property(gaussianCurvatureHandle, v) = 0;
         m_mesh->property(bonesWeightHandle, v) = NULL;
     }
 
@@ -107,7 +110,8 @@ void PlushPatternGenerator::uninitProperties() {
     m_mesh->remove_property(joint_boundary_area_handle);
     m_mesh->remove_property(joint_boundary_distortion_handle);
     
-    m_mesh->remove_property(maxCurvatureHandle);
+    m_mesh->remove_property(meanCurvatureHandle);
+    m_mesh->remove_property(gaussianCurvatureHandle);
     
     m_mesh->remove_property(edgeWeightHandle);
     m_mesh->remove_property(geodesicDistanceHandle);

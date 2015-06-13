@@ -54,7 +54,8 @@ public:
     /// @name Curvature property handle
     ///@{
     /// Curvature value/direction of each vertex. It's empty before curvature calculation.
-    static OpenMesh::VPropHandleT<double> maxCurvatureHandle;
+    static OpenMesh::VPropHandleT<double> meanCurvatureHandle;
+    static OpenMesh::VPropHandleT<double> gaussianCurvatureHandle;
     ///@}
     
     /// @name Geodesic distance property handle

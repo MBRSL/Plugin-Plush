@@ -15,10 +15,10 @@
 bool PlushPatternGenerator::calcCurvature() {
     isJobCanceled = false;
     
-    // Gause curvature
-//    for (VertexHandle v : m_mesh->vertices()) {
-//        m_mesh->property(maxCurvatureHandle, v) =  curvature::gauss_curvature(*m_mesh, v);
-//    }
+    // Gaussian curvature
+    for (VertexHandle v : m_mesh->vertices()) {
+        m_mesh->property(gaussianCurvatureHandle, v) =  curvature::gauss_curvature(*m_mesh, v);
+    }
 
     // Mean
     for (VertexHandle v : m_mesh->vertices()) {
@@ -30,36 +30,56 @@ bool PlushPatternGenerator::calcCurvature() {
         if ((curva | m_mesh->normal(v)) < 0)
             curv = -curv;
         
-        m_mesh->property(maxCurvatureHandle, v) =  curv;
+        m_mesh->property(meanCurvatureHandle, v) =  curv;
     }
 
     // Prepare file for saving data
-    QFile file(m_meshName + "_curvature.txt");
-    file.open(QIODevice::WriteOnly | QIODevice::Text);
-    QTextStream out(&file);
+    QFile mean_file(m_meshName + "_mean_curvature.txt");
+    mean_file.open(QIODevice::WriteOnly | QIODevice::Text);
+    QTextStream mean_out(&mean_file);
 
     for (VertexHandle v : m_mesh->vertices()) {
-        out << m_mesh->property(maxCurvatureHandle, v) << " ";
+        mean_out << m_mesh->property(meanCurvatureHandle, v) << " ";
     }
-    file.close();
+    mean_file.close();
+
+    QFile gaussian_file(m_meshName + "_gaussian_curvature.txt");
+    gaussian_file.open(QIODevice::WriteOnly | QIODevice::Text);
+    QTextStream gaussian_out(&gaussian_file);
     
+    for (VertexHandle v : m_mesh->vertices()) {
+        gaussian_out << m_mesh->property(meanCurvatureHandle, v) << " ";
+    }
+    gaussian_file.close();
+
     return true;
 }
 
 
 void PlushPatternGenerator::loadCurvature() {
-    QString curvatureFilename = m_meshName + "_curvature.txt";
-    QFile file(curvatureFilename);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        emit log(LOGERR, QString("Unable to read file %1").arg(curvatureFilename));
+    QFile mean_file(m_meshName + "_mean_curvature.txt");
+    if (!mean_file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        emit log(LOGERR, QString("Unable to read file %1").arg(m_meshName + "_mean_curvature.txt"));
         return;
     }
-    
-    QTextStream in(&file);
-    
+    QTextStream mean_in(&mean_file);
     double mean_curvature;
     for (VertexHandle v : m_mesh->vertices()) {
-        in >> mean_curvature;
-        m_mesh->property(maxCurvatureHandle, v) = mean_curvature;
+        mean_in >> mean_curvature;
+        m_mesh->property(gaussianCurvatureHandle, v) = mean_curvature;
     }
+    mean_file.close();
+    
+    QFile gaussian_file(m_meshName + "_gaussian_curvature.txt");
+    if (!gaussian_file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        emit log(LOGERR, QString("Unable to read file %1").arg(m_meshName + "_gaussian_curvature.txt"));
+        return;
+    }
+    QTextStream gaussian_in(&gaussian_file);
+    double gaussian_curvature;
+    for (VertexHandle v : m_mesh->vertices()) {
+        gaussian_in >> gaussian_curvature;
+        m_mesh->property(gaussianCurvatureHandle, v) = gaussian_curvature;
+    }
+    gaussian_file.close();
 }

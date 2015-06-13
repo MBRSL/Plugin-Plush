@@ -196,7 +196,7 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh, double threshold, b
     int count = 0;
     for (VertexHandle v : mesh->vertices()) {
         VertexHandle original_v = get_original_handle(mesh, v);
-        double curvature = m_mesh->property(maxCurvatureHandle, original_v);
+        double curvature = m_mesh->property(meanCurvatureHandle, original_v);
         if (curvature < 0) {
             sum_curvature += curvature;
             sum_curvature_sqr += curvature * curvature;
@@ -218,7 +218,7 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh, double threshold, b
     // Select vertices with curvature greater than threshold
     auto curvatureFilterFunctor = [&](VertexHandle v) -> bool {
         VertexHandle original_v = get_original_handle(mesh, v);
-        double curvature = m_mesh->property(maxCurvatureHandle, original_v);
+        double curvature = m_mesh->property(meanCurvatureHandle, original_v);
         return curvature < threshold;
     };
 
@@ -432,8 +432,8 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh, double threshold, b
 //                        double angWij = pow((1-(1-abs(cos(theta)))*convexityFac),2);
 //                        double angWij = pow(cos(theta),2);
 
-                            double curvature1 = m_mesh->property(maxCurvatureHandle, get_original_handle(mesh, v1));
-                            double curvature2 = m_mesh->property(maxCurvatureHandle, get_original_handle(mesh, v2));
+                            double curvature1 = m_mesh->property(meanCurvatureHandle, get_original_handle(mesh, v1));
+                            double curvature2 = m_mesh->property(meanCurvatureHandle, get_original_handle(mesh, v2));
                             if (curvature1 < 0 && curvature2 < 0) {
                                 double curvatureWeight = abs((2 * mean)/(curvature1 + curvature2));
                                 
