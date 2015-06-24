@@ -112,6 +112,7 @@ private slots:
     void seamShowButtonClicked();
     void seamSaveButtonClicked();
     void seamLoadButtonClicked();
+    void seamCalcSubsetButtonClicked();
     void seamMergeButtonClicked();
     
     void calcGeodesicButtonClicked();

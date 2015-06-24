@@ -6,9 +6,12 @@
 
 #include "SuperDeform/Skeleton.hh"
 
+#include "FilteredTriMesh.hh"
 #include "Common.hh"
 
 #include <Eigen/sparse>
+
+#include <boost/graph/adjacency_list.hpp>
 
 #include <ObjectTypes/PolyLine/PolyLine.hh>
 #include <MeshTools/MeshSelectionT.hh>
@@ -48,6 +51,11 @@ public:
     static OpenMesh::MPropHandleT< std::set<VertexHandle> > intersection_points_handle;
 
     static OpenMesh::EPropHandleT<int> segment_no_handle;
+    
+    static OpenMesh::FPropHandleT<int> face_to_submesh_id_handle;
+    
+    /// Seams of this sub-mesh. It contains the edges of original mesh.
+    static OpenMesh::MPropHandleT< std::set<EdgeHandle> > seams_handle;
     ///@}
 
 
@@ -68,7 +76,6 @@ public:
     
     /// @name Skeleton property handle
     ///@{
-    
     /// The skeleton of this mesh. It's built during mesh loading unless error occurs
     static OpenMesh::MPropHandleT<Skeleton*> skeletonHandle;
     /// The weight of corresponding bones for each vertex
@@ -78,15 +85,20 @@ public:
     /// @name Flattening-related handle
     ///@{
     /// This stores flattened meshes.
-    static OpenMesh::MPropHandleT< std::vector<TriMesh> > flattenedMeshesHandle;
+    static OpenMesh::MPropHandleT< std::vector<FilteredTriMesh> > flattenedSubMeshesHandle;
     /// Distortion indicator for visualization
     static OpenMesh::FPropHandleT<double> distortionFHandle;
     static OpenMesh::VPropHandleT<double> distortionVHandle;
-    /// Mapping flattened vertex handle back to original vertex handle
-    static OpenMesh::VPropHandleT<VertexHandle> getInverseMappingHandle(TriMesh *mesh);
-    static OpenMesh::MPropHandleT< std::set<EdgeHandle> > getSeamsHandle(TriMesh *mesh);
+    static OpenMesh::VPropHandleT<TriMesh::Point> flattenedPositionHandle;
     ///@}
     
+    /// @name Handle of new sub-mesh
+    ///@{
+    /// Mapping flattened vertex handle back to original vertex handle
+    static OpenMesh::VPropHandleT<VertexHandle> getInverseMappingHandle(TriMesh *mesh);
+    ///@}
+    
+    static bool getHalfedge(const FilteredTriMesh &mesh, HalfedgeHandle &heh, VertexHandle from, VertexHandle to);
     static bool getHalfedge(const TriMesh *mesh, HalfedgeHandle &heh, int fromNo, int toNo);
     static bool getHalfedge(const TriMesh *mesh, HalfedgeHandle &heh, VertexHandle from, VertexHandle to);
     static bool getEdge(const TriMesh *mesh, EdgeHandle &eh, int v1No, int v2No);
@@ -94,11 +106,11 @@ public:
     static bool getFace(const TriMesh *mesh, FaceHandle &fh, VertexHandle v1, VertexHandle v2, VertexHandle v3);
     
     /// Calculate the sum of inner (clockwise) angles by iterating from one halfedge to another.
-    static double getSumInnerAngle(const TriMesh *mesh, HalfedgeHandle heh1, HalfedgeHandle heh2);
     static double getSumInnerAngle(const TriMesh *mesh, VertexHandle v);
     
     /// Get boundary for a given opened mesh
-    static bool getBoundaryOfOpenedMesh(std::vector< std::vector<HalfedgeHandle> > &boundaries, const TriMesh *mesh, bool getInteriorHalfedge);
+    static std::vector< std::vector<HalfedgeHandle> >  getBoundaryOfOpenedMesh(const FilteredTriMesh &mesh,
+                                        bool getInteriorHalfedge);
     
     /** Expand selection by n-ring connectivity **/
     static void expandVertice(const TriMesh *mesh, const VertexHandle centerV, std::set<VertexHandle> &verticesSelection, int n, double maxDistance);
@@ -114,70 +126,98 @@ public:
     
     PlushPatternGenerator(TriMesh *mesh, QString meshName);
     ~PlushPatternGenerator();
-    
-    bool load_seams();
-    bool save_seams();
 
-    void loadCurvature();
-    
-    bool loadSkeleton();
-    bool loadBoneWeight();
-    bool saveBoneWeight();
-    
-    bool calcCurvature();
-    
-    bool calcSelection(std::vector<VertexHandle> &targetVertices, double threshold=0.001);
-    
-    void calcGeodesic(std::vector<VertexHandle> targetVertices);
-    bool loadGeodesic();
-    bool saveGeodesic(std::vector<VertexHandle> selectedVertices);
-    void optimize_patches(double threshold, bool step);
-
+    /// Seams
+    ///@{
     bool calcSeams(std::vector<VertexHandle> selectedVertices,
                    double developable_threshold = 0.1,
                    int limitNum = 0,
                    bool elimination = false,
                    bool allPaths = true);
+    bool calcLocalSeams(FilteredTriMesh &mesh, double developable_threshold);
+    bool load_seams();
+    bool save_seams();
+    
+    std::set<EdgeHandle> get_seams();
+    ///@}
+
+    /// Skeleton
+    ///@{
     bool calcSkeletonWeight();
+    bool loadSkeleton();
+    bool loadBoneWeight();
+    bool saveBoneWeight();
+    ///@}
+
+    /// Curvature
+    ///@{
+    bool calcCurvature();
+    void loadCurvature();
+    ///@}
     
-    // Used in selection
-    void calc_parameterization_weight_matrix(TriMesh *mesh, Eigen::SparseMatrix<double> &M, InteriorParameterizationMethod method);
+    bool calcSelection(std::vector<VertexHandle> &targetVertices, double threshold=0.001);
     
-    /// Flatten 3D loops into 2D loops using LPFB.
-    bool calcFlattenedGraph();
-    
+    /// Geodesic
+    ///@{
+    void calcGeodesic(std::vector<VertexHandle> targetVertices);
+    bool loadGeodesic();
+    bool saveGeodesic(std::vector<VertexHandle> selectedVertices);
+
     void set_geodesic_coeffifients(double distanceCoefficient,
                                    double textureCoefficient,
                                    double curvatureCoefficient,
                                    double skeletonCoefficient,
                                    double pathCoefficient);
+    ///@}
     
-    std::vector<TriMesh>* getFlattenedMeshes();
-    std::set<EdgeHandle>* getSeams();
+    /// Merging
+    ///@{
+    void construct_subsets();
+    void merge_subMesh(TriMesh *merged_subMesh, TriMesh *subMesh1, TriMesh *subMesh2);
+    void optimize_patches(double threshold, bool step);
+    ///@}
+
+    // Used in selection and flattening
+    Eigen::SparseMatrix<double> calc_parameterization_weight_matrix(FilteredTriMesh &mesh,
+                                                                    InteriorParameterizationMethod method);
+    void calc_parameterization_weight_matrix(TriMesh *mesh,
+                                             Eigen::SparseMatrix<double> &M,
+                                             InteriorParameterizationMethod method);
+    
+    /// Flattening
+    ///@{
+    /// Flatten 3D loops into 2D loops using LPFB.
+    bool calcFlattenedGraph();
+    std::vector<FilteredTriMesh> getFlattenedSubMeshes();
+    bool get_triMesh_from_subMesh(TriMesh *result_triMesh, FilteredTriMesh &subMesh, bool use_flattened_position);
+    ///@}
     
     VertexHandle get_original_handle(TriMesh *mesh, const VertexHandle vh) const;
     EdgeHandle get_original_handle(TriMesh *mesh, const EdgeHandle eh) const;
     HalfedgeHandle get_original_handle(TriMesh *mesh, const HalfedgeHandle eh) const;
     FaceHandle get_original_handle(TriMesh *mesh, const FaceHandle fh) const;
     
-    void get_intersection_points(std::set<EdgeHandle> *seams,
-                                 std::set<VertexHandle> &intersection_points);
-    void get_segments_from_seams(std::vector< std::vector<EdgeHandle> > &segments, std::set<EdgeHandle> *seams);
-    void get_segments_from_seams(std::vector< std::vector<HalfedgeHandle> > &segments, std::set<EdgeHandle> *seams);
-    void get_segments_from_seams(std::vector< std::vector<HalfedgeHandle> > &segments,
-                                 std::set<VertexHandle> intersection_points,
-                                 std::set<EdgeHandle> *seams);
-
-    bool calcLocalSeams(TriMesh *mesh, double developable_threshold);
-    
-    void show_intersection_points();
-
+    /// Visualization utils
+    ///@{
+    std::set<VertexHandle> get_intersection_points();
+    std::vector< std::vector<HalfedgeHandle> > get_seams_segments();
+    ///@}
 private:
     TriMesh *m_mesh;
     QString m_meshName;
     
     bool isJobCanceled;
     
+    typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
+            boost::property<boost::vertex_owner_t, TriMesh*>,
+            boost::property<boost::edge_owner_t, std::vector<HalfedgeHandle>>
+    > Patch_graph;
+
+    typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
+    boost::property<boost::vertex_owner_t, FilteredTriMesh>,
+    boost::property<boost::edge_owner_t, std::vector<HalfedgeHandle>>
+    > SubMesh_graph;
+
     /// @name Geodesic coefficients
     ///@{
     double m_distanceCoefficient = 0.2;
@@ -196,18 +236,24 @@ private:
                             int limitNum,
                             bool elimination,
                             bool allPaths);
+    
+    std::vector< std::vector<EdgeHandle> > get_segments_from_seams(std::set<EdgeHandle> &seams);
+    std::vector< std::vector<HalfedgeHandle> > get_halfedge_segments_from_seams(std::set<EdgeHandle> &seams);
+    std::vector< std::vector<HalfedgeHandle> > get_halfedge_segments_from_seams(std::set<VertexHandle> intersection_points,
+                                                                                std::set<EdgeHandle> &seams);
+    std::set<VertexHandle> get_intersection_points(std::set<EdgeHandle> &seams);
     ///@}
     
-    /// @name Sub mesh
+    /// @name Sub-mesh
     ///@{
-    bool splitWithBoundary(std::vector<TriMesh> *subMeshes, std::set<EdgeHandle> *seams);
-    bool extract_mesh_with_boundary(TriMesh *new_mesh, FaceHandle root_face, std::set<EdgeHandle> *seams);
-    bool extract_mesh_with_boundary(TriMesh *new_mesh, FaceHandle root_face, std::set<HalfedgeHandle> *seams);
+    std::vector<FilteredTriMesh> get_subMeshes_with_boundary(SubMesh_graph &patch_graph, std::set<EdgeHandle> &seams);
+    FilteredTriMesh get_subMesh_with_boundary(FaceHandle root_face, std::set<HalfedgeHandle> &seams);
+    FilteredTriMesh get_subMesh_with_boundary(FaceHandle root_face, std::set<EdgeHandle> &seams);
     ///@}
 
     /// @name Boundary
     ///@{
-    void get_closed_boundaries_of_seams(std::vector< std::vector<HalfedgeHandle> > *closed_seams, std::set<EdgeHandle> *seams);
+    void get_closed_boundaries_of_seams(std::vector< std::vector<HalfedgeHandle> > &closed_seams, std::set<EdgeHandle> &seams);
     
     bool get_adjacent_boundary(HalfedgeHandle start_heh,
                             std::set<EdgeHandle> &seams,
@@ -220,18 +266,14 @@ private:
     bool get_joint_submesh(std::vector<HalfedgeHandle> &joint_seam_segment,
                            std::set<EdgeHandle> &seams);
     
-    bool is_loop(std::set<EdgeHandle> &boundary,
-                 std::set<EdgeHandle> &seams);
     ///@}
     /// @name Flattening
     ///@{
-    bool calcLPFB(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition);
-    bool calcInteriorPoints(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition);
+    bool calcLPFB(FilteredTriMesh &mesh, std::map<HalfedgeHandle, OpenMesh::Vec3d> &boundaryPosition);
+    bool calcInteriorPoints(FilteredTriMesh &mesh, std::map<HalfedgeHandle, OpenMesh::Vec3d> &boundaryPosition);
     /// Calculate the distortion between original 3D mesh and flattened graph, the result is stored in distortionHandle
-    void calcDistortion(std::vector<TriMesh> *flattenedMeshes);
-    void calcDistortion(TriMesh &flattenedMeshes);
-    /// Organize 2D loops to prevent overlapping while minimize bounding area.
-    bool packFlattenedGraph(std::vector<TriMesh> *flattenedMeshes, const int nColumns=4);
+    void calcDistortion(std::vector<FilteredTriMesh> &flattenedMeshes);
+    void calcDistortion(FilteredTriMesh &flattenedMeshes);
     ///@}
     
     void initProperties();
@@ -239,59 +281,6 @@ private:
     
     std::set<HalfedgeHandle> prevBoundary;
     std::vector<HalfedgeHandle> prevSegment;
-    
-    /// Utils
-    template<class T>
-    void markSelection(const std::vector< std::set<T> > &group_of_handles, TriMesh *mesh) {
-        OpenMesh::VPropHandleT<VertexHandle> inverseMapping = getInverseMappingHandle(mesh);
-        for (auto group_it = group_of_handles.begin(); group_it != group_of_handles.end(); group_it++) {
-            markSelection(*group_it, mesh, inverseMapping);
-        }
-    }
-    
-    template<class T>
-    inline void markSelection(const std::set<T> &handles, TriMesh *mesh, OpenMesh::VPropHandleT<VertexHandle> &inverseMapping) {
-        std::vector<T> tmp(handles.begin(), handles.end());
-        markSelection(tmp, mesh, inverseMapping);
-    }
-    inline void markSelection(const std::vector<FaceHandle> &faces, TriMesh *mesh, OpenMesh::VPropHandleT<VertexHandle> &inverseMapping) {
-        std::vector<int> facesId;
-        for (auto f_it = faces.begin(); f_it != faces.end(); f_it++) {
-            VertexHandle originalV[3];
-            int count = 0;
-            for (TriMesh::ConstFaceVertexIter cfv_it = mesh->cfv_iter(*f_it); cfv_it; cfv_it++) {
-                originalV[count++] = mesh->property(inverseMapping, *cfv_it);
-            }
-            FaceHandle originalF;
-            bool found = getFace(m_mesh, originalF, originalV[0], originalV[1], originalV[2]);
-            assert(found);
-            facesId.push_back(originalF.idx());
-        }
-        MeshSelection::selectFaces(m_mesh, facesId);
-    }
-    
-    inline void markSelection(const std::vector<VertexHandle> &vertices, TriMesh *mesh, OpenMesh::VPropHandleT<VertexHandle> &inverseMapping) {
-        std::vector<int> verticesId;
-        for (auto v_it = vertices.begin(); v_it != vertices.end(); v_it++) {
-            VertexHandle originalV = mesh->property(inverseMapping, *v_it);
-            verticesId.push_back(originalV.idx());
-        }
-        MeshSelection::selectVertices(m_mesh, verticesId);
-    }
-    
-    inline void markSelection(const std::vector<EdgeHandle> &edes, TriMesh *mesh, OpenMesh::VPropHandleT<VertexHandle> &inverseMapping) {
-        std::vector<int> edgesId;
-        for (auto e_it = edes.begin(); e_it != edes.end(); e_it++) {
-            HalfedgeHandle heh = mesh->halfedge_handle(*e_it, 0);
-            VertexHandle originalV1 = mesh->property(inverseMapping, mesh->from_vertex_handle(heh));
-            VertexHandle originalV2 = mesh->property(inverseMapping, mesh->to_vertex_handle(heh));
-            EdgeHandle original_eh;
-            bool found = getEdge(m_mesh, original_eh, originalV1, originalV2);
-            assert(found);
-            edgesId.push_back(original_eh.idx());
-        }
-        MeshSelection::selectEdges(m_mesh, edgesId);
-    }
     
     public slots:
     /// Cancel time-consuming works. (calcGeodesic, calcCurvature, etc.)

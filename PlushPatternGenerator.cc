@@ -6,6 +6,11 @@ OpenMesh::MPropHandleT< std::set<VertexHandle> > PlushPatternGenerator::intersec
 
 OpenMesh::MPropHandleT< std::map< std::set<HalfedgeHandle>, double> > PlushPatternGenerator::joint_boundary_area_handle;
 OpenMesh::MPropHandleT< std::map< std::set<HalfedgeHandle>, double> > PlushPatternGenerator::joint_boundary_distortion_handle;
+
+OpenMesh::MPropHandleT< std::set<EdgeHandle> > PlushPatternGenerator::seams_handle;
+
+OpenMesh::FPropHandleT<int> PlushPatternGenerator::face_to_submesh_id_handle;
+
 OpenMesh::VPropHandleT<double> PlushPatternGenerator::meanCurvatureHandle;
 OpenMesh::VPropHandleT<double> PlushPatternGenerator::gaussianCurvatureHandle;
 
@@ -16,9 +21,10 @@ OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, std::vec
 OpenMesh::MPropHandleT<Skeleton*> PlushPatternGenerator::skeletonHandle;
 OpenMesh::VPropHandleT<double*> PlushPatternGenerator::bonesWeightHandle;
 
-OpenMesh::MPropHandleT< std::vector<TriMesh> > PlushPatternGenerator::flattenedMeshesHandle;
+OpenMesh::MPropHandleT< std::vector<FilteredTriMesh> > PlushPatternGenerator::flattenedSubMeshesHandle;
 OpenMesh::FPropHandleT<double> PlushPatternGenerator::distortionFHandle;
 OpenMesh::VPropHandleT<double> PlushPatternGenerator::distortionVHandle;
+OpenMesh::VPropHandleT<TriMesh::Point> PlushPatternGenerator::flattenedPositionHandle;
 
 OpenMesh::VPropHandleT<VertexHandle> PlushPatternGenerator::getInverseMappingHandle(TriMesh *mesh) {
     OpenMesh::VPropHandleT<VertexHandle> inverse_mappingHandle;
@@ -31,21 +37,8 @@ OpenMesh::VPropHandleT<VertexHandle> PlushPatternGenerator::getInverseMappingHan
     return inverse_mappingHandle;
 }
 
-OpenMesh::MPropHandleT< std::set<EdgeHandle> > PlushPatternGenerator::getSeamsHandle(TriMesh *mesh) {
-    OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle;
-    if(!mesh->get_property_handle(seamsHandle, "seams")) {
-        mesh->add_property(seamsHandle, "seams");
-    }
-    return seamsHandle;
-}
-
-std::set<EdgeHandle>* PlushPatternGenerator::getSeams() {
-    OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
-    if (m_mesh->property(seamsHandle).size() == 0) {
-        return NULL;
-    } else {
-        return &m_mesh->property(seamsHandle);
-    }
+std::vector<FilteredTriMesh> PlushPatternGenerator::getFlattenedSubMeshes() {
+    return m_mesh->property(flattenedSubMeshesHandle);
 }
 
 PlushPatternGenerator::PlushPatternGenerator(TriMesh *mesh, QString meshName) : m_mesh(mesh), m_meshName(meshName) {
@@ -74,6 +67,10 @@ void PlushPatternGenerator::initProperties() {
     m_mesh->add_property(joint_boundary_area_handle, "Sum of area for joint boundary");
     m_mesh->add_property(joint_boundary_distortion_handle, "Distortion for joint boundary");
     
+    m_mesh->add_property(seams_handle, "Seams");
+    
+    m_mesh->add_property(face_to_submesh_id_handle, "The submesh id this face belongs to");
+    
     m_mesh->add_property(meanCurvatureHandle, "Mean Curvature");
     m_mesh->add_property(gaussianCurvatureHandle, "Gaussian Curvature");
     
@@ -84,10 +81,11 @@ void PlushPatternGenerator::initProperties() {
     m_mesh->add_property(skeletonHandle, "Skeleton");
     m_mesh->add_property(bonesWeightHandle, "Bone weights for each vertex");
     
-    m_mesh->add_property(flattenedMeshesHandle, "flattened meshes");
+    m_mesh->add_property(flattenedSubMeshesHandle, "flattened meshes");
 
     m_mesh->add_property(distortionVHandle, "Flattening distortion of vertices");
     m_mesh->add_property(distortionFHandle, "Flattening distortion of faces");
+    m_mesh->add_property(flattenedPositionHandle, "Flattened position of a vertices");
     
     for (VertexHandle v : m_mesh->vertices()) {
         m_mesh->property(distortionVHandle, v) = 0;
@@ -104,6 +102,7 @@ void PlushPatternGenerator::initProperties() {
     }
     
     for (FaceHandle f : m_mesh->faces()) {
+        m_mesh->property(face_to_submesh_id_handle, f) = -1;
         m_mesh->property(distortionFHandle, f) = 0;
     }
 }
@@ -116,6 +115,10 @@ void PlushPatternGenerator::uninitProperties() {
     m_mesh->remove_property(joint_boundary_area_handle);
     m_mesh->remove_property(joint_boundary_distortion_handle);
     
+    m_mesh->remove_property(seams_handle);
+    
+    m_mesh->remove_property(face_to_submesh_id_handle);
+
     m_mesh->remove_property(meanCurvatureHandle);
     m_mesh->remove_property(gaussianCurvatureHandle);
     
@@ -138,15 +141,26 @@ void PlushPatternGenerator::uninitProperties() {
     if(!m_mesh->get_property_handle(seamsHandle, "seams")) {
         m_mesh->remove_property(seamsHandle);
     }
-    m_mesh->remove_property(flattenedMeshesHandle);
+    m_mesh->remove_property(flattenedSubMeshesHandle);
 
     m_mesh->remove_property(distortionVHandle);
     m_mesh->remove_property(distortionFHandle);
-    
+    m_mesh->remove_property(flattenedPositionHandle);
 }
 
 void PlushPatternGenerator::cancelJob() {
     isJobCanceled = true;
+}
+
+bool PlushPatternGenerator::getHalfedge(const FilteredTriMesh &mesh, HalfedgeHandle &heh, VertexHandle from, VertexHandle to) {
+    if (!getHalfedge(mesh.mesh(), heh, from, to)) {
+        return false;
+    } else if (!mesh.is_valid(heh)) {
+        heh.invalidate();
+        return false;
+    } else {
+        return true;
+    }
 }
 
 bool PlushPatternGenerator::getHalfedge(const TriMesh *mesh, HalfedgeHandle &heh, VertexHandle from, VertexHandle to) {
@@ -213,14 +227,6 @@ bool PlushPatternGenerator::getFace(const TriMesh *mesh, FaceHandle &fh, VertexH
     return false;
 }
 
-std::vector<TriMesh>* PlushPatternGenerator::getFlattenedMeshes() {
-    if (!flattenedMeshesHandle.is_valid() || m_mesh->property(flattenedMeshesHandle).size() == 0) {
-        return NULL;
-    } else {
-        return &m_mesh->property(flattenedMeshesHandle);
-    }
-}
-
 VertexHandle PlushPatternGenerator::get_original_handle(TriMesh *mesh, const VertexHandle vh) const {
     if (mesh == m_mesh) {
         return vh;
@@ -273,4 +279,16 @@ FaceHandle PlushPatternGenerator::get_original_handle(TriMesh *mesh, const FaceH
         assert(found);
         return original_fh;
     }
+}
+
+std::set<VertexHandle> PlushPatternGenerator::get_intersection_points() {
+    std::set<EdgeHandle> &seams = m_mesh->property(seams_handle);
+    std::set<VertexHandle> intersection_points = get_intersection_points(seams);
+    return intersection_points;
+}
+
+std::vector< std::vector<HalfedgeHandle> > PlushPatternGenerator::get_seams_segments() {
+    std::set<EdgeHandle> &seams = m_mesh->property(seams_handle);
+    std::vector< std::vector<HalfedgeHandle> > heh_segments = get_halfedge_segments_from_seams(seams);
+    return heh_segments;
 }

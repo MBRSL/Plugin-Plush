@@ -3,11 +3,12 @@
 
 #include "IpTNLP.hpp"
 #include "Common.hh"
+#include "FilteredTriMesh.hh"
 
 class LPFB_NLP : public Ipopt::TNLP
 {
 public:
-    LPFB_NLP(TriMesh *mesh, std::map<VertexHandle, OpenMesh::Vec3d> *boundaryPosition);
+    LPFB_NLP(FilteredTriMesh &mesh, std::map<HalfedgeHandle, OpenMesh::Vec3d> &boundaryPosition);
     virtual ~LPFB_NLP();
     
     /**@name Overloaded from TNLP */
@@ -66,8 +67,8 @@ public:
     //@}
     
 private:
-    TriMesh *m_mesh;
-    std::map<VertexHandle, OpenMesh::Vec3d> *m_boundaryPosition;
+    FilteredTriMesh &m_mesh;
+    std::map<HalfedgeHandle, OpenMesh::Vec3d> &m_boundaryPosition;
     std::vector<double> m_innerAngle3D;
     std::vector<double> m_edgeLengths;
     std::vector<HalfedgeHandle> m_boundary3D;

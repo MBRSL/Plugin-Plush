@@ -56,8 +56,9 @@ void PlushPlugin::initializePlugin()
     seamMergeThreshold->setDecimals(5);
     seamMergeThreshold->setMinimum(0.00001);
     seamMergeThreshold->setMaximum(1);
-    seamMergeThreshold->setValue(0.3);
+    seamMergeThreshold->setValue(0.05);
     seamMergeThreshold->setSingleStep(0.005);
+    QPushButton *seamCalcSubsetButton = new QPushButton(tr("Calc subset"));
     seamMergeButton = new QPushButton(tr("Merge"));
     QVBoxLayout *seamLayout = new QVBoxLayout;
     QHBoxLayout *seamRow1Layout = new QHBoxLayout;
@@ -75,6 +76,7 @@ void PlushPlugin::initializePlugin()
     seamRow4Layout->addWidget(new QLabel(tr("Is step")));
     seamRow4Layout->addWidget(seamMergeIsStep);
     seamRow4Layout->addWidget(seamMergeThreshold);
+    seamRow4Layout->addWidget(seamCalcSubsetButton);
     seamRow4Layout->addWidget(seamMergeButton);
     seamLayout->addLayout(seamRow1Layout);
     seamLayout->addLayout(seamRow2Layout);
@@ -167,6 +169,7 @@ void PlushPlugin::initializePlugin()
     connect(seamLocalButton, SIGNAL(clicked()), this, SLOT(seamShowButtonClicked()));
     connect(seamLoadButton, SIGNAL(clicked()), this, SLOT(seamLoadButtonClicked()));
     connect(seamSaveButton, SIGNAL(clicked()), this, SLOT(seamSaveButtonClicked()));
+    connect(seamCalcSubsetButton, SIGNAL(clicked()), this, SLOT(seamCalcSubsetButtonClicked()));
     connect(seamMergeButton, SIGNAL(clicked()), this, SLOT(seamMergeButtonClicked()));
     
     connect(geodesicCalcButton, SIGNAL(clicked()), this, SLOT(calcGeodesicButtonClicked()));
@@ -352,6 +355,15 @@ void PlushPlugin::seamSaveButtonClicked() {
     m_patternGenerator->save_seams();
 }
 
+void PlushPlugin::seamCalcSubsetButtonClicked() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+    
+    m_patternGenerator->construct_subsets();
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
+}
+
 void PlushPlugin::seamMergeButtonClicked() {
     if (!checkIfGeneratorExist()) {
         return;
@@ -377,12 +389,6 @@ void PlushPlugin::seamMergeButtonClicked() {
 }
 
 void PlushPlugin::calcFlattenedGraphButtonClicked() {
-    std::set<EdgeHandle> *seams = m_patternGenerator->getSeams();
-    if (!seams) {
-        emit log(LOGERR, "No seams. Use show geodesic path.");
-        return;
-    }
-    
     m_currentJobId = "calcFlattenedGraph";
     OpenFlipperThread *thread = new OpenFlipperThread(m_currentJobId);
     connect(thread, SIGNAL(finished(QString)), this, SIGNAL(finishJob(QString)));
@@ -427,21 +433,19 @@ void PlushPlugin::seamShowButtonClicked() {
                                       showAllPath);
         cpu1 = get_cpu_time();
     } else if (sender() == seamLocalButton) {
-        cpu0 = get_cpu_time();
-        m_patternGenerator->calcLocalSeams(mesh, seamMergeThreshold->value());
-        cpu1 = get_cpu_time();
-        emit log(LOGINFO, QString("Time: %1").arg(cpu1-cpu0));
+//        cpu0 = get_cpu_time();
+//        m_patternGenerator->calcLocalSeams(mesh, seamMergeThreshold->value());
+//        cpu1 = get_cpu_time();
+//        emit log(LOGINFO, QString("Time: %1").arg(cpu1-cpu0));
     } else {
         return;
     }
     
-    std::set<EdgeHandle> *seams = m_patternGenerator->getSeams();
-    if (seams) {
-        std::vector<int> edgeList;
-        for (auto e_it = seams->begin(); e_it != seams->end(); e_it++) {
-            edgeList.push_back(e_it->idx());
+    std::set<EdgeHandle> seams = m_patternGenerator->get_seams();
+    if (!seams.empty()) {
+        for (EdgeHandle eh : seams) {
+            mesh->status(eh).set_selected(true);
         }
-        MeshSelection::selectEdges(mesh, edgeList);
         emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
     }
 }
@@ -451,10 +455,8 @@ void PlushPlugin::vis_intersection_points_button_clicked() {
         return;
     }
     
+    std::set<VertexHandle> intersection_points = m_patternGenerator->get_intersection_points();
     TriMesh *mesh = m_triMeshObj->mesh();
-    std::set<VertexHandle> intersection_points;
-    std::set<EdgeHandle> *seams = m_patternGenerator->getSeams();
-    m_patternGenerator->get_intersection_points(seams, intersection_points);
     for (VertexHandle v : intersection_points) {
         mesh->status(v).set_feature(true);
     }
@@ -471,9 +473,7 @@ void PlushPlugin::vis_seam_segments_button_clicked() {
     m_triMeshObj->materialNode()->set_line_smooth(true);
     m_triMeshObj->materialNode()->set_line_width(3);
     
-    std::vector< std::vector<HalfedgeHandle> > heh_segments;
-    std::set<EdgeHandle> *seams = m_patternGenerator->getSeams();
-    m_patternGenerator->get_segments_from_seams(heh_segments, seams);
+    std::vector< std::vector<HalfedgeHandle> > heh_segments = m_patternGenerator->get_seams_segments();
     
     MeshSelection::clearVertexSelection(mesh);
     MeshSelection::clearEdgeSelection(mesh);
@@ -510,16 +510,16 @@ void PlushPlugin::vis_skeleton_button_clicked() {
 }
 
 void PlushPlugin::showFlattenedGrpahButtonClicked() {
-    std::vector<TriMesh> *flattenedMeshes = m_patternGenerator->getFlattenedMeshes();
-    if (!flattenedMeshes) {
+    std::vector<FilteredTriMesh> flattenedSubMeshes = m_patternGenerator->getFlattenedSubMeshes();
+    if (flattenedSubMeshes.empty()) {
         emit log(LOGERR, "Calculate flattened meshes first.");
         return;
     }
     
     // 1 means right viewer
     int viewerId = 1;
-    // We don't want to show both models and polylines at same the time.
-    // So we place polylines to a very far place so that it will not be shown on original viewer
+    // We don't want to show both models at same the time.
+    // So we place the flattened model to a very far place so that it will not be shown on original viewer
     OpenMesh::Vec3d eye(100, 0, 1);
     OpenMesh::Vec3d far(100, 0, 0);
     OpenMesh::Vec3d right(0, 1, 0);
@@ -532,105 +532,45 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
     // Set this viewer to a far place
     PluginFunctions::lookAt(eye, far, right);
 
-
-    // Add new object and copy m_flattenedGraph into it
-    int n = flattenedMeshes->size();
+    int n = flattenedSubMeshes.size();
     int *newTriMeshIds = new int[n];
-    
-    ACG::ColorCoder color_coder(0, 255, false);
-    
+
+    // Used for displaying sub-mesh number
     QFont font("Arial Black", QFont::Bold);
     font.setPointSize(30);
 
-    ACG::Vec3d mesh_bbMin, mesh_bbMax;
-    MeshInfo::getBoundingBox(m_triMeshObj->mesh(), mesh_bbMin, mesh_bbMax);
-    double mesh_length = (mesh_bbMax-mesh_bbMin).norm();
+//    ACG::Vec3d mesh_bbMin, mesh_bbMax;
+//    MeshInfo::getBoundingBox(m_triMeshObj->mesh(), mesh_bbMin, mesh_bbMax);
+//    double mesh_length = (mesh_bbMax-mesh_bbMin).norm();
 
-    std::vector<int> seamsId;
+//    std::vector<int> seamsId;
+    const int nColumns = 4;
+    std::vector<TriMesh::Point> minP(n);
+    std::vector<TriMesh::Point> maxP(n);
+    std::vector<double> columnWidth(nColumns, 0);
+    std::vector<double> rowHeight(ceil((double)n/nColumns), 0);
+    double width = 0, height = 0, depth = 0;
     for (int i = 0; i < n; i++) {
+        // Add an empty object for creating new sub-mesh from FilteredTriMesh
         emit addEmptyObject(DATA_TRIANGLE_MESH, newTriMeshIds[i]);
-
-        // Get the newly created object
         TriMeshObject *object = 0;
         PluginFunctions::getObject(newTriMeshIds[i], object);
-        TriMesh *subMesh = object->mesh();
-        OpenMesh::VPropHandleT<VertexHandle> inverseMappingHandle = PlushPatternGenerator::getInverseMappingHandle(subMesh);
-        OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = PlushPatternGenerator::getSeamsHandle(subMesh);
-        
-        TriMesh &oldSubMesh = flattenedMeshes->at(i);
-        OpenMesh::VPropHandleT<VertexHandle> oldInverseMappingHandle = PlushPatternGenerator::getInverseMappingHandle(&oldSubMesh);
-        OpenMesh::MPropHandleT< std::set<EdgeHandle> > oldSeamsHandle = PlushPatternGenerator::getSeamsHandle(&oldSubMesh);
-        std::map<VertexHandle, VertexHandle> oldToNewMapping;
-
-        for (VertexIter v_it = oldSubMesh.vertices_begin(); v_it != oldSubMesh.vertices_end(); v_it++) {
-            TriMesh::Point p = oldSubMesh.point(*v_it);
-            VertexHandle newV = subMesh->add_vertex(p + far);
-            oldToNewMapping.emplace(*v_it, newV);
-            
-            // Update inverse map
-            subMesh->property(inverseMappingHandle, newV) = oldSubMesh.property(oldInverseMappingHandle, *v_it);
-        }
-
-        for (FaceIter f_it = oldSubMesh.faces_begin(); f_it != oldSubMesh.faces_end(); f_it++) {
-            HalfedgeHandle heh = oldSubMesh.halfedge_handle(*f_it);
-            VertexHandle v1 = oldSubMesh.from_vertex_handle(heh);
-            VertexHandle v2 = oldSubMesh.to_vertex_handle(heh);
-            VertexHandle v3 = oldSubMesh.to_vertex_handle(oldSubMesh.next_halfedge_handle(heh));
-            
-            std::vector<VertexHandle> face_vhs;
-            face_vhs.push_back(oldToNewMapping[v1]);
-            face_vhs.push_back(oldToNewMapping[v2]);
-            face_vhs.push_back(oldToNewMapping[v3]);
-            FaceHandle newF = subMesh->add_face(face_vhs);
-            
-            // Set properties
-            subMesh->set_color(newF, oldSubMesh.color(*f_it));
-        }
-        
-        // Update seams
-        std::vector<int> subSeamsId;
-
-        std::set<EdgeHandle> &seams = subMesh->property(seamsHandle);
-        std::set<EdgeHandle> &oldSeams = oldSubMesh.property(oldSeamsHandle);
-        for (auto e_it = oldSeams.begin(); e_it != oldSeams.end(); e_it++) {
-            HalfedgeHandle old_heh = oldSubMesh.halfedge_handle(*e_it, 0);
-            VertexHandle oldV1 = oldSubMesh.from_vertex_handle(old_heh);
-            VertexHandle oldV2 = oldSubMesh.to_vertex_handle(old_heh);
-            EdgeHandle he;
-            bool edgeExist = PlushPatternGenerator::getEdge(subMesh, he, oldToNewMapping[oldV1], oldToNewMapping[oldV2]);
-            assert(edgeExist);
-            
-            // Update inverse map
-            seams.insert(he);
-            subSeamsId.push_back(he.idx());
-            
-            VertexHandle oldOriginalV1 = oldSubMesh.property(oldInverseMappingHandle, oldV1);
-            VertexHandle oldOriginalV2 = oldSubMesh.property(oldInverseMappingHandle, oldV2);
-            EdgeHandle original_he;
-            edgeExist = PlushPatternGenerator::getEdge(m_triMeshObj->mesh(), original_he, oldOriginalV1, oldOriginalV2);
-            assert(edgeExist);
-            seamsId.push_back(original_he.idx());
-        }
-
-        subMesh->request_face_normals();
-        subMesh->update_face_normals();
-        subMesh->request_edge_colors();
-        
-        // Assigning edge color for boundary
-        for (EdgeHandle eh : subMesh->edges()) {
-            if (subMesh->is_boundary(eh)) {
-                EdgeHandle original_eh = m_patternGenerator->get_original_handle(subMesh, eh);
-                int segment_no = m_triMeshObj->mesh()->property(PlushPatternGenerator::segment_no_handle, original_eh);
-                
-                TriMesh::Color color = color_coder.color_float4(segment_no);
-
-                subMesh->set_color(eh, color);
-            } else {
-                subMesh->set_color(eh, TriMesh::Color(1, 1, 1, 0));
-            }
-        }
         object->materialNode()->set_line_smooth(true);
         object->materialNode()->enable_alpha_test(0.1);
+        object->manipulatorNode()->translate(far);
+
+        TriMesh *mesh = object->mesh();
+        mesh->request_edge_colors();
+        
+        m_patternGenerator->get_triMesh_from_subMesh(mesh, flattenedSubMeshes.at(i), true);
+
+        MeshInfo::getBoundingBox(mesh, minP[i], maxP[i]);
+        columnWidth[i % nColumns] = max(columnWidth[i % nColumns], maxP[i][0] - minP[i][0]);
+        rowHeight[i / nColumns] = max(rowHeight[i / nColumns], maxP[i][1] - minP[i][1]);
+        width = max(width, maxP[i][0] - minP[i][0]);
+        height = max(height, maxP[i][1] - minP[i][1]);
+        depth = max(depth, maxP[i][2] - minP[i][2]);
+
         // numbers on sub meshes
 //        ACG::SceneGraph::TransformNode *sub_mesh_text_transform_node;
 //        std::stringstream sub_mesh_text_transform_node_name;
@@ -712,11 +652,36 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
 //        text_node->setFont(font);
 //        text_node->setText(std::to_string(i+1));
 //        text_node->setPixelSize(20);
-        
-        // Replace old sub mesh with new sub mesh to m_flattenedGraph
-        flattenedMeshes->at(i) = *subMesh;
     }
-    MeshSelection::selectEdges(m_triMeshObj->mesh(), seamsId);
+    
+    // Packing
+    double spacing = max(height, width)/5;
+    // The anchor is at bottom-left corner of a mesh
+    OpenMesh::Vec3d anchor(0,0,0);
+    
+    for (int i = 0; i < n; i++) {
+        TriMeshObject *object = 0;
+        PluginFunctions::getObject(newTriMeshIds[i], object);
+        TriMesh *mesh = object->mesh();
+        
+        // For a new row, calculate the bottom-left anchor position
+        if (i % nColumns == 0) {
+            if (i > 0) {
+                // Add row height of previous row
+                anchor[1] += rowHeight[i / nColumns - 1] + spacing;
+            }
+            anchor[0] = 0;
+        } else {
+            anchor[0] += columnWidth[(i-1) % nColumns] + spacing;
+        }
+        
+        // Move each mesh to the grid center it belongs to
+        OpenMesh::Vec3d additional_offset(columnWidth[i % nColumns]/2 - (maxP[i][0] + minP[i][0])/2,
+                                          rowHeight[i / nColumns]/2 - (maxP[i][1] + minP[i][1])/2,
+                                          -depth/2);
+        object->manipulatorNode()->translate(anchor + additional_offset);
+    }
+//    MeshSelection::selectEdges(m_triMeshObj->mesh(), seamsId);
     PluginFunctions::setDrawMode(ACG::SceneGraph::DrawModes::EDGES_COLORED);
     emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
 }

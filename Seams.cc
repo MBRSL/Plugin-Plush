@@ -121,10 +121,8 @@ bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices
 
     std::vector<TriMesh> subMeshes;
 
-    std::set<EdgeHandle> *seams = getSeams();
-    if (seams) {
-        seams->clear();
-    }
+    std::set<EdgeHandle> &seams = m_mesh->property(seams_handle);
+    seams.clear();
     
 //    calcCircularSeams(m_mesh, developable_threshold, false);
     calcStructralSeams(m_mesh, selectedVertices, limitNum, elimination, allPath);
@@ -140,17 +138,17 @@ bool PlushPatternGenerator::calcSeams(std::vector<VertexHandle> selectedVertices
  @return <#retval#>
  @retval <#meaning#>
  */
-bool PlushPatternGenerator::calcLocalSeams(TriMesh *sub_mesh, double developable_threshold) {
+bool PlushPatternGenerator::calcLocalSeams(FilteredTriMesh &sub_mesh, double developable_threshold) {
     unsigned int num_prev_seam = 0;
-    std::set<EdgeHandle> *seams = getSeams();
+    std::set<EdgeHandle> &seams = m_mesh->property(seams_handle);
     std::vector<TriMesh> sub_meshes;
     std::set<std::vector<HalfedgeHandle> > calculated;
     
     do {
-        num_prev_seam = seams->size();
+        num_prev_seam = seams.size();
         
         std::vector< std::vector<HalfedgeHandle> > closed_seams;
-        get_closed_boundaries_of_seams(&closed_seams, seams);
+        get_closed_boundaries_of_seams(closed_seams, seams);
         
         for (std::vector<HalfedgeHandle> closed_seam : closed_seams) {
             if (calculated.find(closed_seam) != calculated.end()) {
@@ -158,18 +156,17 @@ bool PlushPatternGenerator::calcLocalSeams(TriMesh *sub_mesh, double developable
             }
             calculated.insert(closed_seam);
             
-            TriMesh sub_mesh;
-            extract_mesh_with_boundary(&sub_mesh, m_mesh->face_handle(*closed_seam.begin()), seams);
+            FilteredTriMesh sub_mesh = get_subMesh_with_boundary(m_mesh->face_handle(closed_seam.front()), seams);
             
-            std::map<VertexHandle, OpenMesh::Vec3d> boundaryPosition;
-            calcLPFB(&sub_mesh, &boundaryPosition);
-            calcInteriorPoints(&sub_mesh, &boundaryPosition);
+            std::map<HalfedgeHandle, OpenMesh::Vec3d> boundaryPosition;
+            calcLPFB(sub_mesh, boundaryPosition);
+            calcInteriorPoints(sub_mesh, boundaryPosition);
             calcDistortion(sub_mesh);
             
-            calcCircularSeams(&sub_mesh, developable_threshold, true);
+//            calcCircularSeams(&sub_mesh, developable_threshold, true);
         }
-        seams = getSeams();
-    } while (seams->size() != num_prev_seam);
+        seams = m_mesh->property(seams_handle);
+    } while (seams.size() != num_prev_seam);
     
     return true;
 }
@@ -496,8 +493,7 @@ bool PlushPatternGenerator::calcCircularSeams(TriMesh *mesh, double threshold, b
                 }
             }
         }
-        OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
-        std::set<EdgeHandle> &seams = m_mesh->property(seamsHandle);
+        std::set<EdgeHandle> &seams = m_mesh->property(seams_handle);
         seams.insert(final_edges.begin(), final_edges.end());
     }
     return true;
@@ -577,8 +573,7 @@ bool PlushPatternGenerator::calcStructralSeams(TriMesh *mesh,
     }
     
     // insert edges into seams
-    OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = getSeamsHandle(m_mesh);
-    std::set<EdgeHandle> &seams = m_mesh->property(seamsHandle);
+    std::set<EdgeHandle> &seams = m_mesh->property(seams_handle);
     int count = 0;
     for (std::vector<std::pair<double, std::vector<VertexHandle> > >::iterator it = result.begin(); it != result.end(); it++, count++) {
         // Break if we reach limitNum
@@ -624,8 +619,7 @@ bool PlushPatternGenerator::load_seams() {
     
     QTextStream in(&file);
 
-    OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = PlushPatternGenerator::getSeamsHandle(m_mesh);
-    std::set<EdgeHandle> &seams = m_mesh->property(seamsHandle);
+    std::set<EdgeHandle> &seams = m_mesh->property(seams_handle);
 
     QString eh_str;
     while(!in.atEnd()) {
@@ -644,8 +638,7 @@ bool PlushPatternGenerator::load_seams() {
 }
 
 bool PlushPatternGenerator::save_seams() {
-    OpenMesh::MPropHandleT< std::set<EdgeHandle> > seamsHandle = PlushPatternGenerator::getSeamsHandle(m_mesh);
-    std::set<EdgeHandle> &seams = m_mesh->property(seamsHandle);
+    std::set<EdgeHandle> &seams = m_mesh->property(seams_handle);
     
     // Prepare file for saving data
     QFile file(m_meshName + "_seams.txt");
@@ -658,4 +651,8 @@ bool PlushPatternGenerator::save_seams() {
     file.close();
     
     return true;
+}
+
+std::set<EdgeHandle> PlushPatternGenerator::get_seams() {
+    return m_mesh->property(seams_handle);
 }
