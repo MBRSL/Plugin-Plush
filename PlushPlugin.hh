@@ -137,7 +137,9 @@ private slots:
     void vis_intersection_points_button_clicked();
     void vis_seam_segments_button_clicked();
     void vis_skeleton_button_clicked();
-
+    void vis_save_home_view_button_clicked();
+    void vis_load_home_view_button_clicked();
+    
     // Starter function for thread
     void calcGeodesicThread();
     void calcFlattenedGraphThread();

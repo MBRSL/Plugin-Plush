@@ -163,11 +163,19 @@ void PlushPlugin::initializePlugin()
     QPushButton *vis_intersection_points_button = new QPushButton(tr("Intersection points"));
     QPushButton *vis_seam_segments_button = new QPushButton(tr("Seam segments"));
     QPushButton *vis_skeleton_button = new QPushButton(tr("Skeleton"));
-    QHBoxLayout *visualization_layout = new QHBoxLayout;
-    visualization_layout->addWidget(vis_intersection_points_button);
-    visualization_layout->addWidget(vis_seam_segments_button);
-    visualization_layout->addWidget(vis_skeleton_button);
-    visualization_group->setLayout(visualization_layout);
+    QPushButton *vis_save_home_view_button = new QPushButton(tr("save view"));
+    QPushButton *vis_load_home_view_button = new QPushButton(tr("load view"));
+    QVBoxLayout *vis_layout = new QVBoxLayout;
+    QHBoxLayout *vis_layout_row1 = new QHBoxLayout;
+    QHBoxLayout *vis_layout_row2 = new QHBoxLayout;
+    vis_layout_row1->addWidget(vis_intersection_points_button);
+    vis_layout_row1->addWidget(vis_seam_segments_button);
+    vis_layout_row1->addWidget(vis_skeleton_button);
+    vis_layout_row2->addWidget(vis_save_home_view_button);
+    vis_layout_row2->addWidget(vis_load_home_view_button);
+    vis_layout->addLayout(vis_layout_row1);
+    vis_layout->addLayout(vis_layout_row2);
+    visualization_group->setLayout(vis_layout);
 
     layout->addWidget(seamGroup);
     layout->addWidget(subsetGroup);
@@ -205,7 +213,8 @@ void PlushPlugin::initializePlugin()
     connect(vis_intersection_points_button, SIGNAL(clicked()), this, SLOT(vis_intersection_points_button_clicked()));
     connect(vis_seam_segments_button, SIGNAL(clicked()), this, SLOT(vis_seam_segments_button_clicked()));
     connect(vis_skeleton_button, SIGNAL(clicked()), this, SLOT(vis_skeleton_button_clicked()));
-
+    connect(vis_save_home_view_button, SIGNAL(clicked()), this, SLOT(vis_save_home_view_button_clicked()));
+    connect(vis_load_home_view_button, SIGNAL(clicked()), this, SLOT(vis_load_home_view_button_clicked()));
     
     emit addToolbox(tr("Plush"), toolBox);
 
@@ -542,6 +551,30 @@ void PlushPlugin::vis_skeleton_button_clicked() {
     }
     PluginFunctions::setDrawMode(ACG::SceneGraph::DrawModes::WIREFRAME);
     emit updatedObject(m_triMeshObj->id(), UPDATE_ALL);
+}
+
+void PlushPlugin::vis_save_home_view_button_clicked() {
+    QString view = PluginFunctions::getEncodedExaminerView();
+
+    QString meshName = QFileInfo(m_triMeshObj->name()).baseName();
+    // Prepare file for saving data
+    QFile file(meshName + "_view.txt");
+    file.open(QIODevice::WriteOnly | QIODevice::Text);
+    QTextStream out(&file);
+    out << view;
+    file.close();
+}
+
+void PlushPlugin::vis_load_home_view_button_clicked() {
+    QString meshName = QFileInfo(m_triMeshObj->name()).baseName();
+    QFile file(meshName + "_view.txt");
+    file.open(QIODevice::ReadOnly | QIODevice::Text);
+    QTextStream in(&file);
+    QString view = in.readAll();
+    file.close();
+
+    PluginFunctions::setEncodedExaminerView(view);
+    emit updateView();
 }
 
 void PlushPlugin::showFlattenedGrpahButtonClicked() {
