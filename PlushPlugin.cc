@@ -96,11 +96,22 @@ void PlushPlugin::initializePlugin()
     skeletonWeightLayout->addWidget(calcSkeletonWeightButton);
     skeletonWeightGroup->setLayout(skeletonWeightLayout);
     
+    QGroupBox *visualization_group = new QGroupBox(tr("Visualization"));
+    QPushButton *vis_save_home_view_button = new QPushButton(tr("save view"));
+    QPushButton *vis_load_home_view_button = new QPushButton(tr("load view"));
+    QVBoxLayout *vis_layout = new QVBoxLayout;
+    QHBoxLayout *vis_layout_row1 = new QHBoxLayout;
+    vis_layout_row1->addWidget(vis_save_home_view_button);
+    vis_layout_row1->addWidget(vis_load_home_view_button);
+    vis_layout->addLayout(vis_layout_row1);
+    visualization_group->setLayout(vis_layout);
+
     layout->addWidget(geodesicGroup);
     layout->addWidget(selectionGroup);
     layout->addWidget(flatteningGroup);
     layout->addWidget(curvatureGroup);
     layout->addWidget(skeletonWeightGroup);
+    layout->addWidget(visualization_group);
     
     connect(calcSkeletonWeightButton, SIGNAL(clicked()), this, SLOT(calcSkeletonWeightButtonClicked()));
     connect(geodesicShowSingleButton, SIGNAL(clicked()), this, SLOT(showGeodesicButtonClicked()));
@@ -114,7 +125,9 @@ void PlushPlugin::initializePlugin()
     connect(calcFlattenButton, SIGNAL(clicked()), this, SLOT(calcFlattenedGraphButtonClicked()));
     connect(showFlattenButton, SIGNAL(clicked()), this, SLOT(showFlattenedGrpahButtonClicked()));
     connect(calcCurvatureButton, SIGNAL(clicked()), this, SLOT(calcCurvatureButtonClicked()));
-    
+    connect(vis_save_home_view_button, SIGNAL(clicked()), this, SLOT(vis_save_home_view_button_clicked()));
+    connect(vis_load_home_view_button, SIGNAL(clicked()), this, SLOT(vis_load_home_view_button_clicked()));
+
     emit addToolbox(tr("Plush"), toolBox);
 
     // Register keys
@@ -349,6 +362,30 @@ void PlushPlugin::showGeodesicButtonClicked() {
         MeshSelection::selectEdges(mesh, edgeList);
         emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
     }
+}
+
+void PlushPlugin::vis_save_home_view_button_clicked() {
+    QString view = PluginFunctions::getEncodedExaminerView();
+    
+    QString meshName = QFileInfo(m_triMeshObj->name()).baseName();
+    // Prepare file for saving data
+    QFile file(meshName + "_view.txt");
+    file.open(QIODevice::WriteOnly | QIODevice::Text);
+    QTextStream out(&file);
+    out << view;
+    file.close();
+}
+
+void PlushPlugin::vis_load_home_view_button_clicked() {
+    QString meshName = QFileInfo(m_triMeshObj->name()).baseName();
+    QFile file(meshName + "_view.txt");
+    file.open(QIODevice::ReadOnly | QIODevice::Text);
+    QTextStream in(&file);
+    QString view = in.readAll();
+    file.close();
+
+    PluginFunctions::setEncodedExaminerView(view);
+    emit updateView();
 }
 
 void PlushPlugin::showFlattenedGrpahButtonClicked() {

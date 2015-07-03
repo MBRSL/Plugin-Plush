@@ -117,7 +117,10 @@ private slots:
     void calcFlattenedGraphButtonClicked();
     
     void calcCurvatureButtonClicked();
-
+    
+    void vis_save_home_view_button_clicked();
+    void vis_load_home_view_button_clicked();
+    
     // Starter function for thread
     void calcCurvatureThread();
     void calcGeodesicThread();
