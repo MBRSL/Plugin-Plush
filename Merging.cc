@@ -403,9 +403,6 @@ void PlushPatternGenerator::optimize_patches(double threshold, bool step) {
                 if (max_area_diff[2] > threshold) {
                     if (min(sum_area[0], sum_area[1])/max(sum_area[0], sum_area[1]) < 0.01) {
                         can_be_merge = true;
-                        for (HalfedgeHandle heh : segment) {
-                            m_mesh->status(heh).set_selected(true);
-                        }
                     } else {
                         can_be_merge = false;
                     }
@@ -415,23 +412,38 @@ void PlushPatternGenerator::optimize_patches(double threshold, bool step) {
             iterations++;
             emit setJobState((double)iterations/num_original_segments * 100);
 
+            // visualization
             if (can_be_merge && is_valid) {
-                if (max_area_diff[2] > threshold) {
-                    int a= 0;
+                for (HalfedgeHandle heh : prevBoundary) {
+                    EdgeHandle eh = m_mesh->edge_handle(heh);
+                    m_mesh->set_color(eh, TriMesh::Color(1,1,1,0));
+                    m_mesh->status(eh).set_selected(true);
                 }
+                for (HalfedgeHandle heh : prevSegment) {
+                    EdgeHandle eh = m_mesh->edge_handle(heh);
+                    m_mesh->set_color(eh, TriMesh::Color(1,1,1,0));
+                }
+                for (HalfedgeHandle heh : boundaries[2]) {
+                    EdgeHandle eh = m_mesh->edge_handle(heh);
+                    m_mesh->set_color(eh, TriMesh::Color(0,1,0,1));
+                    m_mesh->status(eh).set_selected(false);
+                }
+                prevBoundary = boundaries[2];
+                prevSegment = segment;
+                
                 for (HalfedgeHandle heh : segment) {
                     EdgeHandle eh = m_mesh->edge_handle(heh);
                     seams->erase(eh);
+                    m_mesh->set_color(eh, TriMesh::Color(0,0,1,1));
                     m_mesh->status(eh).set_selected(false);
                 }
-
+                
                 cant_be_merged_anymore = false;
                 emit updateView();
-                emit log(QString::number(m_mesh->property(merge_iterations_handle)));
+                emit log(LOGINFO, QString::number(m_mesh->property(merge_iterations_handle)));
                 m_mesh->property(merge_iterations_handle)++;
-                
 
-                if (step) {
+                if (step && m_mesh->property(merge_iterations_handle) % 10 == 0) {
                     return;
                 } else {
                     break;

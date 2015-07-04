@@ -287,6 +287,10 @@ void PlushPlugin::mergeSegmentButtonClicked() {
         return;
     }
     
+    m_triMeshObj->setObjectDrawMode(ACG::SceneGraph::DrawModes::EDGES_COLORED | ACG::SceneGraph::DrawModes::SOLID_FLAT_SHADED);
+    m_triMeshObj->materialNode()->enable_alpha_test(0.1);
+    m_triMeshObj->materialNode()->set_line_width(3);
+    
     m_currentJobId = "merge";
     OpenFlipperThread *thread = new OpenFlipperThread(m_currentJobId);
     connect(thread, SIGNAL(finished(QString)), this, SIGNAL(finishJob(QString)));
@@ -621,7 +625,7 @@ void PlushPlugin::receiveLog(int type, QString msg) {
 }
 
 void PlushPlugin::receiveUpdate() {
-    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION | UPDATE_COLOR);
 }
 
 void PlushPlugin::slotKeyEvent( QKeyEvent* _event ) {

@@ -41,6 +41,8 @@ OpenMesh::MPropHandleT< std::set<EdgeHandle> > PlushPatternGenerator::getSeamsHa
 }
 
 PlushPatternGenerator::PlushPatternGenerator(TriMesh *mesh, QString meshName) : m_mesh(mesh), m_meshName(meshName) {
+    m_mesh->request_edge_colors();
+    
     // setup properties
     initProperties();
     

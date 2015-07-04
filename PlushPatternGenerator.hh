@@ -209,6 +209,9 @@ private:
     void initProperties();
     void uninitProperties();
     
+    std::vector<HalfedgeHandle> prevBoundary;
+    std::vector<HalfedgeHandle> prevSegment;
+    
     /// Utils
     template<class T>
     void markSelection(const std::vector< std::set<T> > &group_of_handles, TriMesh *mesh) {
