@@ -548,79 +548,65 @@ bool PlushPatternGenerator::get_triMesh_from_subMesh(TriMesh *result_triMesh, Fi
     
     OpenMesh::VPropHandleT<VertexHandle> inverse_mapping = getInverseMappingHandle(result_triMesh);
 
-    // For non-boundary vertices, we construct a one-to-one mapping from old to new
-    std::map<VertexHandle, VertexHandle> vertex_to_vertex_mapping;
-    // But for boundary vertices, one old vertex may maps to two new vertices. This is the problem.
-    // So we use halfedge-vertex mapping because two old halfedges can map to two new vertices.
-    std::map<HalfedgeHandle, VertexHandle> halfedge_to_vertex_mapping;
+    // We use the idx from subMesh to map old vertice to new vertice
+    std::map<int, VertexHandle> vertex_mapping;
     
-    // Explore & insert new vertices
-    for (FaceHandle fh : subMesh.faces()) {
-        for (const HalfedgeHandle cfh : subMesh.fh_range(fh)) {
-            VertexHandle vi = subMesh.from_vertex_handle(cfh);
-            TriMesh::Point p;
-            if (use_flattened_position) {
-                if (!subMesh.is_boundary(vi)) {
-                    p = subMesh.flattened_non_boundary_point(vi);
-                } else {
-                    p = subMesh.flattened_boundary_point(cfh);
+    // Insert new vertices
+    for (EdgeHandle eh : subMesh.boundary_edges()) {
+        for (int i = 0; i < 2; i++) {
+            HalfedgeHandle heh = subMesh.halfedge_handle(eh, i);
+            if (subMesh.is_boundary(heh)) {
+                VertexHandle vh = subMesh.from_vertex_handle(heh);
+                
+                TriMesh::Point p = subMesh.flattened_boundary_point(heh);
+                if (!use_flattened_position) {
+                    p = subMesh.point(vh);
                 }
-            } else {
-                p = subMesh.point(vi);
-            }
-            // Insert vertices into new mesh
-            // If this is a boundary vertex...
-            if (subMesh.is_boundary(vi)) {
-                // And only add new vertex if this is a boundary halfedge and bind the added vertex to this halfedge
-                if (subMesh.is_boundary(subMesh.edge_handle(cfh))) {
-                    VertexHandle new_v = result_triMesh->add_vertex(p);
-                    result_triMesh->property(inverse_mapping, new_v) = vi;
-                    halfedge_to_vertex_mapping.emplace(cfh, new_v);
-                }
-            }
-            // If not a boundary vertex, we have to check if this vertex is already added
-            else if (vertex_to_vertex_mapping.find(vi) == vertex_to_vertex_mapping.end()) {
-                VertexHandle new_v = result_triMesh->add_vertex(p);
-                result_triMesh->property(inverse_mapping, new_v) = vi;
-                vertex_to_vertex_mapping.emplace(vi, new_v);
+                VertexHandle new_vh = result_triMesh->add_vertex(p);
+                
+                result_triMesh->property(inverse_mapping, new_vh) = vh;
+                int v_id = subMesh.get_boundary_vertex_idx(heh);
+                vertex_mapping.emplace(v_id, new_vh);
             }
         }
     }
-    
-    // Insert new faces
-//    result_triMesh->request_face_colors();
+    for (VertexHandle vh : subMesh.vertices()) {
+        if (!subMesh.is_boundary(vh)) {
+            TriMesh::Point p = subMesh.flattened_non_boundary_point(vh);
+            if (!use_flattened_position) {
+                p = subMesh.point(vh);
+            }
+            VertexHandle new_vh = result_triMesh->add_vertex(p);
+            result_triMesh->property(inverse_mapping, new_vh) = vh;
+            int v_id = subMesh.get_non_boundary_vertex_idx(vh);
+            vertex_mapping.emplace(v_id, new_vh);
+        }
+    }
+
+    // Now new vertices are ready, we can use them to insert new faces
     for (FaceHandle fh : subMesh.faces()) {
         std::vector<VertexHandle> face_vhs;
         // Search for corresponding new vertex
         for (const HalfedgeHandle cfh : subMesh.fh_range(fh)) {
             VertexHandle vi = subMesh.from_vertex_handle(cfh);
-            // Non-boundary vertex
-            if (!subMesh.is_boundary(vi)) {
-                face_vhs.push_back(vertex_to_vertex_mapping[vi]);
+            int v_id = -1;
+            if (subMesh.is_boundary(vi)) {
+                HalfedgeHandle heh = cfh;
+                v_id = subMesh.get_boundary_vertex_idx(heh);
+            } else {
+                v_id = subMesh.get_non_boundary_vertex_idx(vi);
             }
-            // boundary vertex on boundary halfedge
-            else if (subMesh.is_boundary(subMesh.edge_handle(cfh))) {
-                face_vhs.push_back(halfedge_to_vertex_mapping[cfh]);
-            }
-            // boundary vertex on non-boundary halfedge, we need to search for neighbor boundary halfedge
-            else {
-                // loop until we find a boundary halfedge
-                HalfedgeHandle current_heh = subMesh.next_halfedge_handle(subMesh.opposite_halfedge_handle(cfh));
-                for (unsigned int count = 0; !subMesh.is_boundary(subMesh.edge_handle(current_heh)); count++) {
-                    current_heh = subMesh.next_halfedge_handle(subMesh.opposite_halfedge_handle(current_heh));
-                    assert(count < subMesh.valence(vi));
-                }
-                assert(halfedge_to_vertex_mapping.find(current_heh) != halfedge_to_vertex_mapping.end());
-                face_vhs.push_back(halfedge_to_vertex_mapping[current_heh]);
-            }
+            assert(vertex_mapping[v_id].is_valid());
+            face_vhs.push_back(vertex_mapping[v_id]);
         }
-        assert(!face_vhs.empty());
+        assert(face_vhs.size() == 3);
         
         FaceHandle newF = result_triMesh->add_face(face_vhs);
         result_triMesh->set_color(newF, TriMesh::Color(1, 1, 1, 1));
     }
-    
+
     // Assigning edge color for boundary
+    result_triMesh->request_edge_colors();
     ACG::ColorCoder color_coder(0, 255, false);
     for (EdgeHandle eh : result_triMesh->edges()) {
         if (result_triMesh->is_boundary(eh)) {

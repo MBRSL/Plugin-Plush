@@ -40,7 +40,6 @@ LPFB_NLP::LPFB_NLP(FilteredTriMesh &mesh, std::map<HalfedgeHandle, OpenMesh::Vec
         // We have to constrcut a new graph with an additional starting point to achieve it.
         typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
         boost::property<boost::vertex_owner_t, VertexHandle>,
-        
         boost::property<boost::edge_weight_t, double>
         > Graph;
         Graph multi_source_graph;
@@ -48,7 +47,6 @@ LPFB_NLP::LPFB_NLP(FilteredTriMesh &mesh, std::map<HalfedgeHandle, OpenMesh::Vec
         std::map<VertexHandle, unsigned long> triMesh_to_graph_vertex_mapping;
         for (const VertexHandle vh : m_mesh.vertices()) {
             Graph::vertex_descriptor vid = boost::add_vertex(vh, multi_source_graph);
-            put(boost::vertex_owner, multi_source_graph, vid, vh);
             triMesh_to_graph_vertex_mapping.emplace(vh, vid);
         }
         for (const EdgeHandle eh : m_mesh.edges()) {
@@ -58,7 +56,7 @@ LPFB_NLP::LPFB_NLP(FilteredTriMesh &mesh, std::map<HalfedgeHandle, OpenMesh::Vec
             
             Graph::vertex_descriptor vid1 = triMesh_to_graph_vertex_mapping[v1];
             Graph::vertex_descriptor vid2 = triMesh_to_graph_vertex_mapping[v2];
-            boost::add_edge(vid1, vid2, m_mesh.calc_edge_length(eh), multi_source_graph).first;
+            boost::add_edge(vid1, vid2, m_mesh.calc_edge_length(eh), multi_source_graph);
         }
 
         // For inner boundaries, calculate virtual cut and insert them into appropriate position of m_boundary3D
@@ -77,12 +75,10 @@ LPFB_NLP::LPFB_NLP(FilteredTriMesh &mesh, std::map<HalfedgeHandle, OpenMesh::Vec
             // with new additional vertex as starting point and inserting 0-weight edges
             // from starting point to other point on source boundary
             Graph::vertex_descriptor startingV = boost::add_vertex(multi_source_graph);
-            Graph::vertex_iterator v_it, v_ite;
-            for (tie(v_it, v_ite) = vertices(multi_source_graph); v_it != v_ite; v_it++) {
-                VertexHandle v = get(boost::vertex_owner, multi_source_graph, *v_it);
-                if (sourceBoundaryVertices.find(v) != sourceBoundaryVertices.end()) {
-                    Graph::edge_descriptor e = boost::add_edge(startingV, *v_it, 0, multi_source_graph).first;
-                }
+            for (VertexHandle vh : sourceBoundaryVertices) {
+                assert(triMesh_to_graph_vertex_mapping.find(vh) != triMesh_to_graph_vertex_mapping.end());
+                Graph::vertex_descriptor vid = triMesh_to_graph_vertex_mapping[vh];
+                boost::add_edge(startingV, vid, 0, multi_source_graph);
             }
 
             std::vector<Graph::vertex_descriptor> predecessor_map(num_vertices(multi_source_graph));
@@ -111,7 +107,7 @@ LPFB_NLP::LPFB_NLP(FilteredTriMesh &mesh, std::map<HalfedgeHandle, OpenMesh::Vec
                     minDstV = vid;
                 }
             }
-            assert(minDistance > 0);
+            assert(minDistance > 0 && "It's pretty likely that your boundary is wrong.");
             
             // Back tracing
             std::vector<HalfedgeHandle> virtualCut;

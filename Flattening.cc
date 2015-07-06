@@ -150,26 +150,28 @@ void PlushPatternGenerator::calcDistortion(std::vector<FilteredTriMesh> &flatten
 void PlushPatternGenerator::calcDistortion(FilteredTriMesh &flattenedMesh) {
     // For each face, calculate area difference
     // For each vertex, calculate averaged neighboring area difference
-    for (FaceHandle f : flattenedMesh.faces()) {
-        HalfedgeHandle heh = flattenedMesh.halfedge_handle(f);
-        double original_area = m_mesh->calc_sector_area(heh);
+    
+    for (FaceHandle fh : flattenedMesh.faces()) {
+        double original_area = m_mesh->calc_sector_area(flattenedMesh.halfedge_handle(fh));
 
         int count = 0;
         TriMesh::Point flattenedPoints[3];
-        for (HalfedgeHandle heh : flattenedMesh.fh_range(f)) {
-            VertexHandle vh = flattenedMesh.from_vertex_handle(heh);
+        for (const HalfedgeHandle cfh : flattenedMesh.fh_range(fh)) {
+            VertexHandle vh = flattenedMesh.from_vertex_handle(cfh);
             if (!flattenedMesh.is_boundary(vh)) {
                 flattenedPoints[count++] = flattenedMesh.flattened_non_boundary_point(vh);
             } else {
-                flattenedPoints[count++] = flattenedMesh.flattened_boundary_point(heh);
+                flattenedPoints[count++] = flattenedMesh.flattened_boundary_point(cfh);
             }
         }
-        double flattened_area = 1/2 * (flattenedPoints[0][0]*(flattenedPoints[1][1]-flattenedPoints[2][1])
-                                      -flattenedPoints[0][1]*(flattenedPoints[1][0]-flattenedPoints[2][0])
-                                      +flattenedPoints[1][0]*flattenedPoints[2][1]-flattenedPoints[1][1]*flattenedPoints[2][0]);
+        OpenMesh::Vec3d a = flattenedPoints[1] - flattenedPoints[0];
+        OpenMesh::Vec3d b = flattenedPoints[2] - flattenedPoints[0];
+        double flattened_area = (a % b).norm()/2;
 
         double area_diff = (flattened_area - original_area) / original_area;
-        m_mesh->property(distortionFHandle, f) = area_diff;
+        m_mesh->property(distortionFHandle, fh) = area_diff;
+        
+        flattenedMesh.max_distortion = max(flattenedMesh.max_distortion, abs(area_diff));
 //        m_mesh->property(distortionVHandle, original_v1) += area_diff;
 //        m_mesh->property(distortionVHandle, original_v2) += area_diff;
 //        m_mesh->property(distortionVHandle, original_v3) += area_diff;

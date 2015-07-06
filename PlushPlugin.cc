@@ -303,6 +303,7 @@ void PlushPlugin::saveSelection(TriMesh *mesh, QString meshName) {
 
 void PlushPlugin::clearSelection(TriMesh *mesh) {
     MeshSelection::clearVertexSelection(mesh);
+    MeshSelection::clearEdgeSelection(mesh);
     emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
 }
 
@@ -382,7 +383,7 @@ void PlushPlugin::subset_calc_button_clicked() {
     m_triMeshObj->setObjectDrawMode(ACG::SceneGraph::DrawModes::EDGES_COLORED | ACG::SceneGraph::DrawModes::SOLID_FLAT_SHADED);
     m_triMeshObj->materialNode()->enable_alpha_test(0.1);
     if (seamMergeIsStep->isChecked()) {
-        calcMergeSementThread();
+        calcMergeSegmentThread();
     } else {
         m_currentJobId = "calc subset";
         OpenFlipperThread *thread = new OpenFlipperThread(m_currentJobId);
@@ -406,12 +407,12 @@ void PlushPlugin::seamMergeButtonClicked() {
     m_triMeshObj->setObjectDrawMode(ACG::SceneGraph::DrawModes::EDGES_COLORED | ACG::SceneGraph::DrawModes::SOLID_FLAT_SHADED);
     m_triMeshObj->materialNode()->enable_alpha_test(0.1);
     if (seamMergeIsStep->isChecked()) {
-        calcMergeSementThread();
+        calcMergeSegmentThread();
     } else {
         m_currentJobId = "merge";
         OpenFlipperThread *thread = new OpenFlipperThread(m_currentJobId);
         connect(thread, SIGNAL(finished(QString)), this, SIGNAL(finishJob(QString)));
-        connect(thread, SIGNAL(function(QString)), this, SLOT(calcMergeSementThread()), Qt::DirectConnection);
+        connect(thread, SIGNAL(function(QString)), this, SLOT(calcMergeSegmentThread()), Qt::DirectConnection);
         
         // Custom handler to set m_currentJobId to "" after finishing job.
         connect(thread, SIGNAL(finished(QString)), this, SLOT(finishedJobHandler()));
@@ -810,7 +811,7 @@ void PlushPlugin::calcFlattenedGraphThread() {
     m_patternGenerator->calcFlattenedGraph();
 }
 
-void PlushPlugin::calcMergeSementThread() {
+void PlushPlugin::calcMergeSegmentThread() {
 //    MeshSelection::clearEdgeSelection(m_triMeshObj->mesh());
     cpu0 = get_cpu_time();
     m_patternGenerator->optimize_patches(seamMergeThreshold->value(), seamMergeIsStep->isChecked());

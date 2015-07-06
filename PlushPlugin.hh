@@ -141,7 +141,7 @@ private slots:
     // Starter function for thread
     void calcGeodesicThread();
     void calcFlattenedGraphThread();
-    void calcMergeSementThread();
+    void calcMergeSegmentThread();
     void calcSubsetThread();
     
     void slotKeyEvent( QKeyEvent* _event );
