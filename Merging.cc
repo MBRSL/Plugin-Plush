@@ -64,6 +64,8 @@ FilteredTriMesh PlushPatternGenerator::merge_patch(FilteredTriMesh &patch1,
  @param threshold The distortion (area change of faces) threshold used for testing whether two patches can be merged
  */
 void PlushPatternGenerator::construct_subsets(double threshold) {
+    isJobCanceled = false;
+    
     std::set<EdgeHandle> &seams = m_mesh->property(seams_handle);
     
     SubMesh_graph subMesh_graph = get_subMeshes_with_boundary(seams);
@@ -105,6 +107,7 @@ void PlushPatternGenerator::construct_subsets(double threshold) {
             // For each sub-mesh in this patch, find its neigboring sub-mesh for merging
             for (SubMesh_graph::vertex_descriptor v1 = 0; v1 < patch.merged_subMesh_idx.size(); v1++) {
                 if (patch.merged_subMesh_idx[v1]) {
+
                     // Use subMesh_grpah to find adjacent sub-meshes
                     SubMesh_graph::out_edge_iterator e_it, e_ite;
                     for (boost::tie(e_it, e_ite) = boost::out_edges(v1, subMesh_graph); e_it != e_ite; e_it++) {

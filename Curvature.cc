@@ -13,8 +13,6 @@
 #include <QTextStream>
 
 bool PlushPatternGenerator::calcCurvature() {
-    isJobCanceled = false;
-    
     // Gaussian curvature
     for (VertexHandle v : m_mesh->vertices()) {
         m_mesh->property(gaussianCurvatureHandle, v) =  curvature::gauss_curvature(*m_mesh, v);
