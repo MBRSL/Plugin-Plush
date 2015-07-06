@@ -58,7 +58,6 @@ void PlushPlugin::initializePlugin()
     seamMergeThreshold->setMaximum(1);
     seamMergeThreshold->setValue(0.05);
     seamMergeThreshold->setSingleStep(0.005);
-    QPushButton *seamCalcSubsetButton = new QPushButton(tr("Calc subset"));
     seamMergeButton = new QPushButton(tr("Merge"));
     QVBoxLayout *seamLayout = new QVBoxLayout;
     QHBoxLayout *seamRow1Layout = new QHBoxLayout;
@@ -76,13 +75,27 @@ void PlushPlugin::initializePlugin()
     seamRow4Layout->addWidget(new QLabel(tr("Is step")));
     seamRow4Layout->addWidget(seamMergeIsStep);
     seamRow4Layout->addWidget(seamMergeThreshold);
-    seamRow4Layout->addWidget(seamCalcSubsetButton);
     seamRow4Layout->addWidget(seamMergeButton);
     seamLayout->addLayout(seamRow1Layout);
     seamLayout->addLayout(seamRow2Layout);
     seamLayout->addLayout(seamRow3Layout);
     seamLayout->addLayout(seamRow4Layout);
     seamGroup->setLayout(seamLayout);
+    
+    QGroupBox *subsetGroup = new QGroupBox(tr("Subset"));
+    QHBoxLayout *subsetLayout = new QHBoxLayout;
+    subset_merge_threshold = new QDoubleSpinBox();
+    subset_merge_threshold->setDecimals(5);
+    subset_merge_threshold->setMinimum(0.00001);
+    subset_merge_threshold->setMaximum(1);
+    subset_merge_threshold->setValue(0.05);
+    subset_merge_threshold->setSingleStep(0.005);
+    QPushButton *subset_calc_button = new QPushButton(tr("Calc subset"));
+    QPushButton *subset_show_button = new QPushButton(tr("Show subset"));
+    subsetLayout->addWidget(subset_merge_threshold);
+    subsetLayout->addWidget(subset_calc_button);
+    subsetLayout->addWidget(subset_show_button);
+    subsetGroup->setLayout(subsetLayout);
     
     QGroupBox *geodesicGroup = new QGroupBox(tr("Geodesic"));
     geodesic_distance_coef = new QDoubleSpinBox();
@@ -157,6 +170,7 @@ void PlushPlugin::initializePlugin()
     visualization_group->setLayout(visualization_layout);
 
     layout->addWidget(seamGroup);
+    layout->addWidget(subsetGroup);
     layout->addWidget(geodesicGroup);
     layout->addWidget(selectionGroup);
     layout->addWidget(flatteningGroup);
@@ -169,16 +183,21 @@ void PlushPlugin::initializePlugin()
     connect(seamLocalButton, SIGNAL(clicked()), this, SLOT(seamShowButtonClicked()));
     connect(seamLoadButton, SIGNAL(clicked()), this, SLOT(seamLoadButtonClicked()));
     connect(seamSaveButton, SIGNAL(clicked()), this, SLOT(seamSaveButtonClicked()));
-    connect(seamCalcSubsetButton, SIGNAL(clicked()), this, SLOT(seamCalcSubsetButtonClicked()));
     connect(seamMergeButton, SIGNAL(clicked()), this, SLOT(seamMergeButtonClicked()));
     
+    connect(subset_calc_button, SIGNAL(clicked()), this, SLOT(subset_calc_button_clicked()));
+    connect(subset_show_button, SIGNAL(clicked()), this, SLOT(subset_show_button_clicked()));
+
     connect(geodesicCalcButton, SIGNAL(clicked()), this, SLOT(calcGeodesicButtonClicked()));
+
     connect(loadSelectionButton, SIGNAL(clicked()), this, SLOT(loadSelectionButtonClicked()));
     connect(saveSelectionButton, SIGNAL(clicked()), this, SLOT(saveSelectionButtonClicked()));
     connect(clearSelectionButton, SIGNAL(clicked()), this, SLOT(clearSelectionButtonClicked()));
     connect(calcSelectionButton, SIGNAL(clicked()), this, SLOT(calcSelectionButtonClicked()));
+
     connect(calcFlattenButton, SIGNAL(clicked()), this, SLOT(calcFlattenedGraphButtonClicked()));
     connect(showFlattenButton, SIGNAL(clicked()), this, SLOT(showFlattenedGrpahButtonClicked()));
+
     connect(calcCurvatureButton, SIGNAL(clicked()), this, SLOT(calcCurvatureButtonClicked()));
     
     connect(calcSkeletonWeightButton, SIGNAL(clicked()), this, SLOT(calcSkeletonWeightButtonClicked()));
@@ -355,13 +374,28 @@ void PlushPlugin::seamSaveButtonClicked() {
     m_patternGenerator->save_seams();
 }
 
-void PlushPlugin::seamCalcSubsetButtonClicked() {
+void PlushPlugin::subset_calc_button_clicked() {
     if (!checkIfGeneratorExist()) {
         return;
     }
     
-    m_patternGenerator->construct_subsets();
-    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
+    m_triMeshObj->setObjectDrawMode(ACG::SceneGraph::DrawModes::EDGES_COLORED | ACG::SceneGraph::DrawModes::SOLID_FLAT_SHADED);
+    m_triMeshObj->materialNode()->enable_alpha_test(0.1);
+    if (seamMergeIsStep->isChecked()) {
+        calcMergeSementThread();
+    } else {
+        m_currentJobId = "calc subset";
+        OpenFlipperThread *thread = new OpenFlipperThread(m_currentJobId);
+        connect(thread, SIGNAL(finished(QString)), this, SIGNAL(finishJob(QString)));
+        connect(thread, SIGNAL(function(QString)), this, SLOT(calcSubsetThread()), Qt::DirectConnection);
+        
+        // Custom handler to set m_currentJobId to "" after finishing job.
+        connect(thread, SIGNAL(finished(QString)), this, SLOT(finishedJobHandler()));
+        
+        emit startJob(m_currentJobId, "calc subset", 0, 100, false);
+        thread->start();
+        thread->startProcessing();
+    }
 }
 
 void PlushPlugin::seamMergeButtonClicked() {
@@ -686,6 +720,31 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
     emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
 }
 
+void PlushPlugin::subset_show_button_clicked() {
+    auto hierarchical_patches = m_patternGenerator->get_hierarchical_patches();
+    if (hierarchical_patches.size() > 0) {
+        auto hierarchical_patches_layer = hierarchical_patches[hierarchical_patches.size()-1];
+        int counter = 0;
+        for (FilteredTriMesh subMesh : hierarchical_patches_layer) {
+            int id;
+            emit addEmptyObject(DATA_TRIANGLE_MESH, id);
+            TriMeshObject *object = 0;
+            PluginFunctions::getObject(id, object);
+            
+            TriMesh *mesh = object->mesh();
+            
+            m_patternGenerator->get_triMesh_from_subMesh(mesh, subMesh, false);
+            MeshSelection::selectBoundaryEdges(mesh);
+            counter++;
+            if (counter > 5) {
+                break;
+            }
+        }
+    }
+    
+    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
+}
+
 void PlushPlugin::saveSelectionButtonClicked() {
     if (!checkIfGeneratorExist()) {
         return;
@@ -757,8 +816,12 @@ void PlushPlugin::calcMergeSementThread() {
     m_patternGenerator->optimize_patches(seamMergeThreshold->value(), seamMergeIsStep->isChecked());
     cpu1 = get_cpu_time();
     emit log(LOGINFO, QString("Time: %1").arg(cpu1-cpu0));
-    
-    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
+}
+
+
+void PlushPlugin::calcSubsetThread() {
+    m_patternGenerator->construct_subsets(seamMergeThreshold->value());
+//    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
 }
 
 void PlushPlugin::canceledJob(QString _job) {

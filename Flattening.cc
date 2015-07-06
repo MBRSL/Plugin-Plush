@@ -14,24 +14,29 @@ bool PlushPatternGenerator::calcFlattenedGraph()
     }
     
     // Create sub meshes using boundaries
-    SubMesh_graph subMesh_graph;
-    m_mesh->property(flattenedSubMeshesHandle) = get_subMeshes_with_boundary(subMesh_graph, seams);
-    std::vector<FilteredTriMesh> &flattenedSubMeshes = m_mesh->property(flattenedSubMeshesHandle);
+    m_mesh->property(flattenedSubMeshesHandle) = get_subMeshes_with_boundary(seams);
 
     isJobCanceled = false;
-    for (size_t i = 0; i < flattenedSubMeshes.size(); i++) {
+    int progress_counter = 0;
+
+    SubMesh_graph &subMesh_graph = m_mesh->property(flattenedSubMeshesHandle);
+    SubMesh_graph::vertex_iterator v_it, v_ite;
+    for (boost::tie(v_it, v_ite) = boost::vertices(subMesh_graph); v_it != v_ite; v_it++) {
         if (isJobCanceled) {
             emit log(LOGINFO, "Flattening calculation canceled.");
             return false;
         }
+        FilteredTriMesh &subMesh = boost::get(boost::vertex_owner, subMesh_graph, *v_it);
+
         std::map<HalfedgeHandle, OpenMesh::Vec3d> boundaryPosition;
-        calcLPFB(flattenedSubMeshes.at(i), boundaryPosition);
-        calcInteriorPoints(flattenedSubMeshes.at(i), boundaryPosition);
-        setJobState((double)(i+1) / flattenedSubMeshes.size() * 100);
+        calcLPFB(subMesh, boundaryPosition);
+        calcInteriorPoints(subMesh, boundaryPosition);
+        calcDistortion(subMesh);
+
+        progress_counter++;
+        setJobState((double)progress_counter/ boost::num_vertices(subMesh_graph) * 100);
     }
     
-    calcDistortion(flattenedSubMeshes);
-
     return true;
 }
 

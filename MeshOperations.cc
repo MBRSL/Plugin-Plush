@@ -5,6 +5,7 @@
 #include <boost/graph/copy.hpp>
 #include <boost/graph/filtered_graph.hpp>
 #include <boost/graph/dijkstra_shortest_paths.hpp>
+#include <boost/dynamic_bitset.hpp>
 
 #include <ACG/Utils/ColorCoder.hh>
 
@@ -437,21 +438,15 @@ FilteredTriMesh PlushPatternGenerator::get_subMesh_with_boundary(FaceHandle root
     visitedF.insert(root_face);
     
     // Explore
-    std::vector<VertexHandle> vertices;
-    std::vector<EdgeHandle> edges;
-    std::vector<FaceHandle> faces;
-    std::vector<EdgeHandle> boundary_edges;
+    std::set<FaceHandle> faces;
+    std::set<EdgeHandle> boundary_edges;
     while (!queue.empty()) {
         FaceHandle f = queue.front();
         queue.pop();
         
-        faces.push_back(f);
+        faces.insert(f);
         
         for (const HalfedgeHandle cfh : m_mesh->fh_range(f)) {
-            VertexHandle vi = m_mesh->from_vertex_handle(cfh);
-            vertices.push_back(vi);
-            edges.push_back(m_mesh->edge_handle(cfh));
-            
             // Explore other faces through non-boundary halfedges
             FaceHandle neighborFi = m_mesh->opposite_face_handle(cfh);
             if (seams.find(m_mesh->edge_handle(cfh)) == seams.end()) {
@@ -460,30 +455,35 @@ FilteredTriMesh PlushPatternGenerator::get_subMesh_with_boundary(FaceHandle root
                     visitedF.insert(neighborFi);
                 }
             } else {
-                boundary_edges.push_back(m_mesh->edge_handle(cfh));
+                boundary_edges.insert(m_mesh->edge_handle(cfh));
             }
         }
     }
     
-    FilteredTriMesh filtered_mesh(m_mesh, vertices, edges, faces, boundary_edges);
+    FilteredTriMesh filtered_mesh(m_mesh, faces, boundary_edges);
     return filtered_mesh;
 }
 
 /**
  Split existing m_mesh into sub meshes with boundary as seams.
- @param loops The given set of boundaries. Each boundary should be a loop.
- @param subMeshes Resulting sub meshes will be stored here.
+ @param subMeshes
+    Resulting sub meshes will be stored here.
+ @param subMesh_graph
+    This variable store the relationship between each sub-mesh as a graph.
+    The vertices in this graph have a property of pointer pointing to the returned sub-mesh.
+    If the returned variable is destroyed, the pointers in this graph also become invalid.
  */
-std::vector<FilteredTriMesh> PlushPatternGenerator::get_subMeshes_with_boundary(SubMesh_graph &subMesh_graph, std::set<EdgeHandle> &seams)
+PlushPatternGenerator::SubMesh_graph PlushPatternGenerator::get_subMeshes_with_boundary(std::set<EdgeHandle> &seams)
 {
-    std::vector<FilteredTriMesh> subMeshes;
+    SubMesh_graph subMesh_graph;
     
     // Init faces to invalid sub-mesh id.
     for (FaceHandle f : m_mesh->faces()) {
-        m_mesh->property(face_to_submesh_id_handle, f) = -1;
+        m_mesh->property(face_to_patch_idx_handle, f) = -1;
     }
     
     // Use seam segments to generate sub-meshes
+    size_t edge_counter = 0;
     std::vector< std::vector<HalfedgeHandle> > segments = get_halfedge_segments_from_seams(seams);
     for (std::vector<HalfedgeHandle> &segment : segments) {
         // Choose a non-clustered face as the root to extract sub-mesh
@@ -491,38 +491,47 @@ std::vector<FilteredTriMesh> PlushPatternGenerator::get_subMeshes_with_boundary(
         root_f[0] = m_mesh->face_handle(segment.front());
         root_f[1] = m_mesh->opposite_face_handle(segment.front());
         
-        long submesh_id[2];
+        SubMesh_graph::vertex_descriptor subMesh_idx[2];
         for (int i = 0; i < 2; i++) {
             assert(root_f[i].is_valid());
-            if (m_mesh->property(face_to_submesh_id_handle, root_f[i]) < 0) {
-                subMeshes.push_back(get_subMesh_with_boundary(root_f[i], seams));
-                FilteredTriMesh &filtered_mesh = subMeshes.back();
+            if (m_mesh->property(face_to_patch_idx_handle, root_f[i]) < 0) {
+                // Add this subMesh to SubMesh_graph as a vertex
+                subMesh_idx[i] = boost::add_vertex(get_subMesh_with_boundary(root_f[i], seams), subMesh_graph);
+                FilteredTriMesh &subMesh = boost::get(boost::vertex_owner, subMesh_graph, subMesh_idx[i]);
                 
-                // Add vertex for patch graph
-                submesh_id[i] = boost::add_vertex(filtered_mesh, subMesh_graph);
+                subMesh.merged_subMesh_idx.resize(segments.size()*2);
+                subMesh.merged_subMesh_idx[subMesh_idx[i]] = 1;
                 
                 // Assign sub-mesh id to all faces of this sub-mesh
-                for (FaceHandle f : filtered_mesh.faces()) {
-                    m_mesh->property(face_to_submesh_id_handle, f) = submesh_id[i];
+                for (FaceHandle f : subMesh.faces()) {
+                    m_mesh->property(face_to_patch_idx_handle, f) = subMesh_idx[i];
                 }
-                
-                std::vector<bool> &ids = filtered_mesh.subMesh_id;
-                ids.resize(segments.size());
-                ids.at(submesh_id[i]) = 1;
             } else {
-                submesh_id[i] = m_mesh->property(face_to_submesh_id_handle, root_f[i]);
+                subMesh_idx[i] = m_mesh->property(face_to_patch_idx_handle, root_f[i]);
             }
         }
-        SubMesh_graph::edge_descriptor e = boost::add_edge(submesh_id[0], submesh_id[1], segment, subMesh_graph).first;
+        if (subMesh_idx[0] != subMesh_idx[1]) {
+            auto result = boost::add_edge(subMesh_idx[0], subMesh_idx[1], subMesh_graph);
+            bool success = result.second;
+            assert(success);
+            
+            SubMesh_graph::edge_descriptor e = result.first;
+            boost::put(boost::edge_index, subMesh_graph, e, edge_counter++);
+            boost::put(boost::edge_owner, subMesh_graph, e, segment);
+        }
     }
     
     // Re-adjust the length of ids
-    for (FilteredTriMesh &filtered_mesh : subMeshes) {
-        std::vector<bool> &ids = filtered_mesh.subMesh_id;
-        ids.resize(subMeshes.size());
+    int n_vertices = boost::num_vertices(subMesh_graph);
+    int n_edges = boost::num_edges(subMesh_graph);
+    SubMesh_graph::vertex_iterator v_it, v_ite;
+    for (boost::tie(v_it, v_ite) = boost::vertices(subMesh_graph); v_it != v_ite; v_it++) {
+        FilteredTriMesh &filtered_mesh = boost::get(boost::vertex_owner, subMesh_graph, *v_it);
+        filtered_mesh.merged_subMesh_idx.resize(n_vertices);
+        filtered_mesh.merged_seam_idx.resize(n_edges);
     }
     
-    return subMeshes;
+    return subMesh_graph;
 }
 
 /*

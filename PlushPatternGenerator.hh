@@ -37,6 +37,12 @@ signals:
     void updateView();
     
 public:
+    typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
+    boost::property<boost::vertex_owner_t, FilteredTriMesh>,
+    boost::property<boost::edge_index_t, std::size_t,
+    boost::property<boost::edge_owner_t, std::vector<HalfedgeHandle>>>
+    > SubMesh_graph;
+
     /// Used for log
     ///@{
     static const int LOGERR = 0;
@@ -52,10 +58,11 @@ public:
 
     static OpenMesh::EPropHandleT<int> segment_no_handle;
     
-    static OpenMesh::FPropHandleT<int> face_to_submesh_id_handle;
-    
-    /// Seams of this sub-mesh. It contains the edges of original mesh.
+    static OpenMesh::FPropHandleT<int> face_to_patch_idx_handle;
+
     static OpenMesh::MPropHandleT< std::set<EdgeHandle> > seams_handle;
+    
+    static OpenMesh::MPropHandleT< std::vector< std::vector<FilteredTriMesh> > > hierarchical_patches_handle;
     ///@}
 
 
@@ -85,7 +92,7 @@ public:
     /// @name Flattening-related handle
     ///@{
     /// This stores flattened meshes.
-    static OpenMesh::MPropHandleT< std::vector<FilteredTriMesh> > flattenedSubMeshesHandle;
+    static OpenMesh::MPropHandleT<SubMesh_graph> flattenedSubMeshesHandle;
     /// Distortion indicator for visualization
     static OpenMesh::FPropHandleT<double> distortionFHandle;
     static OpenMesh::VPropHandleT<double> distortionVHandle;
@@ -172,9 +179,14 @@ public:
     
     /// Merging
     ///@{
-    void construct_subsets();
-    void merge_subMesh(TriMesh *merged_subMesh, TriMesh *subMesh1, TriMesh *subMesh2);
+    void construct_subsets(double threshold);
+    FilteredTriMesh merge_patch(FilteredTriMesh &patch1,
+                                FilteredTriMesh &patch2,
+                                int seam_segment_idx,
+                                std::set<EdgeHandle> &seam_segment);
     void optimize_patches(double threshold, bool step);
+    
+    std::vector< std::vector<FilteredTriMesh> > get_hierarchical_patches();
     ///@}
 
     // Used in selection and flattening
@@ -208,16 +220,6 @@ private:
     
     bool isJobCanceled;
     
-    typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
-            boost::property<boost::vertex_owner_t, TriMesh*>,
-            boost::property<boost::edge_owner_t, std::vector<HalfedgeHandle>>
-    > Patch_graph;
-
-    typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
-    boost::property<boost::vertex_owner_t, FilteredTriMesh>,
-    boost::property<boost::edge_owner_t, std::vector<HalfedgeHandle>>
-    > SubMesh_graph;
-
     /// @name Geodesic coefficients
     ///@{
     double m_distanceCoefficient = 0.2;
@@ -246,7 +248,7 @@ private:
     
     /// @name Sub-mesh
     ///@{
-    std::vector<FilteredTriMesh> get_subMeshes_with_boundary(SubMesh_graph &patch_graph, std::set<EdgeHandle> &seams);
+    SubMesh_graph get_subMeshes_with_boundary(std::set<EdgeHandle> &seams);
     FilteredTriMesh get_subMesh_with_boundary(FaceHandle root_face, std::set<HalfedgeHandle> &seams);
     FilteredTriMesh get_subMesh_with_boundary(FaceHandle root_face, std::set<EdgeHandle> &seams);
     ///@}

@@ -91,6 +91,9 @@ private:
     QDoubleSpinBox *geodesic_skeleton_coef;
     QDoubleSpinBox *geodesic_curvature_coef;
     QDoubleSpinBox *geodesic_smoothness_coef;
+    
+    // subset
+    QDoubleSpinBox *subset_merge_threshold;
 
     bool showAllPath;
     /// Flag for thread stopping
@@ -112,8 +115,10 @@ private slots:
     void seamShowButtonClicked();
     void seamSaveButtonClicked();
     void seamLoadButtonClicked();
-    void seamCalcSubsetButtonClicked();
     void seamMergeButtonClicked();
+    
+    void subset_calc_button_clicked();
+    void subset_show_button_clicked();
     
     void calcGeodesicButtonClicked();
     
@@ -137,6 +142,7 @@ private slots:
     void calcGeodesicThread();
     void calcFlattenedGraphThread();
     void calcMergeSementThread();
+    void calcSubsetThread();
     
     void slotKeyEvent( QKeyEvent* _event );
     

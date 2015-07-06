@@ -20,10 +20,8 @@ HalfedgeHandle FilteredTriMesh::get_nearby_boundary_halfedge(HalfedgeHandle heh)
 }
 
 FilteredTriMesh::FilteredTriMesh(TriMesh *mesh,
-                                 std::vector<VertexHandle> vertices,
-                                 std::vector<EdgeHandle> edges,
-                                 std::vector<FaceHandle> faces,
-                                 std::vector<EdgeHandle> boundary_edges) : m_mesh(mesh) {
+                                 std::set<FaceHandle> &faces,
+                                 std::set<EdgeHandle> &boundary_edges) : m_mesh(mesh) {
     predicate.m_vertex_filter.resize(m_mesh->n_vertices(), false);
     predicate.m_edge_filter.resize(m_mesh->n_edges(), false);
     predicate.m_halfedge_filter.resize(m_mesh->n_halfedges(), false);
@@ -32,18 +30,18 @@ FilteredTriMesh::FilteredTriMesh(TriMesh *mesh,
     boundary_predicate.m_boundary_vertex_filter.resize(m_mesh->n_vertices(), false);
     boundary_predicate.m_boundary_edge_filter.resize(m_mesh->n_edges(), false);
     
-    for (VertexHandle vh : vertices) {
-        predicate.m_vertex_filter[vh.idx()] = true;
-    }
-    for (EdgeHandle eh : edges) {
-        predicate.m_edge_filter[eh.idx()] = true;
-        
-        HalfedgeHandle heh1 = m_mesh->halfedge_handle(eh, 0);
-        HalfedgeHandle heh2 = m_mesh->halfedge_handle(eh, 1);
-        predicate.m_halfedge_filter[heh1.idx()] = true;
-        predicate.m_halfedge_filter[heh2.idx()] = true;
-    }
     for (FaceHandle fh : faces) {
+        for (VertexHandle vh : m_mesh->fv_range(fh)) {
+            predicate.m_vertex_filter[vh.idx()] = true;
+        }
+        for (EdgeHandle eh : m_mesh->fe_range(fh)) {
+            predicate.m_edge_filter[eh.idx()] = true;
+            
+            HalfedgeHandle heh1 = m_mesh->halfedge_handle(eh, 0);
+            HalfedgeHandle heh2 = m_mesh->halfedge_handle(eh, 1);
+            predicate.m_halfedge_filter[heh1.idx()] = true;
+            predicate.m_halfedge_filter[heh2.idx()] = true;
+        }
         predicate.m_face_filter[fh.idx()] = true;
     }
     
@@ -63,12 +61,85 @@ FilteredTriMesh::FilteredTriMesh(TriMesh *mesh,
             non_boundary_vertex_mapping.emplace(vh, idx_counter++);
         }
     }
-    for (HalfedgeHandle heh : m_mesh->halfedges()) {
-        if (is_valid(heh) && is_boundary(heh)) {
-            boundary_vertex_mapping.emplace(heh, idx_counter++);
+    for (EdgeHandle eh : m_mesh->edges()) {
+        if (is_valid(eh)) {
+            HalfedgeHandle heh1 = m_mesh->halfedge_handle(eh, 0);
+            if (is_boundary(heh1)) {
+                boundary_vertex_mapping.emplace(heh1, idx_counter++);
+            }
+            HalfedgeHandle heh2 = m_mesh->halfedge_handle(eh, 1);
+            if (is_boundary(heh2)) {
+                boundary_vertex_mapping.emplace(heh2, idx_counter++);
+            }
         }
     }
     flattened_position.resize(n_duplicated_vertices(), TriMesh::Point(0,0,0));
+    
+    merged_edge_idx.resize(m_mesh->n_edges());
+}
+
+FilteredTriMesh::FilteredTriMesh(FilteredTriMesh&& other) noexcept :
+m_mesh(other.m_mesh),
+predicate(std::move(other.predicate)),
+boundary_predicate(std::move(other.boundary_predicate)),
+boundary_vertex_mapping(std::move(other.boundary_vertex_mapping)),
+non_boundary_vertex_mapping(std::move(other.non_boundary_vertex_mapping)),
+flattened_position(std::move(other.flattened_position)),
+merged_subMesh_idx(std::move(other.merged_subMesh_idx)),
+merged_seam_idx(std::move(other.merged_seam_idx)),
+merged_edge_idx(std::move(other.merged_edge_idx))
+{
+}
+
+FilteredTriMesh& FilteredTriMesh::operator=(FilteredTriMesh&& other) noexcept {
+    if (this != &other) {
+        m_mesh = other.m_mesh;
+        other.m_mesh = nullptr;
+
+        predicate.m_edge_filter = std::move(other.predicate.m_edge_filter);
+        predicate.m_face_filter = std::move(other.predicate.m_face_filter);
+        predicate.m_halfedge_filter = std::move(other.predicate.m_halfedge_filter);
+        predicate.m_vertex_filter = std::move(other.predicate.m_vertex_filter);
+        
+        boundary_predicate.m_boundary_edge_filter = std::move(other.boundary_predicate.m_boundary_edge_filter);
+        boundary_predicate.m_boundary_vertex_filter = std::move(other.boundary_predicate.m_boundary_vertex_filter);
+        
+        non_boundary_vertex_mapping = std::move(other.non_boundary_vertex_mapping);
+        boundary_vertex_mapping = std::move(other.boundary_vertex_mapping);
+        
+        flattened_position = std::move(other.flattened_position);
+        
+        merged_subMesh_idx = std::move(other.merged_subMesh_idx);
+        merged_seam_idx = std::move(other.merged_seam_idx);
+        merged_edge_idx = std::move(other.merged_edge_idx);
+    }
+    return *this;
+}
+
+FilteredTriMesh::FilteredTriMesh(const FilteredTriMesh& other) :
+m_mesh(other.m_mesh),
+predicate(other.predicate),
+boundary_predicate(other.boundary_predicate),
+boundary_vertex_mapping(other.boundary_vertex_mapping),
+non_boundary_vertex_mapping(other.non_boundary_vertex_mapping),
+flattened_position(other.flattened_position),
+merged_subMesh_idx(other.merged_subMesh_idx),
+merged_seam_idx(other.merged_seam_idx),
+merged_edge_idx(other.merged_edge_idx)
+{
+}
+
+FilteredTriMesh& FilteredTriMesh::operator=(const FilteredTriMesh& other) {
+    m_mesh = other.m_mesh;
+    predicate = other.predicate;
+    boundary_predicate = other.boundary_predicate;
+    boundary_vertex_mapping = other.boundary_vertex_mapping;
+    non_boundary_vertex_mapping = other.non_boundary_vertex_mapping;
+    flattened_position = other.flattened_position;
+    merged_subMesh_idx = other.merged_subMesh_idx;
+    merged_seam_idx = other.merged_seam_idx;
+    merged_edge_idx = other.merged_edge_idx;
+    return *this;
 }
 
 bool FilteredTriMesh::is_valid(VertexHandle vh) const {
@@ -133,8 +204,8 @@ unsigned long FilteredTriMesh::n_vertices() const {
     return count;
 }
 
-Range<VertexIter, Predicate> FilteredTriMesh::vertices() const {
-    Range<VertexIter, Predicate>
+FilteredRange<VertexIter, Predicate> FilteredTriMesh::vertices() const {
+    FilteredRange<VertexIter, Predicate>
         range(boost::make_filter_iterator<Predicate>(predicate,
                                                      m_mesh->vertices_begin(),
                                                      m_mesh->vertices_end()),
@@ -144,8 +215,8 @@ Range<VertexIter, Predicate> FilteredTriMesh::vertices() const {
     return range;
 }
 
-Range<EdgeIter, Predicate> FilteredTriMesh::edges() const {
-    Range<EdgeIter, Predicate>
+FilteredRange<EdgeIter, Predicate> FilteredTriMesh::edges() const {
+    FilteredRange<EdgeIter, Predicate>
         range(boost::make_filter_iterator<Predicate>(predicate,
                                                      m_mesh->edges_begin(),
                                                      m_mesh->edges_end()),
@@ -155,8 +226,8 @@ Range<EdgeIter, Predicate> FilteredTriMesh::edges() const {
     return range;
 }
 
-Range<HalfedgeIter, Predicate> FilteredTriMesh::halfedges() const {
-    Range<HalfedgeIter, Predicate>
+FilteredRange<HalfedgeIter, Predicate> FilteredTriMesh::halfedges() const {
+    FilteredRange<HalfedgeIter, Predicate>
         range(boost::make_filter_iterator<Predicate>(predicate,
                                                      m_mesh->halfedges_begin(),
                                                      m_mesh->halfedges_end()),
@@ -166,8 +237,8 @@ Range<HalfedgeIter, Predicate> FilteredTriMesh::halfedges() const {
     return range;
 }
 
-Range<FaceIter, Predicate> FilteredTriMesh::faces() const {
-    Range<FaceIter, Predicate>
+FilteredRange<FaceIter, Predicate> FilteredTriMesh::faces() const {
+    FilteredRange<FaceIter, Predicate>
         range(boost::make_filter_iterator<Predicate>(predicate,
                                                      m_mesh->faces_begin(),
                                                      m_mesh->faces_end()),
@@ -177,32 +248,37 @@ Range<FaceIter, Predicate> FilteredTriMesh::faces() const {
     return range;
 }
 
-Range<TriMesh::ConstFaceVertexIter, Predicate> FilteredTriMesh::fv_range(FaceHandle fh) const {
-    assert(is_valid(fh));
-    Range<TriMesh::ConstFaceVertexIter, Predicate>
-        range(boost::make_filter_iterator<Predicate>(predicate,
-                                                     m_mesh->cfv_begin(fh),
-                                                     m_mesh->cfv_end(fh)),
-              boost::make_filter_iterator<Predicate>(predicate,
-                                                     m_mesh->cfv_end(fh),
-                                                     m_mesh->cfv_end(fh)));
-    return range;
+//FilteredRange<TriMesh::ConstFaceVertexIter, Predicate> FilteredTriMesh::fv_range(FaceHandle fh) const {
+//    assert(is_valid(fh));
+//    FilteredRange<TriMesh::ConstFaceVertexIter, Predicate>
+//        range(boost::make_filter_iterator<Predicate>(predicate,
+//                                                     m_mesh->cfv_begin(fh),
+//                                                     m_mesh->cfv_end(fh)),
+//              boost::make_filter_iterator<Predicate>(predicate,
+//                                                     m_mesh->cfv_end(fh),
+//                                                     m_mesh->cfv_end(fh)));
+//    return range;
+//}
+
+//FilteredRange<TriMesh::ConstFaceHalfedgeIter, Predicate> FilteredTriMesh::fh_range(FaceHandle fh) const {
+//    assert(is_valid(fh));
+//    FilteredRange<TriMesh::ConstFaceHalfedgeIter, Predicate>
+//        range(boost::make_filter_iterator<Predicate>(predicate,
+//                                                     m_mesh->cfh_begin(fh),
+//                                                     m_mesh->cfh_end(fh)),
+//              boost::make_filter_iterator<Predicate>(predicate,
+//                                                     m_mesh->cfh_end(fh),
+//                                                     m_mesh->cfh_end(fh)));
+//    return range;
+//}
+
+Range<TriMesh::ConstFaceHalfedgeIter> FilteredTriMesh::fh_range(FaceHandle fh) const {
+    return Range<TriMesh::ConstFaceHalfedgeIter>( m_mesh->cfh_begin(fh),
+                                                  m_mesh->cfh_end(fh));
 }
 
-Range<TriMesh::ConstFaceHalfedgeIter, Predicate> FilteredTriMesh::fh_range(FaceHandle fh) const {
-    assert(is_valid(fh));
-    Range<TriMesh::ConstFaceHalfedgeIter, Predicate>
-        range(boost::make_filter_iterator<Predicate>(predicate,
-                                                     m_mesh->cfh_begin(fh),
-                                                     m_mesh->cfh_end(fh)),
-              boost::make_filter_iterator<Predicate>(predicate,
-                                                     m_mesh->cfh_end(fh),
-                                                     m_mesh->cfh_end(fh)));
-    return range;
-}
-
-Range<VertexIter, Boundary_predicate> FilteredTriMesh::boundary_vertices() const {
-    Range<VertexIter, Boundary_predicate>
+FilteredRange<VertexIter, Boundary_predicate> FilteredTriMesh::boundary_vertices() const {
+    FilteredRange<VertexIter, Boundary_predicate>
         range(boost::make_filter_iterator<Boundary_predicate>(boundary_predicate,
                                                               m_mesh->vertices_begin(),
                                                               m_mesh->vertices_end()),
@@ -212,8 +288,8 @@ Range<VertexIter, Boundary_predicate> FilteredTriMesh::boundary_vertices() const
     return range;
 }
 
-Range<EdgeIter, Boundary_predicate> FilteredTriMesh::boundary_edges() const {
-    Range<EdgeIter, Boundary_predicate>
+FilteredRange<EdgeIter, Boundary_predicate> FilteredTriMesh::boundary_edges() const {
+    FilteredRange<EdgeIter, Boundary_predicate>
         range(boost::make_filter_iterator<Boundary_predicate>(boundary_predicate,
                                                               m_mesh->edges_begin(),
                                                               m_mesh->edges_end()),
@@ -275,6 +351,9 @@ HalfedgeHandle FilteredTriMesh::next_boundary_halfedge_handle(HalfedgeHandle heh
     }
     // The next halfedge is reversed during rotating, flip it.
     next_heh = m_mesh->opposite_halfedge_handle(next_heh);
+    if (!is_boundary(next_heh)) {
+        is_boundary(next_heh);
+    }
     assert(is_boundary(next_heh));
     return next_heh;
 }

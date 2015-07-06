@@ -4,14 +4,16 @@
 #include "common.hh"
 
 #include <ObjectTypes/TriangleMesh/TriangleMesh.hh>
+
 #include <boost/range/adaptor/filtered.hpp>
+#include <boost/dynamic_bitset.hpp>
 
 // True means it's contained in this sub-mesh
 struct Predicate {
-    std::vector<bool> m_vertex_filter;
-    std::vector<bool> m_edge_filter;
-    std::vector<bool> m_halfedge_filter;
-    std::vector<bool> m_face_filter;
+    boost::dynamic_bitset<> m_vertex_filter;
+    boost::dynamic_bitset<> m_edge_filter;
+    boost::dynamic_bitset<> m_halfedge_filter;
+    boost::dynamic_bitset<> m_face_filter;
     
     bool operator()(VertexHandle vh) const {
         return m_vertex_filter[vh.idx()];
@@ -28,8 +30,8 @@ struct Predicate {
 };
 
 struct Boundary_predicate {
-    std::vector<bool> m_boundary_vertex_filter;
-    std::vector<bool> m_boundary_edge_filter;
+    boost::dynamic_bitset<> m_boundary_vertex_filter;
+    boost::dynamic_bitset<> m_boundary_edge_filter;
     bool operator()(VertexHandle vh) const {
         return m_boundary_vertex_filter[vh.idx()];
     }
@@ -39,16 +41,30 @@ struct Boundary_predicate {
 };
 
 template <class Handle, class Predicate>
-struct Range {
+struct FilteredRange {
     typedef boost::filter_iterator<Predicate, Handle> FilterIter;
     FilterIter m_begin;
     FilterIter m_end;
     
-    Range(FilterIter begin, FilterIter end) : m_begin(begin), m_end(end) {}
+    FilteredRange(FilterIter begin, FilterIter end) : m_begin(begin), m_end(end) {}
     FilterIter begin() {
         return m_begin;
     }
     FilterIter end() {
+        return m_end;
+    }
+};
+
+template <class Iter>
+struct Range {
+    Iter m_begin;
+    Iter m_end;
+
+    Range(Iter begin, Iter end) : m_begin(begin), m_end(end) {}
+    Iter begin() {
+        return m_begin;
+    }
+    Iter end() {
         return m_end;
     }
 };
@@ -76,15 +92,38 @@ private:
 
     HalfedgeHandle get_nearby_boundary_halfedge(HalfedgeHandle heh);
 public:
-    std::vector<bool> subMesh_id;
+    /* Use this to record which sub-meshes do this patch have merged
+     * A patch with bits [1,0,0,0,0,....] mean it contains #1 sub-mesh
+     * A patch with bits [0,1,1,0,0,....] mean it merged #2 and #3 sub-meshes
+     */
+    boost::dynamic_bitset<> merged_subMesh_idx;
+    /* Use this to record which seam segment do this patch have merged
+     * A patch with bits [1,0,0,0,0,....] mean it merged #1 seam
+     * A patch with bits [0,1,1,0,0,....] mean it merged #2 and #3 seams
+     */
+    boost::dynamic_bitset<> merged_seam_idx;
+    /* Use this to record which edge handle do this patch have merged
+     * A merged edge should not be added to boundary anymore
+     * A patch with bits [1,0,0,0,0,....] mean it merged #1 edge
+     * A patch with bits [0,1,1,0,0,....] mean it merged #2 and #3 edges
+     */
+    boost::dynamic_bitset<> merged_edge_idx;
+    
+    // The face area difference between original sub-mesh & flattened sub-mesh
+    double max_distortion = -1;
     
     /// You shouldn't use this constructor unless you just need to allocate a variable and assigned it later.
     FilteredTriMesh() {}
     FilteredTriMesh(TriMesh *mesh,
-                    std::vector<VertexHandle> vertices,
-                    std::vector<EdgeHandle> edges,
-                    std::vector<FaceHandle> faces,
-                    std::vector<EdgeHandle> boundary_edges);
+                    std::set<FaceHandle> &faces,
+                    std::set<EdgeHandle> &boundary_edges);
+
+    /// Copy constructor (backward compatible with old boost code)
+    FilteredTriMesh(const FilteredTriMesh& other);
+    FilteredTriMesh& operator=(const FilteredTriMesh& other);
+    /// Move constructor
+    FilteredTriMesh(FilteredTriMesh&& other) noexcept;
+    FilteredTriMesh& operator=(FilteredTriMesh&& other) noexcept;
     
     bool is_valid(VertexHandle vh) const;
     bool is_valid(EdgeHandle eh) const;
@@ -107,15 +146,25 @@ public:
     ///@{
     unsigned long n_vertices() const;
     
-    Range<VertexIter, Predicate> vertices() const;
-    Range<EdgeIter, Predicate> edges() const;
-    Range<HalfedgeIter, Predicate> halfedges() const;
-    Range<FaceIter, Predicate> faces() const;
-    Range<TriMesh::ConstFaceVertexIter, Predicate> fv_range(FaceHandle fh) const;
-    Range<TriMesh::ConstFaceHalfedgeIter, Predicate> fh_range(FaceHandle fh) const;
+    FilteredRange<VertexIter, Predicate> vertices() const;
+    FilteredRange<EdgeIter, Predicate> edges() const;
+    FilteredRange<HalfedgeIter, Predicate> halfedges() const;
+    FilteredRange<FaceIter, Predicate> faces() const;
+    /// There seems to be some problem about filter_iterator with circulator
+    /// You should use *(iter.base()) instead of *iter
+    ///@{
+//    FilteredRange<TriMesh::ConstFaceVertexIter, Predicate> fv_range(FaceHandle fh) const;
+//    FilteredRange<TriMesh::ConstFaceHalfedgeIter, Predicate> fh_range(FaceHandle fh) const;
+//    boost::filter_iterator<Predicate, TriMesh::ConstFaceVertexIter> cfv_begin(FaceHandle fh) const;
+//    boost::filter_iterator<Predicate, TriMesh::ConstFaceVertexIter> cfv_end(FaceHandle fh) const;
     
-    Range<VertexIter, Boundary_predicate> boundary_vertices() const;
-    Range<EdgeIter, Boundary_predicate> boundary_edges() const;
+    /// For face-halfedge circulator, if a face is valid, then its all related halfedges are valid
+    /// Thus we don't need to filter them
+    Range<TriMesh::ConstFaceHalfedgeIter> fh_range(FaceHandle fh) const;
+    ///@}
+    
+    FilteredRange<VertexIter, Boundary_predicate> boundary_vertices() const;
+    FilteredRange<EdgeIter, Boundary_predicate> boundary_edges() const;
     ///@}
 
     /// Filtered functions
