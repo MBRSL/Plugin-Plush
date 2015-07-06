@@ -1,7 +1,6 @@
 #include "PlushPatternGenerator.hh"
 #include <Eigen/Sparse>
 
-#include <IpIpoptApplication.hpp>
 #include <LPFB.hh>
 
 bool PlushPatternGenerator::calcFlattenedGraph()
@@ -100,40 +99,10 @@ bool PlushPatternGenerator::calcInteriorPoints(FilteredTriMesh &mesh, std::map<H
  @retval <#meaning#>
  */
 bool PlushPatternGenerator::calcLPFB(FilteredTriMesh &mesh, std::map<HalfedgeHandle, OpenMesh::Vec3d> &boundaryPosition) {
-    Ipopt::SmartPtr<Ipopt::TNLP> mynlp = new LPFB_NLP(mesh, boundaryPosition);
-    Ipopt::SmartPtr<Ipopt::IpoptApplication> app = IpoptApplicationFactory();
+    LPFB_NLP mynlp(mesh, boundaryPosition);
+    mynlp.newtons_method();
     
-    app->Options()->SetNumericValue("tol", 1e-5);
-    app->Options()->SetStringValue("mu_strategy", "adaptive");
-    app->Options()->SetStringValue("linear_solver", "ma57");
-    // This let us not implementing eval_h()
-    app->Options()->SetStringValue("hessian_approximation","limited-memory");
-//    app->Options()->SetStringValue("derivative_test","first-order");
-    app->Options()->SetIntegerValue("print_level", 0);
-    
-    // Intialize the IpoptApplication and process the options
-    Ipopt::ApplicationReturnStatus status;
-    status = app->Initialize();
-    if (status != Ipopt::Solve_Succeeded) {
-        printf("\n\n*** Error during initialization!\n");
-        return false;
-    }
-    
-    // Ask Ipopt to solve the problem
-    status = app->OptimizeTNLP(mynlp);
-    
-    if (status == Ipopt::Solve_Succeeded) {
-        printf("\n\n*** The problem solved!\n");
-        return true;
-    }
-    else {
-        printf("\n\n*** Some problem occured! See messages above\n");
-        return false;
-    }
-    
-    // As the SmartPtrs go out of scope, the reference count
-    // will be decremented and the objects will automatically
-    // be deleted.
+    return true;
 }
 
 void PlushPatternGenerator::calcDistortion(std::vector<FilteredTriMesh> &flattenedSubMeshes) {

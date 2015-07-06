@@ -3,16 +3,12 @@
 #include "PlushPatternGenerator.hh"
 
 #include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/copy.hpp>
-#include <boost/graph/filtered_graph.hpp>
 #include <boost/graph/dijkstra_shortest_paths.hpp>
 
 #include <cassert>
 #include <iostream>
 
 #include <queue>
-
-using namespace Ipopt;
 
 // constructor
 LPFB_NLP::LPFB_NLP(FilteredTriMesh &mesh, std::map<HalfedgeHandle, OpenMesh::Vec3d> &boundaryPosition) : m_mesh(mesh), m_boundaryPosition(boundaryPosition)
@@ -207,13 +203,130 @@ LPFB_NLP::LPFB_NLP(FilteredTriMesh &mesh, std::map<HalfedgeHandle, OpenMesh::Vec
     }
 }
 
-//destructor
-LPFB_NLP::~LPFB_NLP()
-{}
+void LPFB_NLP::newtons_method() {
+    int n, m, nnz_jac_g, nnz_h_lag;
+    get_nlp_info(n, m, nnz_jac_g);
+
+    double *cos_phi = new double[n];
+    double *sin_phi = new double[n];
+    Eigen::VectorXd X(n);
+    Eigen::VectorXd g(m);
+    Eigen::VectorXd grad_f(n);
+    Eigen::MatrixXd grad_g(m, n);
+    
+    get_starting_point(n, X);
+    get_phi(n, X, cos_phi, sin_phi);
+    eval_grad_f(n, X, grad_f);
+    eval_g(n, X, g, cos_phi, sin_phi);
+    eval_jac_g(n, X, m, grad_g, cos_phi, sin_phi);
+
+    Eigen::VectorXd lambda(m);
+    lambda.setOnes();
+
+    double derivative = 1e9;
+    Eigen::VectorXd delta_theta(n);
+    Eigen::VectorXd delta_lambda(m);
+    delta_theta.setOnes();
+    delta_lambda.setOnes();
+    for (int iterations = 0; iterations < 20 && derivative > 1e-2 && delta_theta.norm() > 1e-2 && delta_lambda.norm() > 1e-2; iterations++) {
+        get_delta(n, m,
+                  X,
+                  g,
+                  grad_f,
+                  grad_g,
+                  lambda, delta_theta, delta_lambda);
+        
+//        printf("X:");
+//        for (int i = 0; i < n; i++) {
+//            printf("%.3lf, ", X[i]);
+//        }
+//        printf("\n");
+//        printf("delta_theta:");
+//        for (int i = 0; i < n; i++) {
+//            printf("%.3lf, ", delta_theta[i]);
+//        }
+//        printf("\n");
+//        printf("delta_lambda:");
+//        for (int i = 0; i < m; i++) {
+//            printf("%.3lf, ", delta_lambda[i]);
+//        }
+//        printf("\n\n");
+
+        X += delta_theta;
+        lambda += delta_lambda;
+        for (int i = 0; i < n; i++) {
+            X[i] = min(max(X[i], 0.0), 2*M_PI);
+        }
+        
+        get_phi(n, X, cos_phi, sin_phi);
+        eval_grad_f(n, X, grad_f);
+        eval_g(n, X, g, cos_phi, sin_phi);
+        eval_jac_g(n, X, m, grad_g, cos_phi, sin_phi);
+        
+        double component_sqr = 0;
+        for (int p = 0; p < m; p++) {
+            grad_g.row(p) *= lambda[p];
+        }
+        for (int i = 0; i < n; i++) {
+            component_sqr += pow(grad_f[i] + grad_g.col(i).sum(), 2);
+        }
+        // derivative for lambda_theta, lambda_0x, lambda_0y, ...
+        for (int p = 0; p < m; p++) {
+            component_sqr += pow(g[p], 2);
+        }
+        
+        derivative = sqrt(component_sqr);
+    }
+    
+    finalize_solution(n, X, m, lambda, cos_phi, sin_phi);
+    
+    delete[] cos_phi;
+    delete[] sin_phi;
+}
+
+bool LPFB_NLP::get_delta(int n, int m,
+                        Eigen::VectorXd &X,
+                        Eigen::VectorXd &g,
+                        Eigen::VectorXd &grad_f,
+                        Eigen::MatrixXd &grad_g,
+                        Eigen::VectorXd &lambda,
+                        Eigen::VectorXd &delta_theta,
+                        Eigen::VectorXd &delta_lambda) {
+    // B_lambda
+    Eigen::VectorXd B_lambda = g * -1;
+
+    // B_theta
+    Eigen::VectorXd B_theta(n);
+    for (int i = 0; i < n; i++) {
+        B_theta[i] = grad_f[i];
+        for (int p = 0; p < m; p++) {
+            B_theta[i] += grad_g(p, i) * lambda[p];
+        }
+    }
+    B_theta *= -1;
+    
+    Eigen::MatrixXd big_lambda = grad_g;
+    Eigen::MatrixXd big_lambda_x_big_lambda = big_lambda * big_lambda.transpose();
+    Eigen::VectorXd lambda_rhs = big_lambda * B_theta - B_lambda;
+    delta_lambda = big_lambda_x_big_lambda.jacobiSvd(Eigen::ComputeThinU | Eigen::ComputeThinV).solve(lambda_rhs);
+    delta_theta = B_theta - big_lambda.transpose() * delta_lambda;
+
+    return true;
+}
+
+bool LPFB_NLP::get_phi(int n, Eigen::VectorXd &X, double *cos_phi, double *sin_phi) {
+    double phi_k = 0;
+    for (int k = 0; k < n; k++) {
+        phi_k += M_PI - X[k];
+        cos_phi[k] = cos(phi_k);
+        sin_phi[k] = sin(phi_k);
+    }
+    
+    return true;
+}
 
 // returns the size of the problem
-bool LPFB_NLP::get_nlp_info(Index& n, Index& m, Index& nnz_jac_g,
-                            Index& nnz_h_lag, TNLP::IndexStyleEnum& index_style)
+bool LPFB_NLP::get_nlp_info(int& n, int& m, int& nnz_jac_g)
 {
     // variables
     n = m_boundary3D.size();
@@ -240,54 +353,44 @@ bool LPFB_NLP::get_nlp_info(Index& n, Index& m, Index& nnz_jac_g,
         
         nnz_jac_g += 2 * endingIdx;
     }
-    
-    // the hessian is dense
-//    nnz_h_lag = n*n;
-    
-    // use the C style indexing (0-based)
-    index_style = TNLP::C_STYLE;
-    
     return true;
 }
 
 // returns the variable bounds
-bool LPFB_NLP::get_bounds_info(Index n, Number* x_l, Number* x_u,
-                                Index m, Number* g_l, Number* g_u)
-{
-    // lower/upper bounds
-    for (Index i = 0; i < n; i++) {
-        x_l[i] = 0;
-        x_u[i] = 2 * M_PI;
-    }
-    
-    // All constraints should be 0
-    for (Index i = 0; i < m; i++) {
-        g_l[i] = g_u[i] = 0;
-    }
-    
-    return true;
-}
+//bool LPFB_NLP::get_bounds_info(int n, Number* x_l, Number* x_u,
+//                                int m, Number* g_l, Number* g_u)
+//{
+//    // lower/upper bounds
+//    for (int i = 0; i < n; i++) {
+//        x_l[i] = 0;
+//        x_u[i] = 2 * M_PI;
+//    }
+//    
+//    // All constraints should be 0
+//    for (int i = 0; i < m; i++) {
+//        g_l[i] = g_u[i] = 0;
+//    }
+//    
+//    return true;
+//}
 
 // returns the initial point for the problem
-bool LPFB_NLP::get_starting_point(Index n, bool init_x, Number* x,
-                                   bool init_z, Number* z_L, Number* z_U,
-                                   Index m, bool init_lambda,
-                                   Number* lambda)
+bool LPFB_NLP::get_starting_point(int n, Eigen::VectorXd &X)
 {
     // initialize to the given starting point
     for (int i = 0; i < n; i++) {
-        x[i] = m_innerAngle3D[i];
+        X[i] = m_innerAngle3D[i];
     }
     
     return true;
 }
 
 // returns the value of the objective function
-bool LPFB_NLP::eval_f(Index n, const Number* x, bool new_x, Number& obj_value)
+bool LPFB_NLP::eval_f(int n, Eigen::VectorXd &X, double &obj_value)
 {
     double sumAngleDiff = 0;
     for (int i = 0; i < n; i++) {
-        double angleDiff = x[i] - m_innerAngle3D[i];
+        double angleDiff = X[i] - m_innerAngle3D[i];
         sumAngleDiff += 0.5 * angleDiff * angleDiff;
     }
     
@@ -296,31 +399,25 @@ bool LPFB_NLP::eval_f(Index n, const Number* x, bool new_x, Number& obj_value)
 }
 
 // return the gradient of the objective function grad_{x} f(x)
-bool LPFB_NLP::eval_grad_f(Index n, const Number* x, bool new_x, Number* grad_f)
+bool LPFB_NLP::eval_grad_f(int n, Eigen::VectorXd &X, Eigen::VectorXd &grad_f)
 {
     for (int i = 0; i < n; i++) {
-        grad_f[i] = x[i] - m_innerAngle3D[i];
+        grad_f[i] = X[i] - m_innerAngle3D[i];
     }
     return true;
 }
 
 // return the value of the constraints: g(x)
-bool LPFB_NLP::eval_g(Index n, const Number* x, bool new_x, Index m, Number* g)
+bool LPFB_NLP::eval_g(int n, Eigen::VectorXd &X, Eigen::VectorXd &g, double *cos_phi, double *sin_phi)
 {
-    double sumAngle = (n - 2) * M_PI;
-    
     double *posX = new double[n+1];
     double *posY = new double[n+1];
-    
-    double phi_k = 0;
     posX[0] = posY[0] = 0;
-    for (Index k = 0; k < n; k++) {
-        sumAngle -= x[k];
-        phi_k += M_PI - x[k];
-        posX[k+1] = posX[k] + m_edgeLengths[k] * cos(phi_k);
-        posY[k+1] = posY[k] + m_edgeLengths[k] * sin(phi_k);
+    for (int k = 0; k < n; k++) {
+        posX[k+1] = posX[k] + m_edgeLengths[k] * cos_phi[k];
+        posY[k+1] = posY[k] + m_edgeLengths[k] * sin_phi[k];
     }
-    Index constraintIdx = 0;
+    int constraintIdx = 0;
     
     // Angle constraints, inner turning angle sums up to 2PI
     for (size_t boundary_no = 0; boundary_no < m_boundaryCoincidentPair.size(); boundary_no++) {
@@ -330,7 +427,7 @@ bool LPFB_NLP::eval_g(Index n, const Number* x, bool new_x, Index m, Number* g)
         double sumInnerAngle = 0;
         int nInnerAngles = 0;
         for (int i = startingIdx; i < endingIdx; i++, nInnerAngles++) {
-            sumInnerAngle += x[i];
+            sumInnerAngle += X[i];
         }
         
         g[constraintIdx++] = (nInnerAngles - 2) * M_PI - sumInnerAngle;
@@ -351,89 +448,52 @@ bool LPFB_NLP::eval_g(Index n, const Number* x, bool new_x, Index m, Number* g)
 }
 
 // return the structure or values of the jacobian
-bool LPFB_NLP::eval_jac_g(Index n, const Number* x, bool new_x,
-                           Index m, Index nele_jac, Index* iRow, Index *jCol,
-                           Number* values)
+bool LPFB_NLP::eval_jac_g(int n, Eigen::VectorXd &X,
+                          int m, Eigen::MatrixXd &values,
+                          double *cos_phi, double *sin_phi)
 {
-    if (values == NULL) {
-        // return the structure of the jacobian
-        // this particular jacobian is dense
-        
-        // Angle constraints
-        Index idx = 0;
-        Index constraintIdx = 0;
+    values.setZero();
 
-        for (size_t boundary_no = 0; boundary_no < m_boundaryCoincidentPair.size(); boundary_no++, constraintIdx++) {
-            int startingIdx = m_boundaryCoincidentPair[boundary_no].first;
-            int endingIdx = m_boundaryCoincidentPair[boundary_no].second;
+    // return the values of the jacobian of the constraints
+    double *dPosX = new double[n+1];
+    double *dPosY = new double[n+1];
 
-            for (Index j = startingIdx; j < endingIdx; j++, idx++) {
-                iRow[idx] = constraintIdx;
-                jCol[idx] = j;
-            }
-        }
-        
-        // Position constraints
-        for (size_t pairNo = 0; pairNo < m_coincidentPair.size(); pairNo++) {
-            Index endingIdx = m_coincidentPair[pairNo].second;
-            for (Index j = 0; j < endingIdx; j++, idx++) {
-                // X pos
-                iRow[idx] = constraintIdx;
-                jCol[idx] = j;
-                // Y pos
-                iRow[idx+endingIdx] = constraintIdx+1;
-                jCol[idx+endingIdx] = j;
-            }
-            constraintIdx += 2;
-            idx += endingIdx;
-        }
-        
-        assert(idx == nele_jac);
+    dPosX[0] = dPosY[0] = 0;
+    for (int k = 0; k < n; k++) {
+        dPosX[k+1] = dPosX[k] + m_edgeLengths[k] * sin_phi[k];
+        dPosY[k+1] = dPosY[k] + m_edgeLengths[k] * -cos_phi[k];
     }
-    else {
-        // return the values of the jacobian of the constraints
-        double *dPosX = new double[n+1];
-        double *dPosY = new double[n+1];
 
-        double phi_k = 0;
-        dPosX[0] = dPosY[0] = 0;
-        for (Index k = 0; k < n; k++) {
-            phi_k += M_PI - x[k];
-            dPosX[k+1] = dPosX[k] + m_edgeLengths[k] * sin(phi_k);
-            dPosY[k+1] = dPosY[k] + m_edgeLengths[k] * -cos(phi_k);
-        }
-
-        // Angle constraints
-        Index idx = 0;
+    // Angle constraints
+    int constraintIdx = 0;
+    for (size_t boundary_no = 0; boundary_no < m_boundaryCoincidentPair.size(); boundary_no++) {
+        int startingIdx = m_boundaryCoincidentPair[boundary_no].first;
+        int endingIdx = m_boundaryCoincidentPair[boundary_no].second;
         
-        for (size_t boundary_no = 0; boundary_no < m_boundaryCoincidentPair.size(); boundary_no++) {
-            int startingIdx = m_boundaryCoincidentPair[boundary_no].first;
-            int endingIdx = m_boundaryCoincidentPair[boundary_no].second;
-            
-            for (Index j = startingIdx; j < endingIdx; j++) {
-                values[idx++] = -1;
-            }
+        for (int j = startingIdx; j < endingIdx; j++) {
+            values(constraintIdx, j) = -1;
         }
-
-        // Position constraints
-        for (size_t pairNo = 0; pairNo < m_coincidentPair.size(); pairNo++) {
-            Index startingIdx = m_coincidentPair[pairNo].first;
-            Index endingIdx = m_coincidentPair[pairNo].second;
-
-            for (Index k = 0; k < endingIdx; k++, idx++) {
-                if (k < startingIdx) {
-                    values[idx] = dPosX[endingIdx] - dPosX[startingIdx];
-                    values[idx+endingIdx] = dPosY[endingIdx] - dPosY[startingIdx];
-                } else {
-                    values[idx] = dPosX[endingIdx] - dPosX[k];
-                    values[idx+endingIdx] = dPosY[endingIdx] - dPosY[k];
-                }
-            }
-            idx += endingIdx;
-        }
-        delete[] dPosX;
-        delete[] dPosY;
+        constraintIdx++;
     }
+
+    // Position constraints
+    for (size_t pairNo = 0; pairNo < m_coincidentPair.size(); pairNo++) {
+        int startingIdx = m_coincidentPair[pairNo].first;
+        int endingIdx = m_coincidentPair[pairNo].second;
+
+        for (int k = 0; k < endingIdx; k++) {
+            if (k < startingIdx) {
+                values(constraintIdx, k) = dPosX[endingIdx] - dPosX[startingIdx];
+                values(constraintIdx+1, k) = dPosY[endingIdx] - dPosY[startingIdx];
+            } else {
+                values(constraintIdx, k) = dPosX[endingIdx] - dPosX[k];
+                values(constraintIdx+1, k) = dPosY[endingIdx] - dPosY[k];
+            }
+        }
+        constraintIdx += 2;
+    }
+    delete[] dPosX;
+    delete[] dPosY;
     
     return true;
 }
@@ -443,16 +503,16 @@ bool LPFB_NLP::eval_jac_g(Index n, const Number* x, bool new_x,
  There are some problem for this function. I do calculate the answer correctly, but the values seems to be modified after this function and became incorrect. I now use built-in hessian_approximation to replace this function.
  This function is NOT updated for inner virtual cut.
  */
-//bool LPFB_NLP::eval_h(Index n, const Number* x, bool new_x,
-//                       Number obj_factor, Index m, const Number* lambda,
-//                       bool new_lambda, Index nele_hess, Index* iRow,
-//                       Index* jCol, Number* values)
+//bool LPFB_NLP::eval_h(int n, const Number* x, bool new_x,
+//                       Number obj_factor, int m, const Number* lambda,
+//                       bool new_lambda, int nele_hess, int* iRow,
+//                       int* jCol, Number* values)
 //{
 //    if (values == NULL) {
 //        // the hessian for this problem is dense
-//        Index idx=0;
-//        for (Index i = 0; i < n; i++) {
-//            for (Index j = 0; j < n; j++) {
+//        int idx=0;
+//        for (int i = 0; i < n; i++) {
+//            for (int j = 0; j < n; j++) {
 //                iRow[idx] = i;
 //                jCol[idx] = j;
 //                idx++;
@@ -465,8 +525,8 @@ bool LPFB_NLP::eval_jac_g(Index n, const Number* x, bool new_x,
 //        // return the values.
 //        // fill the objective portion which is identical matrix
 //        int idx = 0;
-//        for (Index i = 0; i < n; i++) {
-//            for (Index j = 0; j < n; j++) {
+//        for (int i = 0; i < n; i++) {
+//            for (int j = 0; j < n; j++) {
 //                if (i == j) {
 //                    values[idx] = obj_factor;
 //                } else {
@@ -483,15 +543,15 @@ bool LPFB_NLP::eval_jac_g(Index n, const Number* x, bool new_x,
 //        
 //        double phi_k = 0;
 //        dPosX[0] = dPosY[0] = 0;
-//        for (Index k = 0; k < n; k++) {
+//        for (int k = 0; k < n; k++) {
 //            phi_k += M_PI - x[k];
 //            dPosX[k+1] = dPosX[k] + m_edgeLengths[k] * -cos(phi_k);
 //            dPosY[k+1] = dPosY[k] + m_edgeLengths[k] * -sin(phi_k);
 //        }
 //        
 //        idx = 0;
-//        for (Index i = 0; i < n; i++) {
-//            for (Index j = 0; j < n; j++) {
+//        for (int i = 0; i < n; i++) {
+//            for (int j = 0; j < n; j++) {
 //                // First constaints equals 0 after differentition
 //
 //                // 2nd & 3rd constraints, closed loop position
@@ -507,38 +567,32 @@ bool LPFB_NLP::eval_jac_g(Index n, const Number* x, bool new_x,
 //    return true;
 //}
 
-void LPFB_NLP::finalize_solution(SolverReturn status,
-                                  Index n, const Number* x, const Number* z_L, const Number* z_U,
-                                  Index m, const Number* g, const Number* lambda,
-                                  Number obj_value,
-                                  const IpoptData* ip_data,
-                                  IpoptCalculatedQuantities* ip_cq)
-{
+void LPFB_NLP::finalize_solution(int n, Eigen::VectorXd &X,
+                                 int m, Eigen::VectorXd &lambda,
+                                 double *cos_phi, double *sin_phi) {
+    double obj_value;
+    eval_f(n, X, obj_value);
     std::cout << std::endl << std::endl << "Objective value" << std::endl;
     std::cout << "f(x*) = " << obj_value << std::endl;
-    
+
+    Eigen::VectorXd g(m);
+    eval_g(n, X, g, cos_phi, sin_phi);
     std::cout << std::endl << "Final value of the constraints:" << std::endl;
-    for (Index i=0; i<m ;i++) {
+    for (int i=0; i<m ;i++) {
         std::cout << "g(" << i << ") = " << g[i] << std::endl;
     }
     
-    double *phi_k = new double[n];
     double *posX = new double[n+1];
     double *posY = new double[n+1];
     posX[0] = posY[0] = 0;
-    for (Index k = 0; k < n; k++) {
-        if (k == 0) {
-            phi_k[k] = M_PI - x[k];
-        } else {
-            phi_k[k] = phi_k[k-1] + M_PI - x[k];
-        }
-        posX[k+1] = posX[k] + m_edgeLengths[k] * cos(phi_k[k]);
-        posY[k+1] = posY[k] + m_edgeLengths[k] * sin(phi_k[k]);
+    for (int k = 0; k < n; k++) {
+        posX[k+1] = posX[k] + m_edgeLengths[k] * cos_phi[k];
+        posY[k+1] = posY[k] + m_edgeLengths[k] * sin_phi[k];
         
 //        printf("%d : %d | %.3lf | %.3lf\n", k, m_mesh.from_vertex_handle(m_boundary3D[k]).idx(), x[k], x[k]-m_innerAngle3D[k]);
     }
     
-    for (Index k = 0; k < n; k++) {
+    for (int k = 0; k < n; k++) {
         // If k == 0, it will be placed at (0,0,0)
         // Ignore virtual cuts, they are not real boundary
         // Also, since we use the opposite of boundary halfedge which is not boundary, we need to use edge handle to test both side.
@@ -546,7 +600,6 @@ void LPFB_NLP::finalize_solution(SolverReturn status,
             m_boundaryPosition.emplace(m_boundary3D[k], OpenMesh::Vec3d(posX[k], posY[k], 0));
         }
     }
-    delete[] phi_k;
     delete[] posX;
     delete[] posY;
 }
