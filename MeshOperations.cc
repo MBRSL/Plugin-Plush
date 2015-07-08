@@ -204,9 +204,9 @@ PlushPatternGenerator::get_halfedge_segments_from_seams(std::set<VertexHandle> i
         HalfedgeHandle heh = m_mesh->halfedge_handle(eh, 0);
         VertexHandle v = m_mesh->from_vertex_handle(heh);
         
-        bool is_all_visited = true;
+        bool is_all_neighbors_visited = true;
         do {
-            is_all_visited = true;
+            is_all_neighbors_visited = true;
             for (const HalfedgeHandle cvoh : m_mesh->voh_range(v)) {
                 EdgeHandle cve = m_mesh->edge_handle(cvoh);
                 VertexHandle neighbor_v = m_mesh->to_vertex_handle(cvoh);
@@ -217,11 +217,15 @@ PlushPatternGenerator::get_halfedge_segments_from_seams(std::set<VertexHandle> i
                     segment.push_back(cvoh);
                     
                     v = neighbor_v;
-                    is_all_visited = false;
+                    is_all_neighbors_visited = false;
                     break;
                 }
             }
-        } while (!is_all_visited);
+        } while (!is_all_neighbors_visited);
+
+        if (!segment.empty()) {
+            segments.push_back(segment);
+        }
     }
     
     // Check if result is valid
