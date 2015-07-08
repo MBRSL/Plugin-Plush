@@ -46,7 +46,7 @@ bool PlushPatternGenerator::calcCurvature() {
     QTextStream gaussian_out(&gaussian_file);
     
     for (VertexHandle v : m_mesh->vertices()) {
-        gaussian_out << m_mesh->property(meanCurvatureHandle, v) << " ";
+        gaussian_out << m_mesh->property(gaussianCurvatureHandle, v) << " ";
     }
     gaussian_file.close();
 
@@ -64,7 +64,7 @@ void PlushPatternGenerator::loadCurvature() {
     double mean_curvature;
     for (VertexHandle v : m_mesh->vertices()) {
         mean_in >> mean_curvature;
-        m_mesh->property(gaussianCurvatureHandle, v) = mean_curvature;
+        m_mesh->property(meanCurvatureHandle, v) = mean_curvature;
     }
     mean_file.close();
     
