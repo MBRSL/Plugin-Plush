@@ -142,6 +142,7 @@ public:
                    bool elimination = false,
                    bool allPaths = true);
     bool calcLocalSeams(FilteredTriMesh &mesh, double developable_threshold);
+    bool set_seams_from_selection();
     bool load_seams();
     bool save_seams();
     

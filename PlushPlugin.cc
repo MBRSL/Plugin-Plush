@@ -49,6 +49,7 @@ void PlushPlugin::initializePlugin()
     seamShowSingleButton = new QPushButton(tr("Single seam"));
     seamShowAllButton = new QPushButton(tr("All seams"));
     seamLocalButton = new QPushButton(tr("Local seams"));
+    QPushButton *seam_from_selection_button = new QPushButton(tr("Seam from selection"));
     QPushButton *seamLoadButton = new QPushButton(tr("Load"));
     QPushButton *seamSaveButton = new QPushButton(tr("Save"));
     seamMergeIsStep = new QCheckBox();
@@ -70,6 +71,7 @@ void PlushPlugin::initializePlugin()
     seamRow2Layout->addWidget(seamShowSingleButton);
     seamRow2Layout->addWidget(seamShowAllButton);
     seamRow2Layout->addWidget(seamLocalButton);
+    seamRow3Layout->addWidget(seam_from_selection_button);
     seamRow3Layout->addWidget(seamLoadButton);
     seamRow3Layout->addWidget(seamSaveButton);
     seamRow4Layout->addWidget(new QLabel(tr("Is step")));
@@ -189,6 +191,7 @@ void PlushPlugin::initializePlugin()
     connect(seamShowSingleButton, SIGNAL(clicked()), this, SLOT(seamShowButtonClicked()));
     connect(seamShowAllButton, SIGNAL(clicked()), this, SLOT(seamShowButtonClicked()));
     connect(seamLocalButton, SIGNAL(clicked()), this, SLOT(seamShowButtonClicked()));
+    connect(seam_from_selection_button, SIGNAL(clicked()), this, SLOT(seam_from_selection_button_clicked()));
     connect(seamLoadButton, SIGNAL(clicked()), this, SLOT(seamLoadButtonClicked()));
     connect(seamSaveButton, SIGNAL(clicked()), this, SLOT(seamSaveButtonClicked()));
     connect(seamMergeButton, SIGNAL(clicked()), this, SLOT(seamMergeButtonClicked()));
@@ -367,6 +370,13 @@ void PlushPlugin::calcGeodesicButtonClicked() {
     emit startJob(m_currentJobId, "calculate geodesic of whole mesh", 0, 100, true);
     thread->start();
     thread->startProcessing();
+}
+
+void PlushPlugin::seam_from_selection_button_clicked() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+    m_patternGenerator->set_seams_from_selection();
 }
 
 void PlushPlugin::seamLoadButtonClicked() {

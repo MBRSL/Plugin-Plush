@@ -610,6 +610,17 @@ bool PlushPatternGenerator::calcStructralSeams(TriMesh *mesh,
     return true;
 }
 
+bool PlushPatternGenerator::set_seams_from_selection() {
+    std::set<EdgeHandle> &seams = m_mesh->property(seams_handle);
+    seams.clear();
+    for (EdgeHandle eh : m_mesh->edges()) {
+        if (m_mesh->status(eh).selected()) {
+            seams.insert(eh);
+        }
+    }
+    return true;
+}
+
 bool PlushPatternGenerator::load_seams() {
     QFile file(m_meshName + "_seams.txt");
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {

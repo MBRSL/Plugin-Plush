@@ -113,6 +113,7 @@ private slots:
     void pluginsInitialized();
     
     void seamShowButtonClicked();
+    void seam_from_selection_button_clicked();
     void seamSaveButtonClicked();
     void seamLoadButtonClicked();
     void seamMergeButtonClicked();
