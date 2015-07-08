@@ -94,6 +94,10 @@ private:
     
     // subset
     QDoubleSpinBox *subset_merge_threshold;
+    
+    // vis
+    QPushButton *vis_seam_segments_button;
+    QPushButton *vis_seam_segments_importance_button;
 
     bool showAllPath;
     /// Flag for thread stopping

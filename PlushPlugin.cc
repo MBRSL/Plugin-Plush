@@ -163,7 +163,8 @@ void PlushPlugin::initializePlugin()
     
     QGroupBox *visualization_group = new QGroupBox(tr("Visualization"));
     QPushButton *vis_intersection_points_button = new QPushButton(tr("Intersection points"));
-    QPushButton *vis_seam_segments_button = new QPushButton(tr("Seam segments"));
+    vis_seam_segments_button = new QPushButton(tr("Segments"));
+    vis_seam_segments_importance_button = new QPushButton(tr("Segments importance"));
     QPushButton *vis_skeleton_button = new QPushButton(tr("Skeleton"));
     QPushButton *vis_save_home_view_button = new QPushButton(tr("save view"));
     QPushButton *vis_load_home_view_button = new QPushButton(tr("load view"));
@@ -172,6 +173,7 @@ void PlushPlugin::initializePlugin()
     QHBoxLayout *vis_layout_row2 = new QHBoxLayout;
     vis_layout_row1->addWidget(vis_intersection_points_button);
     vis_layout_row1->addWidget(vis_seam_segments_button);
+    vis_layout_row1->addWidget(vis_seam_segments_importance_button);
     vis_layout_row1->addWidget(vis_skeleton_button);
     vis_layout_row2->addWidget(vis_save_home_view_button);
     vis_layout_row2->addWidget(vis_load_home_view_button);
@@ -215,6 +217,7 @@ void PlushPlugin::initializePlugin()
 
     connect(vis_intersection_points_button, SIGNAL(clicked()), this, SLOT(vis_intersection_points_button_clicked()));
     connect(vis_seam_segments_button, SIGNAL(clicked()), this, SLOT(vis_seam_segments_button_clicked()));
+    connect(vis_seam_segments_importance_button, SIGNAL(clicked()), this, SLOT(vis_seam_segments_button_clicked()));
     connect(vis_skeleton_button, SIGNAL(clicked()), this, SLOT(vis_skeleton_button_clicked()));
     connect(vis_save_home_view_button, SIGNAL(clicked()), this, SLOT(vis_save_home_view_button_clicked()));
     connect(vis_load_home_view_button, SIGNAL(clicked()), this, SLOT(vis_load_home_view_button_clicked()));
@@ -533,15 +536,55 @@ void PlushPlugin::vis_seam_segments_button_clicked() {
     MeshSelection::clearEdgeSelection(mesh);
 
     int num = heh_segments.size();
-    ACG::ColorCoder color_coder(0, num, false);
     for (EdgeHandle eh : mesh->edges()) {
         mesh->set_color(eh, TriMesh::Color(1,1,1,0));
     }
-    for (auto group : heh_segments) {
-        TriMesh::Color color = color_coder.color_float4(rand() % num);
-        for (HalfedgeHandle heh : group) {
-            mesh->set_color(mesh->edge_handle(heh), color);
+    
+    if (sender() == vis_seam_segments_button) {
+        // generate unique random sequence
+        int *sequence = new int[num];
+        for (int i = 0; i < num; i++) {
+            sequence[i] = i;
         }
+        // randomly swap
+        for (int i = 0; i < num; i++) {
+            int r = rand() % num;
+            int tmp = sequence[i];
+            sequence[i] = sequence[r];
+            sequence[r] = tmp;
+        }
+        int counter = 0;
+        ACG::ColorCoder color_coder(0, num, false);
+        for (auto group : heh_segments) {
+            TriMesh::Color color = color_coder.color_float4(sequence[counter++] % num);
+            for (HalfedgeHandle heh : group) {
+                mesh->set_color(mesh->edge_handle(heh), color);
+            }
+        }
+    } else {
+        double max = -1;
+        double *group_weight_sum = new double[heh_segments.size()];
+        int counter = 0;
+        for (auto group : heh_segments) {
+            for (HalfedgeHandle heh : group) {
+                if (!PlushPatternGenerator::is_different_texture(mesh, mesh->edge_handle(heh))) {
+                        group_weight_sum[counter] += mesh->property(PlushPatternGenerator::edgeWeightHandle, mesh->edge_handle(heh));
+                }
+            }
+            if (group_weight_sum[counter] > max) {
+                max = group_weight_sum[counter];
+            }
+            counter++;
+        }
+        ACG::ColorCoder color_coder(0, log2(max), false);
+        counter = 0;
+        for (auto group : heh_segments) {
+            TriMesh::Color color = color_coder.color_float4(log2(group_weight_sum[counter++]));
+            for (HalfedgeHandle heh : group) {
+                mesh->set_color(mesh->edge_handle(heh), color);
+            }
+        }
+        delete[] group_weight_sum;
     }
     PluginFunctions::setDrawMode(ACG::SceneGraph::DrawModes::EDGES_COLORED | ACG::SceneGraph::DrawModes::SOLID_FLAT_SHADED);
     emit updatedObject(m_triMeshObj->id(), UPDATE_COLOR | UPDATE_SELECTION);
