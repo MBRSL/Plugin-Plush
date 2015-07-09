@@ -84,12 +84,14 @@ void PlushPatternGenerator::construct_subsets(double threshold) {
     
     // Construct first level of patches from sub-meshes
     // Compute the distortion of each patch
+    int progress_counter = 0;
     for (FilteredTriMesh &patch : hierarchical_patches[0]) {
         std::map<HalfedgeHandle, OpenMesh::Vec3d> boundaryPosition;
         calcLPFB(patch, boundaryPosition);
         calcInteriorPoints(patch, boundaryPosition);
         calcDistortion(patch);
         patch_distortion.emplace(patch.merged_seam_idx, patch.max_distortion);
+        emit setJobState((double)progress_counter++/hierarchical_patches[0].size() * 100);
     }
     // Construct larger patches from previous level
 //    for (int level = 1; hierarchical_patches[level-1].size() > 0; level++) {
@@ -97,7 +99,7 @@ void PlushPatternGenerator::construct_subsets(double threshold) {
         // Extend container
         hierarchical_patches.resize(hierarchical_patches.size()+1);
         // For every patch, test if it can be merged with its neighbors
-        int progress_counter = 0;
+        progress_counter = 0;
         for (FilteredTriMesh &patch : hierarchical_patches[level-1]) {
             if (isJobCanceled) {
                 emit log(LOGINFO, "Subset calculation canceled.");
