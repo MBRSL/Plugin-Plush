@@ -143,7 +143,7 @@ void PlushPatternGenerator::construct_subsets(double threshold) {
                 }
             }
             progress_counter++;
-            setJobState((double)progress_counter/hierarchical_patches[level-1].size() * 100);
+            emit setJobState((double)progress_counter/hierarchical_patches[level-1].size() * 100);
         }
     }
     // Remove uneccessary level

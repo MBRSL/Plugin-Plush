@@ -33,7 +33,7 @@ bool PlushPatternGenerator::calcFlattenedGraph()
         calcDistortion(subMesh);
 
         progress_counter++;
-        setJobState((double)progress_counter/ boost::num_vertices(subMesh_graph) * 100);
+        emit setJobState((double)progress_counter/ boost::num_vertices(subMesh_graph) * 100);
     }
     
     return true;
