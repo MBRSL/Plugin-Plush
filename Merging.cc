@@ -114,10 +114,6 @@ void PlushPatternGenerator::construct_subsets(double threshold) {
                     SubMesh_graph::out_edge_iterator e_it, e_ite;
                     for (boost::tie(e_it, e_ite) = boost::out_edges(v1, subMesh_graph); e_it != e_ite; e_it++) {
                         std::vector<HalfedgeHandle> seam_segment = boost::get(boost::edge_owner, subMesh_graph, *e_it);
-                        std::set<EdgeHandle> seam_segment_set;
-                        for (HalfedgeHandle heh : seam_segment) {
-                            seam_segment_set.insert(m_mesh->edge_handle(heh));
-                        }
                         
                         SubMesh_graph::vertex_descriptor v2 = boost::target(*e_it, subMesh_graph);
                         FilteredTriMesh &neigboring_subMesh = boost::get(boost::vertex_owner, subMesh_graph, v2);
@@ -128,17 +124,42 @@ void PlushPatternGenerator::construct_subsets(double threshold) {
                         merged_seam_idx[seam_segment_idx] = true;
                         
                         if (patch_distortion.find(merged_seam_idx) == patch_distortion.end()) {
+                            std::set<EdgeHandle> seam_segment_set;
+                            for (HalfedgeHandle heh : seam_segment) {
+                                seam_segment_set.insert(m_mesh->edge_handle(heh));
+                            }
                             FilteredTriMesh merged_subMesh = merge_patch(patch, neigboring_subMesh, seam_segment_idx, seam_segment_set);
-                            // Distortion not calculated yet. Calculate now.
-                            std::map<HalfedgeHandle, OpenMesh::Vec3d> boundaryPosition;
-                            calcLPFB(merged_subMesh, boundaryPosition);
-                            calcInteriorPoints(merged_subMesh, boundaryPosition);
-                            calcDistortion(merged_subMesh);
                             
-                            patch_distortion.emplace(merged_subMesh.merged_seam_idx, merged_subMesh.max_distortion);
+                            // check the guassian curvature of the segment to be merged
+                            // if all curvature < threshold, then this segment can be merged
+                            // note that boundary vertices do not need to have 0 curvature
+                            bool non_developable = false;
+                            for (HalfedgeHandle heh : seam_segment) {
+                                VertexHandle v1 = merged_subMesh.from_vertex_handle(heh);
+                                VertexHandle v2 = merged_subMesh.from_vertex_handle(heh);
+                                
+                                double gaussian_curvature1 = m_mesh->property(gaussianCurvatureHandle, v1);
+                                double gaussian_curvature2 = m_mesh->property(gaussianCurvatureHandle, v2);
+                                if ((!merged_subMesh.is_boundary(v1) && gaussian_curvature1 > 0.05) ||
+                                    (!merged_subMesh.is_boundary(v2) && gaussian_curvature2 > 0.05)) {
+                                    non_developable = true;
+                                    patch_distortion.emplace(merged_subMesh.merged_seam_idx, 1e9);
+                                    break;
+                                }
+                            }
                             
-                            if (merged_subMesh.max_distortion < threshold) {
-                                hierarchical_patches[level].push_back(merged_subMesh);
+                            if (!non_developable) {
+                                // Distortion not calculated yet. Calculate now.
+                                std::map<HalfedgeHandle, OpenMesh::Vec3d> boundaryPosition;
+                                calcLPFB(merged_subMesh, boundaryPosition);
+                                calcInteriorPoints(merged_subMesh, boundaryPosition);
+                                calcDistortion(merged_subMesh);
+                                
+                                patch_distortion.emplace(merged_subMesh.merged_seam_idx, merged_subMesh.max_distortion);
+                                
+                                if (merged_subMesh.max_distortion < threshold) {
+                                    hierarchical_patches[level].push_back(merged_subMesh);
+                                }
                             }
                         }
                     }
