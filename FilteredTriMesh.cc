@@ -56,24 +56,28 @@ FilteredTriMesh::FilteredTriMesh(TriMesh *mesh,
         boundary_predicate.m_boundary_vertex_filter[vh2.idx()] = true;
     }
     int idx_counter = 0;
-    for (VertexHandle vh : m_mesh->vertices()) {
+    size_t pos = predicate.m_vertex_filter.find_first();
+    while (pos != boost::dynamic_bitset<>::npos) {
+        VertexHandle vh = m_mesh->vertex_handle(pos);
         if (is_valid(vh) && !is_boundary(vh)) {
             non_boundary_vertex_mapping.emplace(vh, idx_counter++);
         }
+        pos = predicate.m_vertex_filter.find_next(pos);
     }
-    for (EdgeHandle eh : m_mesh->edges()) {
-        if (is_valid(eh)) {
-            HalfedgeHandle heh1 = m_mesh->halfedge_handle(eh, 0);
-            if (is_boundary(heh1)) {
-                boundary_vertex_mapping.emplace(heh1, idx_counter++);
-            }
-            HalfedgeHandle heh2 = m_mesh->halfedge_handle(eh, 1);
-            if (is_boundary(heh2)) {
-                boundary_vertex_mapping.emplace(heh2, idx_counter++);
-            }
+    pos = predicate.m_edge_filter.find_first();
+    while (pos != boost::dynamic_bitset<>::npos) {
+        EdgeHandle eh = m_mesh->edge_handle(pos);
+        HalfedgeHandle heh1 = m_mesh->halfedge_handle(eh, 0);
+        if (is_boundary(heh1)) {
+            boundary_vertex_mapping.emplace(heh1, idx_counter++);
         }
+        HalfedgeHandle heh2 = m_mesh->halfedge_handle(eh, 1);
+        if (is_boundary(heh2)) {
+            boundary_vertex_mapping.emplace(heh2, idx_counter++);
+        }
+        pos = predicate.m_edge_filter.find_next(pos);
     }
-    flattened_position.resize(n_duplicated_vertices(), TriMesh::Point(0,0,0));
+    flattened_position.resize(n_duplicated_vertices());
     
     merged_edge_idx.resize(m_mesh->n_edges());
 }
@@ -205,47 +209,44 @@ unsigned long FilteredTriMesh::n_vertices() const {
 }
 
 FilteredRange<VertexIter, Predicate> FilteredTriMesh::vertices() const {
-    FilteredRange<VertexIter, Predicate>
-        range(boost::make_filter_iterator<Predicate>(predicate,
-                                                     m_mesh->vertices_begin(),
-                                                     m_mesh->vertices_end()),
-              boost::make_filter_iterator<Predicate>(predicate,
-                                                     m_mesh->vertices_end(),
-                                                     m_mesh->vertices_end()));
-    return range;
+    size_t pos = predicate.m_vertex_filter.find_first();
+    if (pos == boost::dynamic_bitset<>::npos) {
+        pos = m_mesh->n_vertices();
+    }
+    VertexIter v_it = m_mesh->vertices_begin();
+    return FilteredRange<VertexIter, Predicate>(predicate,
+                                                VertexIter(*m_mesh, m_mesh->vertex_handle(pos)),
+                                                m_mesh->vertices_end());
 }
 
 FilteredRange<EdgeIter, Predicate> FilteredTriMesh::edges() const {
-    FilteredRange<EdgeIter, Predicate>
-        range(boost::make_filter_iterator<Predicate>(predicate,
-                                                     m_mesh->edges_begin(),
-                                                     m_mesh->edges_end()),
-              boost::make_filter_iterator<Predicate>(predicate,
-                                                     m_mesh->edges_end(),
-                                                     m_mesh->edges_end()));
-    return range;
+    size_t pos = predicate.m_edge_filter.find_first();
+    if (pos == boost::dynamic_bitset<>::npos) {
+        pos = m_mesh->n_edges();
+    }
+    return FilteredRange<EdgeIter, Predicate>(predicate,
+                                              EdgeIter(*m_mesh, m_mesh->edge_handle(pos)),
+                                              m_mesh->edges_end());
 }
 
 FilteredRange<HalfedgeIter, Predicate> FilteredTriMesh::halfedges() const {
-    FilteredRange<HalfedgeIter, Predicate>
-        range(boost::make_filter_iterator<Predicate>(predicate,
-                                                     m_mesh->halfedges_begin(),
-                                                     m_mesh->halfedges_end()),
-              boost::make_filter_iterator<Predicate>(predicate,
-                                                     m_mesh->halfedges_end(),
-                                                     m_mesh->halfedges_end()));
-    return range;
+    size_t pos = predicate.m_halfedge_filter.find_first();
+    if (pos == boost::dynamic_bitset<>::npos) {
+        pos = m_mesh->n_halfedges();
+    }
+    return FilteredRange<HalfedgeIter, Predicate>(predicate,
+                                                  HalfedgeIter(*m_mesh, m_mesh->halfedge_handle(pos)),
+                                                  m_mesh->halfedges_end());
 }
 
 FilteredRange<FaceIter, Predicate> FilteredTriMesh::faces() const {
-    FilteredRange<FaceIter, Predicate>
-        range(boost::make_filter_iterator<Predicate>(predicate,
-                                                     m_mesh->faces_begin(),
-                                                     m_mesh->faces_end()),
-              boost::make_filter_iterator<Predicate>(predicate,
-                                                     m_mesh->faces_end(),
-                                                     m_mesh->faces_end()));
-    return range;
+    size_t pos = predicate.m_face_filter.find_first();
+    if (pos == boost::dynamic_bitset<>::npos) {
+        pos = m_mesh->n_faces();
+    }
+    return FilteredRange<FaceIter, Predicate>(predicate,
+                                              FaceIter(*m_mesh, m_mesh->face_handle(pos)),
+                                              m_mesh->faces_end());
 }
 
 //FilteredRange<TriMesh::ConstFaceVertexIter, Predicate> FilteredTriMesh::fv_range(FaceHandle fh) const {
@@ -278,25 +279,23 @@ Range<TriMesh::ConstFaceHalfedgeIter> FilteredTriMesh::fh_range(FaceHandle fh) c
 }
 
 FilteredRange<VertexIter, Boundary_predicate> FilteredTriMesh::boundary_vertices() const {
-    FilteredRange<VertexIter, Boundary_predicate>
-        range(boost::make_filter_iterator<Boundary_predicate>(boundary_predicate,
-                                                              m_mesh->vertices_begin(),
-                                                              m_mesh->vertices_end()),
-              boost::make_filter_iterator<Boundary_predicate>(boundary_predicate,
-                                                              m_mesh->vertices_end(),
-                                                              m_mesh->vertices_end()));
-    return range;
+    size_t pos = boundary_predicate.m_boundary_vertex_filter.find_first();
+    if (pos == boost::dynamic_bitset<>::npos) {
+        pos = m_mesh->n_vertices();
+    }
+    return FilteredRange<VertexIter, Boundary_predicate>(boundary_predicate,
+                                                         VertexIter(*m_mesh, m_mesh->vertex_handle(pos)),
+                                                         m_mesh->vertices_end());
 }
 
 FilteredRange<EdgeIter, Boundary_predicate> FilteredTriMesh::boundary_edges() const {
-    FilteredRange<EdgeIter, Boundary_predicate>
-        range(boost::make_filter_iterator<Boundary_predicate>(boundary_predicate,
-                                                              m_mesh->edges_begin(),
-                                                              m_mesh->edges_end()),
-              boost::make_filter_iterator<Boundary_predicate>(boundary_predicate,
-                                                              m_mesh->edges_end(),
-                                                              m_mesh->edges_end()));
-    return range;
+    size_t pos = boundary_predicate.m_boundary_edge_filter.find_first();
+    if (pos == boost::dynamic_bitset<>::npos) {
+        pos = m_mesh->n_edges();
+    }
+    return FilteredRange<EdgeIter, Boundary_predicate>(boundary_predicate,
+                                                       EdgeIter(*m_mesh, m_mesh->edge_handle(pos)),
+                                                       m_mesh->edges_end());
 }
 
 ///@}

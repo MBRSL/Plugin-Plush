@@ -40,17 +40,40 @@ struct Boundary_predicate {
     }
 };
 
-template <class Handle, class Predicate>
+template <class Iter, class Pred>
 struct FilteredRange {
-    typedef boost::filter_iterator<Predicate, Handle> FilterIter;
+    typedef boost::filter_iterator<const Pred&, Iter> FilterIter;
+    const Pred &m_pred;
     FilterIter m_begin;
     FilterIter m_end;
     
-    FilteredRange(FilterIter begin, FilterIter end) : m_begin(begin), m_end(end) {}
-    FilterIter begin() {
+    FilteredRange(const Pred &pred, Iter begin, Iter end) :
+        m_pred(pred),
+        m_begin(boost::make_filter_iterator<const Pred&>(pred, begin, end)),
+        m_end(boost::make_filter_iterator<const Pred&>(pred, end, end))
+    {
+    }
+    FilteredRange(FilteredRange&& other) noexcept :
+    m_pred(other.m_pred),
+    m_begin(std::move(other.m_begin)),
+    m_end(std::move(other.m_end))
+    {
+    }
+    FilteredRange& operator=(FilteredRange&& other) noexcept
+    {
+        if (this != &other) {
+            m_pred = other.m_pred;
+            m_begin = std::move(other.m_begin);
+            m_end = std::move(other.m_end);
+        }
+        return *this;
+    }
+
+    
+    FilterIter& begin() {
         return m_begin;
     }
-    FilterIter end() {
+    FilterIter& end() {
         return m_end;
     }
 };
