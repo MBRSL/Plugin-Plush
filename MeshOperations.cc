@@ -322,34 +322,37 @@ std::vector< std::vector<HalfedgeHandle> >  PlushPatternGenerator::getBoundaryOf
         return heh.idx();
     };
     std::unordered_set<HalfedgeHandle, decltype(hasher)> visited(0, hasher);
-    for (HalfedgeHandle heh : mesh.halfedges()) {
-        if (!mesh.is_boundary(heh)
-        ||  visited.find(heh) != visited.end()) {
-            continue;
-        }
-        
-        std::vector<HalfedgeHandle> boundary;
-        
-        HalfedgeHandle start_heh = heh;
-        HalfedgeHandle current_heh = start_heh;
-        do {
-            visited.insert(current_heh);
-            boundary.push_back(current_heh);
-            current_heh = mesh.next_boundary_halfedge_handle(current_heh);
-        } while (current_heh != start_heh);
-        
-        assert(boundary.size() > 0);
-        assert(mesh.from_vertex_handle(start_heh) == mesh.to_vertex_handle(boundary[boundary.size()-1]));
-        
-        // The loop of opposite halfedges is in reversed direction
-        if (getInteriorHalfedge) {
-            std::reverse(boundary.begin(), boundary.end());
-            for (size_t i = 0; i < boundary.size(); i++) {
-                boundary[i] = mesh.opposite_halfedge_handle(boundary[i]);
-                assert(!mesh.is_boundary(boundary[i]) || mesh.is_dual_boundary(boundary[i]));
+    for (EdgeHandle eh : mesh.boundary_edges()) {
+        for (int i = 0; i < 2; i++) {
+            HalfedgeHandle heh = mesh.halfedge_handle(eh, i);
+            if (!mesh.is_boundary(heh)
+            ||  visited.find(heh) != visited.end()) {
+                continue;
             }
+            
+            std::vector<HalfedgeHandle> boundary;
+            
+            HalfedgeHandle start_heh = heh;
+            HalfedgeHandle current_heh = start_heh;
+            do {
+                visited.insert(current_heh);
+                boundary.push_back(current_heh);
+                current_heh = mesh.next_boundary_halfedge_handle(current_heh);
+            } while (current_heh != start_heh);
+            
+            assert(boundary.size() > 0);
+            assert(mesh.from_vertex_handle(start_heh) == mesh.to_vertex_handle(boundary[boundary.size()-1]));
+            
+            // The loop of opposite halfedges is in reversed direction
+            if (getInteriorHalfedge) {
+                std::reverse(boundary.begin(), boundary.end());
+                for (size_t i = 0; i < boundary.size(); i++) {
+                    boundary[i] = mesh.opposite_halfedge_handle(boundary[i]);
+                    assert(!mesh.is_boundary(boundary[i]) || mesh.is_dual_boundary(boundary[i]));
+                }
+            }
+            boundaries.push_back(boundary);
         }
-        boundaries.push_back(boundary);
     }
     return boundaries;
 }
