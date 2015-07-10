@@ -5,7 +5,7 @@
 
 #include <ObjectTypes/TriangleMesh/TriangleMesh.hh>
 
-#include <boost/range/adaptor/filtered.hpp>
+#include <boost/iterator/iterator_facade.hpp>
 #include <boost/dynamic_bitset.hpp>
 
 // True means it's contained in this sub-mesh
@@ -40,44 +40,6 @@ struct Boundary_predicate {
     }
 };
 
-template <class Iter, class Pred>
-struct FilteredRange {
-    typedef boost::filter_iterator<const Pred&, Iter> FilterIter;
-    const Pred &m_pred;
-    FilterIter m_begin;
-    FilterIter m_end;
-    
-    FilteredRange(const Pred &pred, Iter begin, Iter end) :
-        m_pred(pred),
-        m_begin(boost::make_filter_iterator<const Pred&>(pred, begin, end)),
-        m_end(boost::make_filter_iterator<const Pred&>(pred, end, end))
-    {
-    }
-    FilteredRange(FilteredRange&& other) noexcept :
-    m_pred(other.m_pred),
-    m_begin(std::move(other.m_begin)),
-    m_end(std::move(other.m_end))
-    {
-    }
-    FilteredRange& operator=(FilteredRange&& other) noexcept
-    {
-        if (this != &other) {
-            m_pred = other.m_pred;
-            m_begin = std::move(other.m_begin);
-            m_end = std::move(other.m_end);
-        }
-        return *this;
-    }
-
-    
-    FilterIter& begin() {
-        return m_begin;
-    }
-    FilterIter& end() {
-        return m_end;
-    }
-};
-
 template <class Iter>
 struct Range {
     Iter m_begin;
@@ -92,6 +54,10 @@ struct Range {
     }
 };
 
+class FilteredVertexIter;
+class FilteredEdgeIter;
+class FilteredHalfedgeIter;
+class FilteredFaceIter;
 /**
  * @brief This class stores essential information of a submesh of trimesh.
  */
@@ -169,10 +135,10 @@ public:
     ///@{
     unsigned long n_vertices() const;
     
-    FilteredRange<VertexIter, Predicate> vertices() const;
-    FilteredRange<EdgeIter, Predicate> edges() const;
-    FilteredRange<HalfedgeIter, Predicate> halfedges() const;
-    FilteredRange<FaceIter, Predicate> faces() const;
+    Range<FilteredVertexIter> vertices() const;
+    Range<FilteredEdgeIter> edges() const;
+    Range<FilteredHalfedgeIter> halfedges() const;
+    Range<FilteredFaceIter> faces() const;
     /// There seems to be some problem about filter_iterator with circulator
     /// You should use *(iter.base()) instead of *iter
     ///@{
@@ -186,8 +152,8 @@ public:
     Range<TriMesh::ConstFaceHalfedgeIter> fh_range(FaceHandle fh) const;
     ///@}
     
-    FilteredRange<VertexIter, Boundary_predicate> boundary_vertices() const;
-    FilteredRange<EdgeIter, Boundary_predicate> boundary_edges() const;
+    Range<FilteredVertexIter> boundary_vertices() const;
+    Range<FilteredEdgeIter> boundary_edges() const;
     ///@}
 
     /// Filtered functions
@@ -231,5 +197,87 @@ public:
     
     /// Use this if you want to use operations for original unfiltered mesh
     TriMesh *mesh() const;
+};
+
+template <class HandleType, class Derived>
+class FilteredIterator :
+public boost::iterator_facade<  FilteredIterator<HandleType, Derived>,
+                                HandleType,
+                                boost::forward_traversal_tag,
+                                HandleType>
+{
+public:
+    FilteredIterator(const FilteredTriMesh &mesh,
+                     const boost::dynamic_bitset<> &filter,
+                     size_t pos = 0) :
+    m_mesh(mesh), m_filter(filter), m_pos(pos) {
+    }
+    
+protected:
+    friend class boost::iterator_core_access;
+    
+    void increment() {
+        m_pos = m_filter.find_next(m_pos);
+    }
+    
+    bool equal(FilteredIterator<HandleType, Derived> const& other) const {
+        auto handle1 = this->dereference();
+        auto handle2 = *other;
+        return handle1 == handle2;
+    }
+    
+    HandleType dereference() const {
+        auto handle = static_cast<const Derived*>(this)->dereference_impl();
+        return handle;
+    }
+    
+    const FilteredTriMesh &m_mesh;
+    const boost::dynamic_bitset<> &m_filter;
+    size_t m_pos;
+};
+
+class FilteredVertexIter : public FilteredIterator<VertexHandle, FilteredVertexIter> {
+public:
+    FilteredVertexIter(const FilteredTriMesh &mesh,
+                       const boost::dynamic_bitset<> &filter,
+                       size_t pos) :
+    FilteredIterator(mesh, filter, pos) {
+    }
+    VertexHandle dereference_impl() const {
+        return m_mesh.mesh()->vertex_handle(m_pos);
+    }
+};
+class FilteredEdgeIter : public FilteredIterator<EdgeHandle, FilteredEdgeIter> {
+public:
+    FilteredEdgeIter(const FilteredTriMesh &mesh,
+                         const boost::dynamic_bitset<> &filter,
+                         size_t pos) :
+    FilteredIterator(mesh, filter, pos) {
+    }
+    EdgeHandle dereference_impl() const {
+        return m_mesh.mesh()->edge_handle(m_pos);
+    }
+};
+class FilteredHalfedgeIter : public FilteredIterator<HalfedgeHandle, FilteredHalfedgeIter> {
+public:
+    FilteredHalfedgeIter(const FilteredTriMesh &mesh,
+                             const boost::dynamic_bitset<> &filter,
+                             size_t pos) :
+    FilteredIterator(mesh, filter, pos) {
+    }
+    HalfedgeHandle dereference_impl() const {
+        return m_mesh.mesh()->halfedge_handle(m_pos);
+    }
+};
+class FilteredFaceIter : public FilteredIterator<FaceHandle, FilteredFaceIter> {
+public:
+    FilteredFaceIter(const FilteredTriMesh &mesh,
+                         const boost::dynamic_bitset<> &filter,
+                         size_t pos) :
+    FilteredIterator(mesh, filter, pos) {
+    }
+    FaceHandle dereference_impl() const {
+        return m_mesh.mesh()->face_handle(m_pos);
+    }
 };
 #endif //TRIMESH_FILTER_HH
