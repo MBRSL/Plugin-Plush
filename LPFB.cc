@@ -570,6 +570,7 @@ bool LPFB_NLP::eval_jac_g(int n, Eigen::VectorXd &X,
 void LPFB_NLP::finalize_solution(int n, Eigen::VectorXd &X,
                                  int m, Eigen::VectorXd &lambda,
                                  double *cos_phi, double *sin_phi) {
+#ifndef NDEBUG
     double obj_value;
     eval_f(n, X, obj_value);
     std::cout << std::endl << std::endl << "Objective value" << std::endl;
@@ -581,7 +582,7 @@ void LPFB_NLP::finalize_solution(int n, Eigen::VectorXd &X,
     for (int i=0; i<m ;i++) {
         std::cout << "g(" << i << ") = " << g[i] << std::endl;
     }
-    
+#endif
     double *posX = new double[n+1];
     double *posY = new double[n+1];
     posX[0] = posY[0] = 0;
