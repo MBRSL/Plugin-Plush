@@ -799,28 +799,25 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
 }
 
 void PlushPlugin::subset_show_button_clicked() {
-    auto hierarchical_patches = m_patternGenerator->get_hierarchical_patches();
-    if (hierarchical_patches.size() > 0) {
-        auto hierarchical_patches_layer = hierarchical_patches[hierarchical_patches.size()-1];
-        int counter = 0;
-        for (FilteredTriMesh subMesh : hierarchical_patches_layer) {
-            int id;
-            emit addEmptyObject(DATA_TRIANGLE_MESH, id);
-            TriMeshObject *object = 0;
-            PluginFunctions::getObject(id, object);
-            
-            TriMesh *mesh = object->mesh();
-            
-            m_patternGenerator->get_triMesh_from_subMesh(mesh, subMesh, false);
-            MeshSelection::selectBoundaryEdges(mesh);
-            counter++;
-            if (counter > 5) {
-                break;
-            }
+    std::vector<FilteredTriMesh> merged_patches = m_patternGenerator->get_merged_patches();
+    int counter = 0;
+    for (FilteredTriMesh &patch : merged_patches) {
+        int id;
+        emit addEmptyObject(DATA_TRIANGLE_MESH, id);
+        TriMeshObject *object = 0;
+        PluginFunctions::getObject(id, object);
+        
+        TriMesh *mesh = object->mesh();
+        
+        m_patternGenerator->get_triMesh_from_subMesh(mesh, patch, false);
+        MeshSelection::selectBoundaryEdges(mesh);
+        counter++;
+        if (counter > 10) {
+            break;
         }
     }
     
-    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
+//    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
 }
 
 void PlushPlugin::saveSelectionButtonClicked() {

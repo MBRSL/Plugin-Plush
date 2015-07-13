@@ -91,7 +91,10 @@ non_boundary_vertex_mapping(std::move(other.non_boundary_vertex_mapping)),
 flattened_position(std::move(other.flattened_position)),
 merged_subMesh_idx(std::move(other.merged_subMesh_idx)),
 merged_seam_idx(std::move(other.merged_seam_idx)),
-merged_edge_idx(std::move(other.merged_edge_idx))
+merged_edge_idx(std::move(other.merged_edge_idx)),
+max_distortion(other.max_distortion),
+seam_score(other.seam_score),
+n_merged_seams(other.n_merged_seams)
 {
 }
 
@@ -116,6 +119,10 @@ FilteredTriMesh& FilteredTriMesh::operator=(FilteredTriMesh&& other) noexcept {
         merged_subMesh_idx = std::move(other.merged_subMesh_idx);
         merged_seam_idx = std::move(other.merged_seam_idx);
         merged_edge_idx = std::move(other.merged_edge_idx);
+        
+        max_distortion = other.max_distortion;
+        seam_score = other.seam_score;
+        n_merged_seams = other.n_merged_seams;
     }
     return *this;
 }
@@ -129,7 +136,10 @@ non_boundary_vertex_mapping(other.non_boundary_vertex_mapping),
 flattened_position(other.flattened_position),
 merged_subMesh_idx(other.merged_subMesh_idx),
 merged_seam_idx(other.merged_seam_idx),
-merged_edge_idx(other.merged_edge_idx)
+merged_edge_idx(other.merged_edge_idx),
+max_distortion(other.max_distortion),
+seam_score(other.seam_score),
+n_merged_seams(other.n_merged_seams)
 {
 }
 
@@ -143,6 +153,9 @@ FilteredTriMesh& FilteredTriMesh::operator=(const FilteredTriMesh& other) {
     merged_subMesh_idx = other.merged_subMesh_idx;
     merged_seam_idx = other.merged_seam_idx;
     merged_edge_idx = other.merged_edge_idx;
+    max_distortion = other.max_distortion;
+    seam_score = other.seam_score;
+    n_merged_seams = other.n_merged_seams;
     return *this;
 }
 

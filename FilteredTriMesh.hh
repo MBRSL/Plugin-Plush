@@ -85,12 +85,15 @@ public:
      * A patch with bits [1,0,0,0,0,....] mean it contains #1 sub-mesh
      * A patch with bits [0,1,1,0,0,....] mean it merged #2 and #3 sub-meshes
      */
-    boost::dynamic_bitset<> merged_subMesh_idx;
+    typedef boost::dynamic_bitset<> Patch_idx;
     /* Use this to record which seam segment do this patch have merged
      * A patch with bits [1,0,0,0,0,....] mean it merged #1 seam
      * A patch with bits [0,1,1,0,0,....] mean it merged #2 and #3 seams
      */
-    boost::dynamic_bitset<> merged_seam_idx;
+    typedef boost::dynamic_bitset<> Seam_idx;
+
+    Patch_idx merged_subMesh_idx;
+    Seam_idx merged_seam_idx;
     /* Use this to record which edge handle do this patch have merged
      * A merged edge should not be added to boundary anymore
      * A patch with bits [1,0,0,0,0,....] mean it merged #1 edge
@@ -100,7 +103,12 @@ public:
     
     // The face area difference between original sub-mesh & flattened sub-mesh
     double max_distortion = -1;
+
+    // The seam score by evaluating weightFunction (lower is better)
+    double seam_score = -1;
     
+    double n_merged_seams = 0;
+
     /// You shouldn't use this constructor unless you just need to allocate a variable and assigned it later.
     FilteredTriMesh() {}
     FilteredTriMesh(TriMesh *mesh,

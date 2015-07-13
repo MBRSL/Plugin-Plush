@@ -10,7 +10,7 @@ OpenMesh::MPropHandleT< std::map< std::set<HalfedgeHandle>, double> > PlushPatte
 
 OpenMesh::MPropHandleT< std::set<EdgeHandle> > PlushPatternGenerator::seams_handle;
 
-OpenMesh::MPropHandleT< std::vector< std::vector<FilteredTriMesh> > > PlushPatternGenerator::hierarchical_patches_handle;
+OpenMesh::MPropHandleT< std::vector<FilteredTriMesh> > PlushPatternGenerator::merged_patches_handle;
 
 OpenMesh::FPropHandleT<int> PlushPatternGenerator::face_to_patch_idx_handle;
 
@@ -83,7 +83,7 @@ void PlushPatternGenerator::initProperties() {
     
     m_mesh->add_property(seams_handle, "Seams");
     
-    m_mesh->add_property(hierarchical_patches_handle, "subMesh subset");
+    m_mesh->add_property(merged_patches_handle, "subMesh subset");
     
     m_mesh->add_property(face_to_patch_idx_handle, "The submesh id this face belongs to");
     
@@ -140,7 +140,7 @@ void PlushPatternGenerator::uninitProperties() {
     
     m_mesh->remove_property(seams_handle);
     
-    m_mesh->remove_property(hierarchical_patches_handle);
+    m_mesh->remove_property(merged_patches_handle);
     
     m_mesh->remove_property(face_to_patch_idx_handle);
 
@@ -348,6 +348,6 @@ std::vector< std::pair< std::vector<HalfedgeHandle>, double> > PlushPatternGener
     return segments_with_importance;
 }
 
-std::vector< std::vector<FilteredTriMesh> > PlushPatternGenerator::get_hierarchical_patches() {
-    return m_mesh->property(hierarchical_patches_handle);
+std::vector<FilteredTriMesh> PlushPatternGenerator::get_merged_patches() {
+    return m_mesh->property(merged_patches_handle);
 }

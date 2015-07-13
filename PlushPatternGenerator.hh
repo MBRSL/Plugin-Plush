@@ -59,7 +59,7 @@ public:
 
     static OpenMesh::MPropHandleT< std::set<EdgeHandle> > seams_handle;
     
-    static OpenMesh::MPropHandleT< std::vector< std::vector<FilteredTriMesh> > > hierarchical_patches_handle;
+    static OpenMesh::MPropHandleT<std::vector<FilteredTriMesh>> merged_patches_handle;
     ///@}
 
 
@@ -187,7 +187,7 @@ public:
                                 std::set<EdgeHandle> &seam_segment);
     void optimize_patches(double threshold, bool step);
     
-    std::vector< std::vector<FilteredTriMesh> > get_hierarchical_patches();
+    std::vector<FilteredTriMesh> get_merged_patches();
     ///@}
 
     // Used in selection and flattening

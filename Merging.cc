@@ -45,6 +45,9 @@ FilteredTriMesh PlushPatternGenerator::merge_patch(FilteredTriMesh &patch1,
     if (seam_segment_idx >= 0) {
         merged_patch.merged_seam_idx[seam_segment_idx] = true;
     }
+
+    merged_patch.n_merged_seams = merged_patch.merged_seam_idx.count();
+    
     for (EdgeHandle eh : seam_segment) {
         merged_patch.merged_edge_idx[eh.idx()] = true;
     }
@@ -69,61 +72,84 @@ void PlushPatternGenerator::construct_subsets(double threshold) {
     std::set<EdgeHandle> &seams = m_mesh->property(seams_handle);
     
     SubMesh_graph subMesh_graph = get_subMeshes_with_boundary(seams);
-    // It's possible that we'll have maximum levels as subMeshes.size() if the given mesh is flat.
-    std::vector< std::vector<FilteredTriMesh> > hierarchical_patches(1);
-    SubMesh_graph::vertex_iterator v_it, v_ite;
-    for (boost::tie(v_it, v_ite) = boost::vertices(subMesh_graph); v_it != v_ite; v_it++) {
-        FilteredTriMesh &subMesh = boost::get(boost::vertex_owner, subMesh_graph, *v_it);
-        hierarchical_patches[0].push_back(subMesh);
-    }
+    // Record the best layout given Patch_idx
+    std::map<FilteredTriMesh::Patch_idx, FilteredTriMesh> optimal_patches;
+
+    // This stores which patch has been calculated
+    std::set<FilteredTriMesh::Seam_idx> is_patch_calculated;
     
-    // This cache the distortion of each patch using their merged_seam_idx as key.
-    // We use merged_seam_idx because there are many possible way to merge two patch while
-    // only one way exist to merge a seam segment
-    std::map< boost::dynamic_bitset<>, double > patch_distortion;
+    // The merged result of this iteration, will be used as base patch in the next iteration
+    std::map<FilteredTriMesh::Patch_idx, FilteredTriMesh> base_patches;
     
     // Construct first level of patches from sub-meshes
     // Compute the distortion of each patch
     int progress_counter = 0;
-    for (FilteredTriMesh &patch : hierarchical_patches[0]) {
+    SubMesh_graph::vertex_iterator v_it, v_ite;
+    for (boost::tie(v_it, v_ite) = boost::vertices(subMesh_graph); v_it != v_ite; v_it++) {
+        FilteredTriMesh &subMesh = boost::get(boost::vertex_owner, subMesh_graph, *v_it);
+        optimal_patches.emplace(subMesh.merged_subMesh_idx, subMesh);
+        base_patches.emplace(subMesh.merged_subMesh_idx, subMesh);
+
         std::map<HalfedgeHandle, OpenMesh::Vec3d> boundaryPosition;
-        calcLPFB(patch, boundaryPosition);
-        calcInteriorPoints(patch, boundaryPosition);
-        calcDistortion(patch);
-        patch_distortion.emplace(patch.merged_seam_idx, patch.max_distortion);
-        emit setJobState((double)progress_counter++/hierarchical_patches[0].size() * 100);
+        calcLPFB(subMesh, boundaryPosition);
+        calcInteriorPoints(subMesh, boundaryPosition);
+        calcDistortion(subMesh);
+        subMesh.seam_score = 0;
+        is_patch_calculated.insert(subMesh.merged_seam_idx);
+        
+        emit setJobState((double)progress_counter++/boost::num_vertices(subMesh_graph) * 100);
     }
+    
+    VertexHandle dummy;
+    WeightFunctor weightFunctor(m_mesh, dummy, NULL,
+                                m_distanceCoefficient,
+                                m_textureCoefficient,
+                                m_curvatureCoefficient,
+                                m_skeletonCoefficient,
+                                m_pathCoefficient
+                                );
+
     // Construct larger patches from previous level
 //    for (int level = 1; hierarchical_patches[level-1].size() > 0; level++) {
-    for (int level = 1; level < 5; level++) {
+        //    for (int level = 1; level < 30; level++) {
+    int level;
+    for (level = 0; !base_patches.empty(); level++) {
+        std::map<FilteredTriMesh::Patch_idx, FilteredTriMesh> next_base_patches;
+
         // Extend container
-        hierarchical_patches.resize(hierarchical_patches.size()+1);
+//        hierarchical_patches.resize(hierarchical_patches.size()+1);
+
         // For every patch, test if it can be merged with its neighbors
         progress_counter = 0;
-        for (FilteredTriMesh &patch : hierarchical_patches[level-1]) {
+        for (auto &pair: base_patches) {
+            FilteredTriMesh &patch = pair.second;
             if (isJobCanceled) {
                 emit log(LOGINFO, "Subset calculation canceled.");
                 return;
             }
             
             // For each sub-mesh in this patch, find its neigboring sub-mesh for merging
-            for (SubMesh_graph::vertex_descriptor v1 = 0; v1 < patch.merged_subMesh_idx.size(); v1++) {
-                if (patch.merged_subMesh_idx[v1]) {
-
-                    // Use subMesh_grpah to find adjacent sub-meshes
-                    SubMesh_graph::out_edge_iterator e_it, e_ite;
-                    for (boost::tie(e_it, e_ite) = boost::out_edges(v1, subMesh_graph); e_it != e_ite; e_it++) {
-                        std::vector<HalfedgeHandle> seam_segment = boost::get(boost::edge_owner, subMesh_graph, *e_it);
-                        
+            for (SubMesh_graph::vertex_descriptor v1 = patch.merged_subMesh_idx.find_first();
+                 v1 != boost::dynamic_bitset<>::npos;
+                 v1 = patch.merged_subMesh_idx.find_next(v1)) {
+                // Use subMesh_grpah to find adjacent sub-meshes
+                SubMesh_graph::out_edge_iterator e_it, e_ite;
+                for (boost::tie(e_it, e_ite) = boost::out_edges(v1, subMesh_graph); e_it != e_ite; e_it++) {
+                    int seam_segment_idx = boost::get(boost::edge_index, subMesh_graph, *e_it);
+                    
+                    // Only deal with edges that are not merged yet
+                    if (!patch.merged_seam_idx[seam_segment_idx]) {
                         SubMesh_graph::vertex_descriptor v2 = boost::target(*e_it, subMesh_graph);
                         FilteredTriMesh &neigboring_subMesh = boost::get(boost::vertex_owner, subMesh_graph, v2);
-                        
+                    
                         // Create a merged sub-mesh
                         boost::dynamic_bitset<> merged_seam_idx = patch.merged_seam_idx;
-                        int seam_segment_idx = boost::get(boost::edge_index, subMesh_graph, *e_it);
                         merged_seam_idx[seam_segment_idx] = true;
                         
-                        if (patch_distortion.find(merged_seam_idx) == patch_distortion.end()) {
+                        if (is_patch_calculated.find(merged_seam_idx) == is_patch_calculated.end()) {
+                            is_patch_calculated.insert(merged_seam_idx);
+
+                            std::vector<HalfedgeHandle> seam_segment = boost::get(boost::edge_owner, subMesh_graph, *e_it);
                             std::set<EdgeHandle> seam_segment_set;
                             for (HalfedgeHandle heh : seam_segment) {
                                 seam_segment_set.insert(m_mesh->edge_handle(heh));
@@ -143,7 +169,6 @@ void PlushPatternGenerator::construct_subsets(double threshold) {
                                 if ((!merged_subMesh.is_boundary(v1) && gaussian_curvature1 > 0.05) ||
                                     (!merged_subMesh.is_boundary(v2) && gaussian_curvature2 > 0.05)) {
                                     non_developable = true;
-                                    patch_distortion.emplace(merged_subMesh.merged_seam_idx, 1e9);
                                     break;
                                 }
                             }
@@ -155,10 +180,30 @@ void PlushPatternGenerator::construct_subsets(double threshold) {
                                 calcInteriorPoints(merged_subMesh, boundaryPosition);
                                 calcDistortion(merged_subMesh);
                                 
-                                patch_distortion.emplace(merged_subMesh.merged_seam_idx, merged_subMesh.max_distortion);
-                                
                                 if (merged_subMesh.max_distortion < threshold) {
-                                    hierarchical_patches[level].push_back(merged_subMesh);
+                                    merged_subMesh.seam_score = weightFunctor(seam_segment);
+                                    if (patch.seam_score >= 0) {
+                                        merged_subMesh.seam_score += patch.seam_score;
+                                    }
+                                    
+                                    auto found_prev_patch = optimal_patches.find(merged_subMesh.merged_subMesh_idx);
+                                    if (found_prev_patch != optimal_patches.end()) {
+                                        double prev_seam_score = found_prev_patch->second.seam_score;
+                                        if (prev_seam_score == -1 || merged_subMesh.seam_score < prev_seam_score) {
+                                            found_prev_patch->second = merged_subMesh;
+
+                                            // Replace record in next_base_patches to prevent from calculating more candidate patches
+                                            auto found_next_base_patch = next_base_patches.find(merged_subMesh.merged_subMesh_idx);
+                                            if (found_next_base_patch != next_base_patches.end()) {
+                                                found_next_base_patch->second = merged_subMesh;
+                                            } else {
+                                                next_base_patches.emplace(merged_subMesh.merged_subMesh_idx, merged_subMesh);
+                                            }
+                                        }
+                                    } else {
+                                        optimal_patches.emplace(merged_subMesh.merged_subMesh_idx, merged_subMesh);
+                                        next_base_patches.emplace(merged_subMesh.merged_subMesh_idx, merged_subMesh);
+                                    }
                                 }
                             }
                         }
@@ -166,16 +211,19 @@ void PlushPatternGenerator::construct_subsets(double threshold) {
                 }
             }
             progress_counter++;
-            emit setJobState((double)progress_counter/hierarchical_patches[level-1].size() * 100);
+            emit setJobState((double)progress_counter/base_patches.size() * 100);
         }
+        printf("Level %d: %lu patches\n", level, base_patches.size());
+        
+        base_patches = std::move(next_base_patches);
+        next_base_patches.clear();
     }
-    // Remove uneccessary level
-    int n_levels = hierarchical_patches.size();
-    if (n_levels > 0) {
-        if (hierarchical_patches[n_levels-1].size() == 0) {
-            hierarchical_patches.erase(hierarchical_patches.end()-1);
+    // Add result to property
+    for (auto &pair : optimal_patches) {
+        FilteredTriMesh &patch = pair.second;
+        if (patch.n_merged_seams == level-1) {
+            m_mesh->property(merged_patches_handle).push_back(patch);
         }
-        m_mesh->property(hierarchical_patches_handle) = hierarchical_patches;
     }
 }
 
