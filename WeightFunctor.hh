@@ -18,13 +18,14 @@ private:
     double m_skeletonCoefficient;
     double m_pathCoefficient;
 
-    double distanceWeight(TriMesh::Point p1, TriMesh::Point p2) const;
+    double distanceWeight(EdgeHandle eh) const;
     double textureWeight(HalfedgeHandle heh) const;
     
 //    double curvatureWeight(VertexHandle v1, VertexHandle v2) const;
     double curvatureWeight(EdgeHandle eh) const;
     
-    double skeletonWeight(VertexHandle v1,
+    double skeletonWeight(EdgeHandle eh,
+                          VertexHandle v1,
                           VertexHandle v2,
                           TriMesh::Point p1,
                           TriMesh::Point p2) const;

@@ -18,6 +18,10 @@ OpenMesh::VPropHandleT<double> PlushPatternGenerator::meanCurvatureHandle;
 OpenMesh::VPropHandleT<double> PlushPatternGenerator::gaussianCurvatureHandle;
 
 OpenMesh::EPropHandleT<double> PlushPatternGenerator::edgeWeightHandle;
+OpenMesh::EPropHandleT<double> PlushPatternGenerator::geodesic_distance_weight_Handle;
+OpenMesh::EPropHandleT<double> PlushPatternGenerator::skeleton_direction_weight_Handle;
+OpenMesh::EPropHandleT<double> PlushPatternGenerator::curvature_weight_Handle;
+
 OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, double> > PlushPatternGenerator::geodesicDistanceHandle;
 OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, std::vector<VertexHandle> > > PlushPatternGenerator::geodesicPathHandle;
 
@@ -87,6 +91,10 @@ void PlushPatternGenerator::initProperties() {
     m_mesh->add_property(gaussianCurvatureHandle, "Gaussian Curvature");
     
     m_mesh->add_property(edgeWeightHandle, "Edge weight");
+    m_mesh->add_property(geodesic_distance_weight_Handle, "The weight of geodesic distance");
+    m_mesh->add_property(skeleton_direction_weight_Handle, "The weight of skeleton direction");
+    m_mesh->add_property(curvature_weight_Handle, "The weight of curvature");
+    
     m_mesh->add_property(geodesicDistanceHandle, "Geodesic distance between vertices pair");
     m_mesh->add_property(geodesicPathHandle, "Geodesic path between vertices pair");
     
@@ -109,6 +117,9 @@ void PlushPatternGenerator::initProperties() {
     m_mesh->request_edge_colors();
     for (EdgeHandle eh : m_mesh->edges()) {
         m_mesh->property(edgeWeightHandle, eh) = -1;
+        m_mesh->property(geodesic_distance_weight_Handle, eh) = 0;
+        m_mesh->property(skeleton_direction_weight_Handle, eh) = 0;
+        m_mesh->property(curvature_weight_Handle, eh) = 0;
         m_mesh->property(segment_no_handle, eh) = 0;
         m_mesh->set_color(eh, TriMesh::Color(1,1,1,0));
     }
@@ -137,6 +148,10 @@ void PlushPatternGenerator::uninitProperties() {
     m_mesh->remove_property(gaussianCurvatureHandle);
     
     m_mesh->remove_property(edgeWeightHandle);
+    m_mesh->remove_property(geodesic_distance_weight_Handle);
+    m_mesh->remove_property(skeleton_direction_weight_Handle);
+    m_mesh->remove_property(curvature_weight_Handle);
+
     m_mesh->remove_property(geodesicDistanceHandle);
     m_mesh->remove_property(geodesicPathHandle);
     

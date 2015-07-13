@@ -74,6 +74,9 @@ public:
     ///@{
     /// Geodesic distance/path from one vertex to another. It's empty before geodesic calculation.
     static OpenMesh::EPropHandleT<double> edgeWeightHandle;
+    static OpenMesh::EPropHandleT<double> geodesic_distance_weight_Handle;
+    static OpenMesh::EPropHandleT<double> skeleton_direction_weight_Handle;
+    static OpenMesh::EPropHandleT<double> curvature_weight_Handle;
     static OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, double> > geodesicDistanceHandle;
     static OpenMesh::MPropHandleT< std::map<std::pair<VertexHandle, VertexHandle>, std::vector<VertexHandle> > > geodesicPathHandle;
     ///@}
