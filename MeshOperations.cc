@@ -550,9 +550,6 @@ PlushPatternGenerator::SubMesh_graph PlushPatternGenerator::get_subMeshes_with_b
  @param use_flattened_position (Debug) Use original position or flattened position calculated by parameterization.
  */
 bool PlushPatternGenerator::get_triMesh_from_subMesh(TriMesh *result_triMesh, FilteredTriMesh &subMesh, bool use_flattened_position) {
-    std::set<EdgeHandle> &seams = m_mesh->property(seams_handle);
-    assert(!seams.empty() && "seams should not be empty.");
-    
     OpenMesh::VPropHandleT<VertexHandle> inverse_mapping = getInverseMappingHandle(result_triMesh);
 
     // We use the idx from subMesh to map old vertice to new vertice

@@ -85,7 +85,6 @@ void PlushPlugin::initializePlugin()
     seamGroup->setLayout(seamLayout);
     
     QGroupBox *subsetGroup = new QGroupBox(tr("Subset"));
-    QHBoxLayout *subsetLayout = new QHBoxLayout;
     subset_merge_threshold = new QDoubleSpinBox();
     subset_merge_threshold->setDecimals(5);
     subset_merge_threshold->setMinimum(0.00001);
@@ -94,9 +93,18 @@ void PlushPlugin::initializePlugin()
     subset_merge_threshold->setSingleStep(0.005);
     QPushButton *subset_calc_button = new QPushButton(tr("Calc subset"));
     QPushButton *subset_show_button = new QPushButton(tr("Show subset"));
-    subsetLayout->addWidget(subset_merge_threshold);
-    subsetLayout->addWidget(subset_calc_button);
-    subsetLayout->addWidget(subset_show_button);
+    QPushButton *subset_save_button = new QPushButton(tr("Save"));
+    QPushButton *subset_load_button = new QPushButton(tr("Load"));
+    QVBoxLayout *subsetLayout = new QVBoxLayout;
+    QHBoxLayout *subsetRow1Layout = new QHBoxLayout;
+    QHBoxLayout *subsetRow2Layout = new QHBoxLayout;
+    subsetRow1Layout->addWidget(subset_merge_threshold);
+    subsetRow1Layout->addWidget(subset_calc_button);
+    subsetRow1Layout->addWidget(subset_show_button);
+    subsetRow2Layout->addWidget(subset_save_button);
+    subsetRow2Layout->addWidget(subset_load_button);
+    subsetLayout->addLayout(subsetRow1Layout);
+    subsetLayout->addLayout(subsetRow2Layout);
     subsetGroup->setLayout(subsetLayout);
     
     QGroupBox *geodesicGroup = new QGroupBox(tr("Geodesic"));
@@ -200,6 +208,8 @@ void PlushPlugin::initializePlugin()
     
     connect(subset_calc_button, SIGNAL(clicked()), this, SLOT(subset_calc_button_clicked()));
     connect(subset_show_button, SIGNAL(clicked()), this, SLOT(subset_show_button_clicked()));
+    connect(subset_save_button, SIGNAL(clicked()), this, SLOT(subset_save_button_clicked()));
+    connect(subset_load_button, SIGNAL(clicked()), this, SLOT(subset_load_button_clicked()));
 
     connect(geodesicCalcButton, SIGNAL(clicked()), this, SLOT(calcGeodesicButtonClicked()));
 
@@ -801,23 +811,37 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
 void PlushPlugin::subset_show_button_clicked() {
     std::vector<FilteredTriMesh> merged_patches = m_patternGenerator->get_merged_patches();
     int counter = 0;
+    int max_level = 0;
     for (FilteredTriMesh &patch : merged_patches) {
-        int id;
-        emit addEmptyObject(DATA_TRIANGLE_MESH, id);
-        TriMeshObject *object = 0;
-        PluginFunctions::getObject(id, object);
-        
-        TriMesh *mesh = object->mesh();
-        
-        m_patternGenerator->get_triMesh_from_subMesh(mesh, patch, false);
-        MeshSelection::selectBoundaryEdges(mesh);
-        counter++;
-        if (counter > 10) {
-            break;
+        max_level = max(max_level, patch.n_merged_seams);
+    }
+    for (FilteredTriMesh &patch : merged_patches) {
+        if (patch.n_merged_seams == max_level) {
+            int id;
+            emit addEmptyObject(DATA_TRIANGLE_MESH, id);
+            TriMeshObject *object = 0;
+            PluginFunctions::getObject(id, object);
+            
+            TriMesh *mesh = object->mesh();
+            
+            m_patternGenerator->get_triMesh_from_subMesh(mesh, patch, false);
+            MeshSelection::selectBoundaryEdges(mesh);
+            counter++;
+            if (counter > 10) {
+                break;
+            }
         }
     }
     
 //    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
+}
+
+void PlushPlugin::subset_save_button_clicked() {
+    m_patternGenerator->save_patches();
+}
+
+void PlushPlugin::subset_load_button_clicked() {
+    m_patternGenerator->load_patches();
 }
 
 void PlushPlugin::saveSelectionButtonClicked() {

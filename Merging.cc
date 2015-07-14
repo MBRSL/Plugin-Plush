@@ -121,7 +121,7 @@ void PlushPatternGenerator::construct_subsets(double threshold) {
 
         // For every patch, test if it can be merged with its neighbors
         progress_counter = 0;
-        for (auto &pair: base_patches) {
+        for (auto &pair : base_patches) {
             FilteredTriMesh &patch = pair.second;
             if (isJobCanceled) {
                 emit log(LOGINFO, "Subset calculation canceled.");
@@ -221,10 +221,36 @@ void PlushPatternGenerator::construct_subsets(double threshold) {
     // Add result to property
     for (auto &pair : optimal_patches) {
         FilteredTriMesh &patch = pair.second;
-        if (patch.n_merged_seams == level-1) {
-            m_mesh->property(merged_patches_handle).push_back(patch);
-        }
+        m_mesh->property(merged_patches_handle).push_back(patch);
     }
+}
+
+bool PlushPatternGenerator::save_patches() {
+    ofstream out((m_meshName + ".subset").toLocal8Bit().data(), ios::out | ios::binary);
+    long long num_patches = m_mesh->property(merged_patches_handle).size();
+    out.write(reinterpret_cast<const char *>(&num_patches), sizeof(num_patches));
+    
+    for (FilteredTriMesh &patch : m_mesh->property(merged_patches_handle)) {
+        boost::archive::text_oarchive oa(out);
+        oa << patch;
+    }
+    
+    out.close();
+    return true;
+}
+
+bool PlushPatternGenerator::load_patches() {
+    ifstream in((m_meshName + ".subset").toLocal8Bit().data(), ios::in | ios::binary);
+    long long num_patches;
+    in.read(reinterpret_cast<char *>(&num_patches), sizeof(num_patches));
+    
+    for (int i = 0; i < num_patches; i++) {
+        boost::archive::text_iarchive ia(in);
+        FilteredTriMesh patch(m_mesh, ia);
+        m_mesh->property(merged_patches_handle).push_back(patch);
+    }
+    in.close();
+    return true;
 }
 
 void PlushPatternGenerator::optimize_patches(double threshold, bool step) {

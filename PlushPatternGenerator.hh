@@ -188,6 +188,9 @@ public:
     void optimize_patches(double threshold, bool step);
     
     std::vector<FilteredTriMesh> get_merged_patches();
+    
+    bool save_patches();
+    bool load_patches();
     ///@}
 
     // Used in selection and flattening

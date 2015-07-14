@@ -124,6 +124,8 @@ private slots:
     
     void subset_calc_button_clicked();
     void subset_show_button_clicked();
+    void subset_save_button_clicked();
+    void subset_load_button_clicked();
     
     void calcGeodesicButtonClicked();
     
