@@ -13,9 +13,6 @@
 
 #include <boost/graph/adjacency_list.hpp>
 
-#include <ObjectTypes/PolyLine/PolyLine.hh>
-#include <MeshTools/MeshSelectionT.hh>
-
 #include <QObject>
 
 /**
