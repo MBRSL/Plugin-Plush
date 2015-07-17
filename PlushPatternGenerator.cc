@@ -1,4 +1,5 @@
 #include "PlushPatternGenerator.hh"
+#include "WeightFunctor.hh"
 
 OpenMesh::EPropHandleT<int> PlushPatternGenerator::segment_no_handle;
 
@@ -304,6 +305,32 @@ std::vector< std::vector<HalfedgeHandle> > PlushPatternGenerator::get_seams_segm
     std::set<EdgeHandle> &seams = m_mesh->property(seams_handle);
     std::vector< std::vector<HalfedgeHandle> > heh_segments = get_halfedge_segments_from_seams(seams);
     return heh_segments;
+}
+
+std::vector< std::pair< std::vector<HalfedgeHandle>, double> > PlushPatternGenerator::get_seams_segments_with_importance() {
+    std::set<EdgeHandle> &seams = m_mesh->property(seams_handle);
+    std::vector< std::vector<HalfedgeHandle> > heh_segments = get_halfedge_segments_from_seams(seams);
+    
+    std::vector< std::pair< std::vector<HalfedgeHandle>, double> > segments_with_importance;
+    VertexHandle dummy;
+    WeightFunctor weightFunctor(m_mesh,
+                                dummy,
+                                nullptr,
+                                m_distanceCoefficient,
+                                m_textureCoefficient,
+                                m_curvatureCoefficient,
+                                m_skeletonCoefficient,
+                                m_pathCoefficient
+                                );
+    for (auto segment_it = std::make_move_iterator(heh_segments.begin()),
+         segment_end = std::make_move_iterator(heh_segments.end()); segment_it != segment_end; ++segment_it) {
+        segments_with_importance.push_back(std::make_pair(std::move(*segment_it), 0));
+        auto &segment = segments_with_importance.back().first;
+        if (!is_different_texture(m_mesh, m_mesh->edge_handle(segment.front()))) {
+            segments_with_importance.back().second = weightFunctor(segment);
+        }
+    }
+    return segments_with_importance;
 }
 
 std::vector< std::vector<FilteredTriMesh> > PlushPatternGenerator::get_hierarchical_patches() {

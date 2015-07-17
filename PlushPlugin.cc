@@ -530,12 +530,12 @@ void PlushPlugin::vis_seam_segments_button_clicked() {
     m_triMeshObj->materialNode()->set_line_smooth(true);
     m_triMeshObj->materialNode()->set_line_width(3);
     
-    std::vector< std::vector<HalfedgeHandle> > heh_segments = m_patternGenerator->get_seams_segments();
+    auto segments_with_importance = m_patternGenerator->get_seams_segments_with_importance();
     
     MeshSelection::clearVertexSelection(mesh);
     MeshSelection::clearEdgeSelection(mesh);
 
-    int num = heh_segments.size();
+    int num = segments_with_importance.size();
     for (EdgeHandle eh : mesh->edges()) {
         mesh->set_color(eh, TriMesh::Color(1,1,1,0));
     }
@@ -555,36 +555,27 @@ void PlushPlugin::vis_seam_segments_button_clicked() {
         }
         int counter = 0;
         ACG::ColorCoder color_coder(0, num, false);
-        for (auto group : heh_segments) {
+        for (auto pair : segments_with_importance) {
+            auto &segment = pair.first;
             TriMesh::Color color = color_coder.color_float4(sequence[counter++] % num);
-            for (HalfedgeHandle heh : group) {
+            for (HalfedgeHandle heh : segment) {
                 mesh->set_color(mesh->edge_handle(heh), color);
             }
         }
     } else {
-        double max = -1;
-        double *group_weight_sum = new double[heh_segments.size()];
-        int counter = 0;
-        for (auto group : heh_segments) {
-            for (HalfedgeHandle heh : group) {
-                if (!PlushPatternGenerator::is_different_texture(mesh, mesh->edge_handle(heh))) {
-                        group_weight_sum[counter] += mesh->property(PlushPatternGenerator::edgeWeightHandle, mesh->edge_handle(heh));
-                }
-            }
-            if (group_weight_sum[counter] > max) {
-                max = group_weight_sum[counter];
-            }
-            counter++;
+        double max_score = -1;
+        for (auto pair : segments_with_importance) {
+            max_score = max(max_score, pair.second);
         }
-        ACG::ColorCoder color_coder(0, log2(max), false);
-        counter = 0;
-        for (auto group : heh_segments) {
-            TriMesh::Color color = color_coder.color_float4(log2(group_weight_sum[counter++]));
-            for (HalfedgeHandle heh : group) {
+        ACG::ColorCoder color_coder(0, log2(1+max_score), false);
+        for (auto pair : segments_with_importance) {
+            auto &segment = pair.first;
+            double score = pair.second;
+            TriMesh::Color color = color_coder.color_float4(log2(1+score/max_score));
+            for (HalfedgeHandle heh : segment) {
                 mesh->set_color(mesh->edge_handle(heh), color);
             }
         }
-        delete[] group_weight_sum;
     }
     PluginFunctions::setDrawMode(ACG::SceneGraph::DrawModes::EDGES_COLORED | ACG::SceneGraph::DrawModes::SOLID_FLAT_SHADED);
     emit updatedObject(m_triMeshObj->id(), UPDATE_COLOR | UPDATE_SELECTION);

@@ -214,6 +214,7 @@ public:
     ///@{
     std::set<VertexHandle> get_intersection_points();
     std::vector< std::vector<HalfedgeHandle> > get_seams_segments();
+    std::vector< std::pair< std::vector<HalfedgeHandle>, double> > get_seams_segments_with_importance();
     ///@}
 private:
     TriMesh *m_mesh;
