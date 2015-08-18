@@ -19,6 +19,11 @@ HalfedgeHandle FilteredTriMesh::get_nearby_boundary_halfedge(HalfedgeHandle heh)
     return current_heh;
 }
 
+FilteredTriMesh::FilteredTriMesh(TriMesh *mesh, boost::archive::text_iarchive &ia) :
+m_mesh(mesh) {
+    ia >> *this;
+}
+
 FilteredTriMesh::FilteredTriMesh(TriMesh *mesh,
                                  std::set<FaceHandle> &faces,
                                  std::set<EdgeHandle> &boundary_edges) : m_mesh(mesh) {

@@ -7,6 +7,10 @@
 
 #include <boost/iterator/iterator_facade.hpp>
 #include <boost/dynamic_bitset.hpp>
+#include <boost/archive/text_oarchive.hpp>
+#include <boost/archive/text_iarchive.hpp>
+#include <boost/serialization/vector.hpp>
+#include <boost/serialization/map.hpp>
 
 // True means it's contained in this sub-mesh
 struct Predicate {
@@ -80,6 +84,27 @@ private:
     std::vector<TriMesh::Point> flattened_position;
 
     HalfedgeHandle get_nearby_boundary_halfedge(HalfedgeHandle heh);
+    
+    friend class boost::serialization::access;
+    template <class Archive>
+    void serialize(Archive & ar, const unsigned int version)
+    {
+        ar & predicate.m_vertex_filter;
+        ar & predicate.m_edge_filter;
+        ar & predicate.m_halfedge_filter;
+        ar & predicate.m_face_filter;
+        ar & boundary_predicate.m_boundary_vertex_filter;
+        ar & boundary_predicate.m_boundary_edge_filter;
+        ar & merged_subMesh_idx;
+        ar & merged_seam_idx;
+        ar & merged_edge_idx;
+        ar & boundary_vertex_mapping;
+        ar & non_boundary_vertex_mapping;
+        ar & flattened_position;
+        ar & max_distortion;
+        ar & seam_score;
+        ar & n_merged_seams;
+    }
 public:
     /* Use this to record which sub-meshes do this patch have merged
      * A patch with bits [1,0,0,0,0,....] mean it contains #1 sub-mesh
@@ -107,10 +132,12 @@ public:
     // The seam score by evaluating weightFunction (lower is better)
     double seam_score = -1;
     
-    double n_merged_seams = 0;
+    int n_merged_seams = 0;
 
     /// You shouldn't use this constructor unless you just need to allocate a variable and assigned it later.
     FilteredTriMesh() {}
+    FilteredTriMesh(TriMesh *mesh,
+                    boost::archive::text_iarchive &ia);
     FilteredTriMesh(TriMesh *mesh,
                     std::set<FaceHandle> &faces,
                     std::set<EdgeHandle> &boundary_edges);
@@ -288,4 +315,68 @@ public:
         return m_mesh.mesh()->face_handle(m_pos);
     }
 };
+
+namespace boost {
+    namespace serialization {
+        template <typename Ar, typename Block, typename Alloc>
+        void save(Ar& ar, dynamic_bitset<Block, Alloc> const& bs, unsigned) {
+            size_t num_bits = bs.size();
+            std::vector<Block> blocks(bs.num_blocks());
+            to_block_range(bs, blocks.begin());
+            
+            ar & num_bits & blocks;
+        }
+        
+        template <typename Ar, typename Block, typename Alloc>
+        void load(Ar& ar, dynamic_bitset<Block, Alloc>& bs, unsigned) {
+            size_t num_bits;
+            std::vector<Block> blocks;
+            ar & num_bits & blocks;
+            
+            bs.resize(num_bits);
+            from_block_range(blocks.begin(), blocks.end(), bs);
+            bs.resize(num_bits);
+        }
+        
+        template <typename Ar, typename Block, typename Alloc>
+        void serialize(Ar& ar, dynamic_bitset<Block, Alloc>& bs, unsigned version) {
+            split_free(ar, bs, version);
+        }
+        
+        template <typename Ar>
+        void serialize(Ar& ar, VertexHandle& handle, unsigned version) {
+            int idx = handle.idx();
+            ar & idx;
+            handle = VertexHandle(idx);
+        }
+
+        template <typename Ar>
+        void serialize(Ar& ar, EdgeHandle& handle, unsigned version) {
+            int idx = handle.idx();
+            ar & idx;
+            handle = EdgeHandle(idx);
+        }
+
+        template <typename Ar>
+        void serialize(Ar& ar, HalfedgeHandle& handle, unsigned version) {
+            int idx = handle.idx();
+            ar & idx;
+            handle = HalfedgeHandle(idx);
+        }
+        
+        template <typename Ar>
+        void serialize(Ar& ar, FaceHandle& handle, unsigned version) {
+            int idx = handle.idx();
+            ar & idx;
+            handle = FaceHandle(idx);
+        }
+
+        template <typename Ar>
+        void serialize(Ar& ar, OpenMesh::Vec3d& vec, unsigned version) {
+            ar & vec[0];
+            ar & vec[1];
+            ar & vec[2];
+        }
+    }
+}
 #endif //TRIMESH_FILTER_HH
