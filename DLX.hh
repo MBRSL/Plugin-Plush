@@ -24,7 +24,7 @@ public:
     
     bool covered = false;
     
-    FilteredTriMesh* patch_;
+    Patch_boundary *patch_;
     
     DLX_Node() :
     DLX_Node(Node, 0, 0)
@@ -145,11 +145,14 @@ private:
     const static size_t max_skip_num = 100000;
     
     /*
-     * These are the header nodes of each row/column.
-     * They are not treated as part of the DLX, they just point to the starting/ending nodes.
+     * Row headers are not treated as parts of the DLX, they just point to the starting/ending nodes.
      * The up/down/left/right pointer of inner nodes will not point to these headers.
      */
     DLX_Node *row_headers_;
+    /*
+     * Unlike row headers, column headers are parts of the DLX. They are at the -1th row of each column
+     * The up/down/left/right pointer of inner nodes will not point to these headers.
+     */
     DLX_Node *col_headers_;
     /*
      * Can be treated as an entrance point of DLX.
@@ -159,14 +162,14 @@ private:
     
     std::priority_queue<    std::pair< double, std::vector<DLX_Node*> >,
                             std::vector< std::pair< double, std::vector<DLX_Node*> > >,
-                            std::greater< std::pair< double, std::vector<DLX_Node*> > > > results_;
+                            std::less< std::pair< double, std::vector<DLX_Node*> > > > results_;
 
     std::vector<DLX_Node*> intermediate_result_;
     size_t nMerged_subMeshes_;
     bool finished_;
     
 public:
-    DLX(std::vector<FilteredTriMesh> &subset, size_t nSubMeshes);
+    DLX(std::vector<Patch_boundary> &subset, size_t nSubMeshes);
     ~DLX();
     
     // --> DLX Algorithm functions

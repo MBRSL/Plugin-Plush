@@ -95,16 +95,22 @@ void PlushPlugin::initializePlugin()
     QPushButton *subset_show_button = new QPushButton(tr("Show subset"));
     QPushButton *subset_save_button = new QPushButton(tr("Save"));
     QPushButton *subset_load_button = new QPushButton(tr("Load"));
+    QPushButton *subset_calc_union_button = new QPushButton(tr("Calc union"));
+    QPushButton *subset_show_union_button = new QPushButton(tr("Show union"));
     QVBoxLayout *subsetLayout = new QVBoxLayout;
     QHBoxLayout *subsetRow1Layout = new QHBoxLayout;
     QHBoxLayout *subsetRow2Layout = new QHBoxLayout;
+    QHBoxLayout *subsetRow3Layout = new QHBoxLayout;
     subsetRow1Layout->addWidget(subset_merge_threshold);
     subsetRow1Layout->addWidget(subset_calc_button);
     subsetRow1Layout->addWidget(subset_show_button);
     subsetRow2Layout->addWidget(subset_save_button);
     subsetRow2Layout->addWidget(subset_load_button);
+    subsetRow3Layout->addWidget(subset_calc_union_button);
+    subsetRow3Layout->addWidget(subset_show_union_button);
     subsetLayout->addLayout(subsetRow1Layout);
     subsetLayout->addLayout(subsetRow2Layout);
+    subsetLayout->addLayout(subsetRow3Layout);
     subsetGroup->setLayout(subsetLayout);
     
     QGroupBox *geodesicGroup = new QGroupBox(tr("Geodesic"));
@@ -113,8 +119,8 @@ void PlushPlugin::initializePlugin()
     geodesic_skeleton_coef = new QDoubleSpinBox();
     geodesic_smoothness_coef = new QDoubleSpinBox();
     geodesic_distance_coef->setValue(1.0);
-    geodesic_curvature_coef->setValue(1.2);
-    geodesic_skeleton_coef->setValue(0.2);
+    geodesic_curvature_coef->setValue(2.0);
+    geodesic_skeleton_coef->setValue(0.3);
     geodesic_smoothness_coef->setValue(0.0);
     geodesic_distance_coef->setSingleStep(0.1);
     geodesic_curvature_coef->setSingleStep(0.1);
@@ -210,6 +216,8 @@ void PlushPlugin::initializePlugin()
     connect(subset_show_button, SIGNAL(clicked()), this, SLOT(subset_show_button_clicked()));
     connect(subset_save_button, SIGNAL(clicked()), this, SLOT(subset_save_button_clicked()));
     connect(subset_load_button, SIGNAL(clicked()), this, SLOT(subset_load_button_clicked()));
+    connect(subset_calc_union_button, SIGNAL(clicked()), this, SLOT(subset_calc_union_button_clicked()));
+    connect(subset_show_union_button, SIGNAL(clicked()), this, SLOT(subset_show_union_button_clicked()));
 
     connect(geodesicCalcButton, SIGNAL(clicked()), this, SLOT(calcGeodesicButtonClicked()));
 
@@ -235,8 +243,10 @@ void PlushPlugin::initializePlugin()
     emit addToolbox(tr("Plush"), toolBox);
 
     // Register keys
-    emit registerKey(Qt::Key_X,     Qt::NoModifier, "Next path");
-    emit registerKey(Qt::Key_Z,     Qt::NoModifier, "Previous path");
+    emit registerKey(Qt::Key_X,     Qt::NoModifier, tr("Next path"));
+    emit registerKey(Qt::Key_Z,     Qt::NoModifier, tr("Previous path"));
+    emit registerKey(Qt::Key_C,     Qt::NoModifier, tr("Show prev object"), true);
+    emit registerKey(Qt::Key_V,     Qt::NoModifier, tr("Show next object"), true);
 }
 
 PlushPlugin::~PlushPlugin() {
@@ -429,6 +439,24 @@ void PlushPlugin::subset_calc_button_clicked() {
         thread->start();
         thread->startProcessing();
     }
+}
+
+void PlushPlugin::subset_calc_union_button_clicked() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+    
+    m_currentJobId = "calc evc";
+    OpenFlipperThread *thread = new OpenFlipperThread(m_currentJobId);
+    connect(thread, SIGNAL(finished(QString)), this, SIGNAL(finishJob(QString)));
+    connect(thread, SIGNAL(function(QString)), this, SLOT(calc_union_thread()), Qt::DirectConnection);
+    
+    // Custom handler to set m_currentJobId to "" after finishing job.
+    connect(thread, SIGNAL(finished(QString)), this, SLOT(finishedJobHandler()));
+    
+    emit startJob(m_currentJobId, "calculate union of subset with Exact Vertex Cover", 0, 100, true);
+    thread->start();
+    thread->startProcessing();
 }
 
 void PlushPlugin::seamMergeButtonClicked() {
@@ -809,31 +837,59 @@ void PlushPlugin::showFlattenedGrpahButtonClicked() {
 }
 
 void PlushPlugin::subset_show_button_clicked() {
-    std::vector<FilteredTriMesh> merged_patches = m_patternGenerator->get_merged_patches();
+    std::vector<Patch_boundary> patches = m_patternGenerator->get_patches();
     int counter = 0;
-    int max_level = 0;
-    for (FilteredTriMesh &patch : merged_patches) {
-        max_level = max(max_level, patch.n_merged_seams);
+    for (Patch_boundary &patch : patches) {
+        int id;
+        emit addEmptyObject(DATA_TRIANGLE_MESH, id);
+        TriMeshObject *object = 0;
+        PluginFunctions::getObject(id, object);
+        object->hide();
+        object->target(true);
+    
+        TriMesh *mesh = object->mesh();
+    
+        FilteredTriMesh subMesh;
+        m_patternGenerator->convert_patch_boundary_to_FilteredTriMesh(subMesh, patch);
+        m_patternGenerator->get_triMesh_from_subMesh(mesh, subMesh, false);
+        MeshSelection::selectBoundaryEdges(mesh);
+        counter++;
+        if (counter > 200) {
+            break;
+        }
     }
-    for (FilteredTriMesh &patch : merged_patches) {
-        if (patch.n_merged_seams == max_level) {
-            int id;
-            emit addEmptyObject(DATA_TRIANGLE_MESH, id);
-            TriMeshObject *object = 0;
-            PluginFunctions::getObject(id, object);
-            
-            TriMesh *mesh = object->mesh();
-            
-            m_patternGenerator->get_triMesh_from_subMesh(mesh, patch, false);
-            MeshSelection::selectBoundaryEdges(mesh);
-            counter++;
-            if (counter > 10) {
-                break;
+}
+
+void PlushPlugin::subset_show_union_button_clicked() {
+    if (!checkIfGeneratorExist()) {
+        return;
+    }
+    
+    std::vector<Patch_boundary> *patches_union = nullptr;
+    std::vector< std::vector<int> > union_lists;
+    m_patternGenerator->get_union(patches_union, union_lists);
+
+    for (auto list : union_lists) {
+        int newId;
+        emit copyObject(m_triMeshObj->id(), newId);
+        
+        TriMeshObject *new_object;
+        PluginFunctions::getObject(newId, new_object);
+        new_object->hide();
+        TriMesh *new_mesh = new_object->mesh();
+        
+        MeshSelection::clearEdgeSelection(new_mesh);
+
+        for (int idx : list) {
+            FilteredTriMesh subMesh;
+            m_patternGenerator->convert_patch_boundary_to_FilteredTriMesh(subMesh, patches_union->at(idx));
+            m_patternGenerator->get_triMesh_from_subMesh(new_mesh, subMesh, false);
+            // Assume they have same handle ids
+            for (EdgeHandle eh : subMesh.boundary_edges()) {
+                new_mesh->status(eh).set_selected(true);
             }
         }
     }
-    
-//    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
 }
 
 void PlushPlugin::subset_save_button_clicked() {
@@ -919,8 +975,12 @@ void PlushPlugin::calcMergeSegmentThread() {
 
 
 void PlushPlugin::calcSubsetThread() {
-    m_patternGenerator->construct_subsets(seamMergeThreshold->value());
+    m_patternGenerator->construct_subsets(subset_merge_threshold->value());
 //    emit updatedObject(m_triMeshObj->id(), UPDATE_SELECTION);
+}
+
+void PlushPlugin::calc_union_thread() {
+    m_patternGenerator->calc_union();
 }
 
 void PlushPlugin::canceledJob(QString _job) {
@@ -955,6 +1015,9 @@ void PlushPlugin::receiveUpdate() {
 void PlushPlugin::slotKeyEvent( QKeyEvent* _event ) {
     // Switch pressed keys
     int currentEdgeNo = seamNumPaths->value();
+    int showId = 0;
+    int counter = 0;
+    int n_object = PluginFunctions::targetCount();
     switch (_event->key())
     {
         case Qt::Key_X:
@@ -968,6 +1031,30 @@ void PlushPlugin::slotKeyEvent( QKeyEvent* _event ) {
                 seamNumPaths->setValue(currentEdgeNo-1);
             }
             seamShowSingleButton->click();
+            break;
+        case Qt::Key_C:
+        case Qt::Key_V:
+            for ( PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS);
+                 o_it != PluginFunctions::objectsEnd(); ++o_it) {
+                if (o_it->visible() && showId == 0) {
+                    if (_event->key() == Qt::Key_V) {
+                        showId = (counter+1) % n_object;
+                    } else {
+                        showId = (counter+n_object-1) % n_object;
+                    }
+                }
+                o_it->hide();
+                counter++;
+            }
+            counter = 0;
+            for ( PluginFunctions::ObjectIterator o_it(PluginFunctions::TARGET_OBJECTS);
+                 o_it != PluginFunctions::objectsEnd(); ++o_it) {
+                if (counter == showId) {
+                    o_it->show();
+                }
+                counter++;
+            }
+            
             break;
         default:
             break;

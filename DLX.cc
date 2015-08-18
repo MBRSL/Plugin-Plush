@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include "DLX.hh"
 
-DLX::DLX(std::vector<FilteredTriMesh> &subset, size_t nSubMeshes)
+DLX::DLX(std::vector<Patch_boundary> &subset, size_t nSubMeshes)
 {
     nRow_ = subset.size();
     nCol_ = nSubMeshes;
@@ -25,7 +25,8 @@ DLX::DLX(std::vector<FilteredTriMesh> &subset, size_t nSubMeshes)
     std::fill_n(top_most_nodes, nCol_, nullptr);
     
     for (size_t j = 0; j < nRow_; j++) {
-        FilteredTriMesh &patch = subset[j];
+        // We start from the first one, which contains larger patch
+        Patch_boundary &patch = subset[j];
         size_t count = patch.merged_subMesh_idx.count();
 
         // The left_ most node in this row
@@ -84,8 +85,8 @@ DLX::DLX(std::vector<FilteredTriMesh> &subset, size_t nSubMeshes)
     for (size_t i = 0; i < nCol_; i++) {
         // No column can be empty, otherwise no solution
         assert(top_most_nodes[i] != nullptr && "No possible solution for this case.");
-        top_most_nodes[i]->up_ = up_nodes[i];
-        up_nodes[i]->down_ = top_most_nodes[i];
+        top_most_nodes[i]->up_ = &col_headers_[i];
+        up_nodes[i]->down_ = &col_headers_[i];
         
         col_headers_[i].up_ = up_nodes[i];
         col_headers_[i].down_ = top_most_nodes[i];
@@ -130,42 +131,23 @@ void DLX::cover(DLX_Node* col_header) {
     col_header->right_->left_ = col_header->left_;
     col_header->left_->right_ = col_header->right_;
     
-//    for(DLX_Node* row_node : DLX_Iterator_Range<DLX_Down_Iterator>(col_header)) {
-    bool first_iteration = true;
-    for (DLX_Node* row_node = col_header->down_;
-         row_node != nullptr && (first_iteration || row_node != col_header->down_);
-         row_node = row_node->down_, first_iteration = false) {
+    for (DLX_Node* row_node = col_header->down_; row_node != col_header; row_node = row_node->down_) {
         row_node->covered = true;
+
         for(DLX_Node* right_node = row_node->right_; right_node!=row_node; right_node = right_node->right_) {
             right_node->covered = true;
             right_node->up_->down_ = right_node->down_;
             right_node->down_->up_ = right_node->up_;
-            
-            if (right_node->col_header_->down_ == right_node) {
-                right_node->col_header_->down_ = right_node->down_;
-            }
-            if (right_node->col_header_->up_ == right_node) {
-                right_node->col_header_->up_ = right_node->up_;
-            }
         }
     }
 //    print_covered();
 }
 
 void DLX::uncover(DLX_Node* col_header) {
-    bool first_iteration = true;
-    for (DLX_Node* row_node = col_header->up_;
-         row_node != nullptr && (first_iteration || row_node != col_header->up_);
-         row_node = row_node->up_, first_iteration = false) {
+    for (DLX_Node* row_node = col_header->up_; row_node != col_header; row_node = row_node->up_) {
         row_node->covered = false;
-        for(DLX_Node* left_node = row_node->left_; left_node!=row_node; left_node = left_node->left_) {
-            if (left_node->col_header_->down_ == left_node->down_) {
-                left_node->col_header_->down_ = left_node;
-            }
-            if (left_node->col_header_->up_ == left_node->up_) {
-                left_node->col_header_->up_ = left_node;
-            }
 
+        for(DLX_Node* left_node = row_node->left_; left_node!=row_node; left_node = left_node->left_) {
             left_node->covered = false;
             left_node->up_->down_ = left_node;
             left_node->down_->up_ = left_node;
@@ -187,12 +169,12 @@ void DLX::search(size_t k) {
     if(root_.left_ == &root_ && root_.right_ == &root_) {
         double score = 0;
         for (DLX_Node *node : intermediate_result_) {
-            FilteredTriMesh *patch = node->patch_;
+            Patch_boundary *patch = node->patch_;
             score += patch->seam_score;
         }
         
-        double min_score = !results_.empty() ? results_.top().first : 1e9;
-        if (results_.size() >= max_results && score <= min_score) {
+        double max_score = !results_.empty() ? results_.top().first : -1;
+        if (results_.size() >= max_results && score > max_score) {
             skip_counter++;
             if (skip_counter > max_skip_num) {
                 finished_ = true;
@@ -221,11 +203,7 @@ void DLX::search(size_t k) {
     assert(col_header->type_ != DLX_Node::Root);
     cover(col_header);
     
-    bool first_iteration = true;
-    for (DLX_Node* row_node = col_header->down_;
-         !finished_ &&
-         row_node != nullptr && (first_iteration || row_node != col_header->down_);
-         row_node = row_node->down_, first_iteration = false) {
+    for (DLX_Node* row_node = col_header->down_; !finished_ && row_node != col_header; row_node = row_node->down_) {
         // Try this row node on!
         intermediate_result_.push_back(row_node->row_header_);
         nMerged_subMeshes_ += row_node->row_count_;

@@ -2,54 +2,44 @@
 #include "PlushPatternGenerator.hh"
 #include "WeightFunctor.hh"
 #include "FilteredTriMesh.hh"
+#include "DLX.hh"
 
 #include <queue>
 #include <unordered_set>
 /*
- @brief Merge two adjacent patches with seam_segment as boundary
+ @brief Merge two adjacent (seam_segment_idx is the intersection boundary) patches.
  @param seam_segment_idx
-    The idx of seam segment which is used to merged these two patch. This is the edge# of subMesh_graph
-    If you don't want to use it, just pass -1.
- @param seam_segment 
-    Indicate which boundary edge should be merged (mark as non-boundary) in the merged patch.
+     The idx of seam segment which is used to merged these two patch. This is the edge# of subMesh_graph.
+ @param subMesh_boundary_graph
+     The relationship graph of boundary. Used to calculate seam score.
+ @param weightFunctor
+     Used to calculate seam score.
  */
-FilteredTriMesh PlushPatternGenerator::merge_patch(FilteredTriMesh &patch1,
-                                                   FilteredTriMesh &patch2,
-                                                   int seam_segment_idx,
-                                                   std::set<EdgeHandle> &seam_segment) {
-    std::set<FaceHandle> faces;
-    std::set<EdgeHandle> boundary_edges;
 
-    for (int i = 0; i < 2; i++) {
-        FilteredTriMesh &patch = (i == 0) ? patch1 : patch2;
-        for (EdgeHandle eh : patch.boundary_edges()) {
-            // Ignore edges to be merged
-            if (seam_segment.find(eh) == seam_segment.end()
-            &&  !patch1.merged_edge_idx[eh.idx()]
-            &&  !patch2.merged_edge_idx[eh.idx()]) {
-                boundary_edges.insert(eh);
-            }
-        }
-        for (FaceHandle fh : patch.faces()) {
-            faces.insert(fh);
-        }
-    }
+Patch_boundary PlushPatternGenerator::merge_patch(Patch_boundary &patch1,
+                                                  Patch_boundary &patch2,
+                                                  int seam_segment_idx,
+                                                  SubMesh_boundary_graph &subMesh_boundary_graph,
+                                                  WeightFunctor &weightFunctor) {
+    Patch_boundary merged_patch(patch1.boundary_seam_idx.size(), patch1.merged_subMesh_idx.size());
     
-    FilteredTriMesh merged_patch(m_mesh, faces, boundary_edges);
-    
-    // Update idx information by union the set
-    merged_patch.merged_subMesh_idx = patch1.merged_subMesh_idx | patch2.merged_subMesh_idx;
     merged_patch.merged_seam_idx = patch1.merged_seam_idx | patch2.merged_seam_idx;
-    merged_patch.merged_edge_idx = patch1.merged_edge_idx | patch2.merged_edge_idx;
+    merged_patch.merged_seam_idx[seam_segment_idx] = true;
+    merged_patch.n_merged_seams = patch1.n_merged_seams + patch2.n_merged_seams + 1;
     
-    if (seam_segment_idx >= 0) {
-        merged_patch.merged_seam_idx[seam_segment_idx] = true;
-    }
+    merged_patch.boundary_seam_idx = patch1.boundary_seam_idx | patch2.boundary_seam_idx;
+    merged_patch.boundary_seam_idx -= merged_patch.merged_seam_idx;
+    
+    merged_patch.merged_subMesh_idx = patch1.merged_subMesh_idx | patch2.merged_subMesh_idx;
 
-    merged_patch.n_merged_seams = merged_patch.merged_seam_idx.count();
-    
-    for (EdgeHandle eh : seam_segment) {
-        merged_patch.merged_edge_idx[eh.idx()] = true;
+    // Calculate seam score for all boundary seam segments
+    SubMesh_boundary_graph::edge_iterator e_it, e_ite;
+    for (boost::tie(e_it, e_ite) = boost::edges(subMesh_boundary_graph); e_it != e_ite; e_it++) {
+        int idx = boost::get(boost::edge_index, subMesh_boundary_graph, *e_it);
+        if (merged_patch.boundary_seam_idx[idx]) {
+            auto seam_segment = boost::get(boost::edge_owner, subMesh_boundary_graph, *e_it);
+            merged_patch.seam_score += weightFunctor.operator()(seam_segment);
+        }
     }
     return merged_patch;
 }
@@ -65,41 +55,25 @@ FilteredTriMesh PlushPatternGenerator::merge_patch(FilteredTriMesh &patch1,
     The merged patches are the level 1 patches.
  3. Repeat step 2 for next level until no patches in this level. i.e., no patches can be merged.
  @param threshold The distortion (area change of faces) threshold used for testing whether two patches can be merged
+ @param maximum_patches_per_level The maximum number of patches in each level. Because this process is computational intense, this number can be used for early termination.
  */
-void PlushPatternGenerator::construct_subsets(double threshold) {
+void PlushPatternGenerator::construct_subsets(double threshold, unsigned long maximum_patches_per_level) {
     isJobCanceled = false;
     
     std::set<EdgeHandle> &seams = m_mesh->property(seams_handle);
     
-    SubMesh_graph subMesh_graph = get_subMeshes_with_boundary(seams);
+    m_mesh->property(subMeshes_handle) = get_subMeshes_with_boundary(seams);
+    SubMesh_graph &subMesh_graph = m_mesh->property(subMeshes_handle);
     // Record the best layout given Patch_idx
-    std::map<FilteredTriMesh::Patch_idx, FilteredTriMesh> optimal_patches;
+    std::map<FilteredTriMesh::Patch_idx, Patch_boundary> optimal_patches;
 
     // This stores which patch has been calculated
     std::set<FilteredTriMesh::Seam_idx> is_patch_calculated;
     
     // The merged result of this iteration, will be used as base patch in the next iteration
-    std::map<FilteredTriMesh::Patch_idx, FilteredTriMesh> base_patches;
-    
-    // Construct first level of patches from sub-meshes
-    // Compute the distortion of each patch
-    int progress_counter = 0;
-    SubMesh_graph::vertex_iterator v_it, v_ite;
-    for (boost::tie(v_it, v_ite) = boost::vertices(subMesh_graph); v_it != v_ite; v_it++) {
-        FilteredTriMesh &subMesh = boost::get(boost::vertex_owner, subMesh_graph, *v_it);
-        optimal_patches.emplace(subMesh.merged_subMesh_idx, subMesh);
-        base_patches.emplace(subMesh.merged_subMesh_idx, subMesh);
+    std::map<FilteredTriMesh::Patch_idx, Patch_boundary> base_patches;
 
-        std::map<HalfedgeHandle, OpenMesh::Vec3d> boundaryPosition;
-        calcLPFB(subMesh, boundaryPosition);
-        calcInteriorPoints(subMesh, boundaryPosition);
-        calcDistortion(subMesh);
-        subMesh.seam_score = 0;
-        is_patch_calculated.insert(subMesh.merged_seam_idx);
-        
-        emit setJobState((double)progress_counter++/boost::num_vertices(subMesh_graph) * 100);
-    }
-    
+    // Used to calculate seam score
     VertexHandle dummy;
     WeightFunctor weightFunctor(m_mesh, dummy, NULL,
                                 m_distanceCoefficient,
@@ -109,128 +83,222 @@ void PlushPatternGenerator::construct_subsets(double threshold) {
                                 m_pathCoefficient
                                 );
 
-    // Construct larger patches from previous level
-//    for (int level = 1; hierarchical_patches[level-1].size() > 0; level++) {
-        //    for (int level = 1; level < 30; level++) {
+    // Create a boundary graph of first level so that we don't need to create Patch_boundary for basic patch everytime
+    int progress_counter = 0;
+    SubMesh_boundary_graph subMesh_boundary_graph;
+    SubMesh_graph::vertex_iterator v_it, v_ite;
+    for (boost::tie(v_it, v_ite) = boost::vertices(subMesh_graph); v_it != v_ite; v_it++) {
+        FilteredTriMesh &subMesh = boost::get(boost::vertex_owner, subMesh_graph, *v_it);
+
+        Patch_boundary subMesh_boundary(boost::num_edges(subMesh_graph), boost::num_vertices(subMesh_graph));
+        
+        subMesh_boundary.merged_subMesh_idx[*v_it] = true;
+
+        SubMesh_graph::out_edge_iterator e_it, e_ite;
+        for (boost::tie(e_it, e_ite) = boost::out_edges(*v_it, subMesh_graph); e_it != e_ite; e_it++) {
+            int seam_segment_idx = boost::get(boost::edge_index, subMesh_graph, *e_it);
+            subMesh_boundary.boundary_seam_idx[seam_segment_idx] = true;
+            
+            auto seam_segment = boost::get(boost::edge_owner, subMesh_graph, *e_it);
+            subMesh_boundary.seam_score += weightFunctor(seam_segment);
+        }
+
+        for (VertexHandle v : subMesh.vertices()) {
+            double curvature = m_mesh->property(gaussianCurvatureHandle, v);
+            if (!subMesh.is_boundary(v) && abs(curvature) > threshold) {
+                subMesh_boundary.developable = false;
+                break;
+            }
+        }
+
+        boost::add_vertex(subMesh_boundary, subMesh_boundary_graph);
+        
+        optimal_patches.emplace(subMesh_boundary.merged_subMesh_idx, subMesh_boundary);
+        if (subMesh_boundary.developable) {
+            base_patches.emplace(subMesh_boundary.merged_subMesh_idx, subMesh_boundary);
+        }
+    }
+    SubMesh_graph::edge_iterator e_it, e_ite;
+    for (boost::tie(e_it, e_ite) = boost::edges(subMesh_graph); e_it != e_ite; e_it++) {
+        SubMesh_graph::vertex_descriptor source = boost::source(*e_it, subMesh_graph);
+        SubMesh_graph::vertex_descriptor target = boost::target(*e_it, subMesh_graph);
+        int idx = boost::get(boost::edge_index, subMesh_graph, *e_it);
+        auto &seam_segment = boost::get(boost::edge_owner, subMesh_graph, *e_it);
+        
+        SubMesh_boundary_graph::edge_descriptor e = boost::add_edge(source, target, subMesh_boundary_graph).first;
+        boost::put(boost::edge_index, subMesh_boundary_graph, e, idx);
+        boost::put(boost::edge_owner, subMesh_boundary_graph, e, seam_segment);
+    }
+    
+    // Construct larger patches by merging smaller patches of previous level
     int level;
-    for (level = 0; !base_patches.empty(); level++) {
-        std::map<FilteredTriMesh::Patch_idx, FilteredTriMesh> next_base_patches;
+    // Unfortunately this process is computationaly intense. So we use a maximum number for early termination
+    for (level = 1; base_patches.size() < maximum_patches_per_level && !base_patches.empty(); level++) {
+        printf("Level %d: %lu patches\n", level, base_patches.size());
 
-        // Extend container
-//        hierarchical_patches.resize(hierarchical_patches.size()+1);
-
+        std::map<FilteredTriMesh::Patch_idx, Patch_boundary> next_base_patches;
         // For every patch, test if it can be merged with its neighbors
         progress_counter = 0;
         for (auto &pair : base_patches) {
-            FilteredTriMesh &patch = pair.second;
+            Patch_boundary &patch_boundary = pair.second;
             if (isJobCanceled) {
                 emit log(LOGINFO, "Subset calculation canceled.");
                 return;
             }
             
             // For each sub-mesh in this patch, find its neigboring sub-mesh for merging
-            for (SubMesh_graph::vertex_descriptor v1 = patch.merged_subMesh_idx.find_first();
-                 v1 != boost::dynamic_bitset<>::npos;
-                 v1 = patch.merged_subMesh_idx.find_next(v1)) {
-                // Use subMesh_grpah to find adjacent sub-meshes
-                SubMesh_graph::out_edge_iterator e_it, e_ite;
-                for (boost::tie(e_it, e_ite) = boost::out_edges(v1, subMesh_graph); e_it != e_ite; e_it++) {
+            for (SubMesh_boundary_graph::vertex_descriptor v1 = patch_boundary.merged_subMesh_idx.find_first();
+                 v1 != patch_boundary.merged_subMesh_idx.npos;
+                 v1 = patch_boundary.merged_subMesh_idx.find_next(v1)) {
+                SubMesh_boundary_graph::out_edge_iterator e_it, e_ite;
+                for (boost::tie(e_it, e_ite) = boost::out_edges(v1, subMesh_boundary_graph); e_it != e_ite; e_it++) {
                     int seam_segment_idx = boost::get(boost::edge_index, subMesh_graph, *e_it);
                     
-                    // Only deal with edges that are not merged yet
-                    if (!patch.merged_seam_idx[seam_segment_idx]) {
-                        SubMesh_graph::vertex_descriptor v2 = boost::target(*e_it, subMesh_graph);
-                        FilteredTriMesh &neigboring_subMesh = boost::get(boost::vertex_owner, subMesh_graph, v2);
+                    // Only deal with segment that are not merged yet
+                    if (patch_boundary.merged_seam_idx[seam_segment_idx]) {
+                        continue;
+                    }
                     
-                        // Create a merged sub-mesh
-                        boost::dynamic_bitset<> merged_seam_idx = patch.merged_seam_idx;
-                        merged_seam_idx[seam_segment_idx] = true;
-                        
-                        if (is_patch_calculated.find(merged_seam_idx) == is_patch_calculated.end()) {
-                            is_patch_calculated.insert(merged_seam_idx);
+                    // Ignore non-developable sub-meshes
+                    SubMesh_boundary_graph::vertex_descriptor v2 = boost::target(*e_it, subMesh_boundary_graph);
+                    Patch_boundary &neighboring_subMesh_boundary = boost::get(boost::vertex_owner, subMesh_boundary_graph, v2);
+                    if (!neighboring_subMesh_boundary.developable) {
+                        continue;
+                    }
+                
+                    // Test if it's already calculated
+                    boost::dynamic_bitset<> merged_seam_idx = patch_boundary.merged_seam_idx;
+                    merged_seam_idx[seam_segment_idx] = true;
+                    if (is_patch_calculated.find(merged_seam_idx) != is_patch_calculated.end()) {
+                        continue;
+                    }
+                    is_patch_calculated.insert(merged_seam_idx);
 
-                            std::vector<HalfedgeHandle> seam_segment = boost::get(boost::edge_owner, subMesh_graph, *e_it);
-                            std::set<EdgeHandle> seam_segment_set;
-                            for (HalfedgeHandle heh : seam_segment) {
-                                seam_segment_set.insert(m_mesh->edge_handle(heh));
-                            }
-                            FilteredTriMesh merged_subMesh = merge_patch(patch, neigboring_subMesh, seam_segment_idx, seam_segment_set);
-                            
-                            // check the guassian curvature of the segment to be merged
-                            // if all curvature < threshold, then this segment can be merged
-                            // note that boundary vertices do not need to have 0 curvature
-                            bool non_developable = false;
-                            for (HalfedgeHandle heh : seam_segment) {
-                                VertexHandle v1 = merged_subMesh.from_vertex_handle(heh);
-                                VertexHandle v2 = merged_subMesh.from_vertex_handle(heh);
-                                
-                                double gaussian_curvature1 = m_mesh->property(gaussianCurvatureHandle, v1);
-                                double gaussian_curvature2 = m_mesh->property(gaussianCurvatureHandle, v2);
-                                if ((!merged_subMesh.is_boundary(v1) && gaussian_curvature1 > 0.05) ||
-                                    (!merged_subMesh.is_boundary(v2) && gaussian_curvature2 > 0.05)) {
-                                    non_developable = true;
+                    // Create a merged sub-mesh
+                    std::vector<HalfedgeHandle> seam_segment = boost::get(boost::edge_owner, subMesh_boundary_graph, *e_it);
+                    Patch_boundary merged_boundary = merge_patch(patch_boundary,
+                                                                 neighboring_subMesh_boundary,
+                                                                 seam_segment_idx,
+                                                                 subMesh_boundary_graph,
+                                                                 weightFunctor);
+
+                    // check the guassian curvature of the segment to be merged
+                    // if all curvature < threshold, then this segment can be merged
+                    // note that boundary vertices do not need to have 0 curvature
+                    for (size_t i = 0; i <= seam_segment.size(); i++) {
+                        VertexHandle v;
+                        if (i == 0) {
+                            HalfedgeHandle heh = seam_segment.front();
+                            v = m_mesh->from_vertex_handle(heh);
+                        } else if (i == seam_segment.size()){
+                            HalfedgeHandle heh = seam_segment.back();
+                            v = m_mesh->to_vertex_handle(heh);
+                        } else {
+                            HalfedgeHandle heh = seam_segment.at(i);
+                            v = m_mesh->from_vertex_handle(heh);
+                        }
+                        
+                        // For end points of this segment, we have to determine whether they are boundary points or not
+                        bool is_boundary = false;
+                        if (i == 0 || i == seam_segment.size()) {
+                            // We can check the end points of neighboring seam segments
+                            // If the end points of this segment is the same of the one of other segments, it's boundary
+                            SubMesh_boundary_graph::edge_iterator e_it2, e_ite2;
+                            for (boost::tie(e_it2, e_ite2) = boost::edges(subMesh_boundary_graph); e_it2 != e_ite2; e_it2++) {
+                                int idx = boost::get(boost::edge_index, subMesh_boundary_graph, *e_it2);
+                                if (!merged_boundary.boundary_seam_idx[idx]) {
+                                    continue;
+                                }
+
+                                auto neighboring_seam_segment = boost::get(boost::edge_owner, subMesh_boundary_graph, *e_it2);
+                                if (m_mesh->from_vertex_handle(neighboring_seam_segment.front()) == v ||
+                                    m_mesh->to_vertex_handle(neighboring_seam_segment.back()) == v) {
+                                    is_boundary = true;
                                     break;
                                 }
                             }
-                            
-                            if (!non_developable) {
-                                // Distortion not calculated yet. Calculate now.
-                                std::map<HalfedgeHandle, OpenMesh::Vec3d> boundaryPosition;
-                                calcLPFB(merged_subMesh, boundaryPosition);
-                                calcInteriorPoints(merged_subMesh, boundaryPosition);
-                                calcDistortion(merged_subMesh);
-                                
-                                if (merged_subMesh.max_distortion < threshold) {
-                                    merged_subMesh.seam_score = weightFunctor(seam_segment);
-                                    if (patch.seam_score >= 0) {
-                                        merged_subMesh.seam_score += patch.seam_score;
-                                    }
-                                    
-                                    auto found_prev_patch = optimal_patches.find(merged_subMesh.merged_subMesh_idx);
-                                    if (found_prev_patch != optimal_patches.end()) {
-                                        double prev_seam_score = found_prev_patch->second.seam_score;
-                                        if (prev_seam_score == -1 || merged_subMesh.seam_score < prev_seam_score) {
-                                            found_prev_patch->second = merged_subMesh;
-
-                                            // Replace record in next_base_patches to prevent from calculating more candidate patches
-                                            auto found_next_base_patch = next_base_patches.find(merged_subMesh.merged_subMesh_idx);
-                                            if (found_next_base_patch != next_base_patches.end()) {
-                                                found_next_base_patch->second = merged_subMesh;
-                                            } else {
-                                                next_base_patches.emplace(merged_subMesh.merged_subMesh_idx, merged_subMesh);
-                                            }
-                                        }
-                                    } else {
-                                        optimal_patches.emplace(merged_subMesh.merged_subMesh_idx, merged_subMesh);
-                                        next_base_patches.emplace(merged_subMesh.merged_subMesh_idx, merged_subMesh);
-                                    }
-                                }
-                            }
+                        }
+                        
+                        double gaussian_curvature = m_mesh->property(gaussianCurvatureHandle, v);
+                        if (!is_boundary && abs(gaussian_curvature) > threshold) {
+                            merged_boundary.developable = false;
+                            break;
                         }
                     }
+                    
+                    if (!merged_boundary.developable) {
+                        continue;
+                    }
+                    
+                    auto found_prev_patch = optimal_patches.find(merged_boundary.merged_subMesh_idx);
+                    if (found_prev_patch != optimal_patches.end()) {
+                        double prev_seam_score = found_prev_patch->second.seam_score;
+                        if (prev_seam_score == -1 || merged_boundary.seam_score < prev_seam_score) {
+                            found_prev_patch->second = merged_boundary;
+                            
+                            // Replace record in next_base_patches to prevent from calculating more candidate patches
+                            auto found_next_base_patch = next_base_patches.find(merged_boundary.merged_subMesh_idx);
+                            if (found_next_base_patch != next_base_patches.end()) {
+                                found_next_base_patch->second = merged_boundary;
+                            } else {
+                                next_base_patches.emplace(merged_boundary.merged_subMesh_idx, merged_boundary);
+                            }
+                        }
+                    } else {
+                        optimal_patches.emplace(merged_boundary.merged_subMesh_idx, merged_boundary);
+                        next_base_patches.emplace(merged_boundary.merged_subMesh_idx, merged_boundary);
+                    }
+
                 }
             }
             progress_counter++;
             emit setJobState((double)progress_counter/base_patches.size() * 100);
         }
-        printf("Level %d: %lu patches\n", level, base_patches.size());
         
         base_patches = std::move(next_base_patches);
         next_base_patches.clear();
     }
-    // Add result to property
-    for (auto &pair : optimal_patches) {
-        FilteredTriMesh &patch = pair.second;
-        m_mesh->property(merged_patches_handle).push_back(patch);
+    // Add result to property, sorting them from large to small
+    m_mesh->property(subsets_handle).clear();
+    for (int l = level; l >= 0; l--) {
+        for (auto &pair : optimal_patches) {
+            Patch_boundary patch = pair.second;
+            if ((int)patch.n_merged_seams == l) {
+                m_mesh->property(subsets_handle).push_back(patch);
+            }
+        }
     }
+}
+
+void PlushPatternGenerator::calc_union() {
+    int num_subMeshes = m_mesh->property(subsets_handle).front().merged_subMesh_idx.size();
+    DLX dlx(m_mesh->property(subsets_handle), num_subMeshes);
+    connect(&dlx, SIGNAL(setJobState(int)), this, SIGNAL(setJobState(int)));
+    
+    dlx.search(0);
+    
+    m_mesh->property(merged_patches_idx_handle) = std::move(dlx.get_results());
+}
+
+/**
+ This function returns the patches(merged sub-meshes) and a lists containing ids of how to union them
+ @param patches The merged sub-meshes
+ @param union_lists Lists (may be more than one) of ids of patches. The union of ids in a list forms a complete mesh.
+ @return <#retval#>
+ @retval <#meaning#>
+ */
+//void PlushPatternGenerator::get_union(const std::vector<FilteredTriMesh> *&patches, std::vector< std::vector<int> > &union_lists) {
+void PlushPatternGenerator::get_union(std::vector<Patch_boundary> *&patches, std::vector< std::vector<int> > &union_lists) {
+    patches = &m_mesh->property(subsets_handle);
+    union_lists = m_mesh->property(merged_patches_idx_handle);
 }
 
 bool PlushPatternGenerator::save_patches() {
     ofstream out((m_meshName + ".subset").toLocal8Bit().data(), ios::out | ios::binary);
-    long long num_patches = m_mesh->property(merged_patches_handle).size();
+    long long num_patches = m_mesh->property(subsets_handle).size();
     out.write(reinterpret_cast<const char *>(&num_patches), sizeof(num_patches));
     
-    for (FilteredTriMesh &patch : m_mesh->property(merged_patches_handle)) {
+    for (Patch_boundary &patch : m_mesh->property(subsets_handle)) {
         boost::archive::text_oarchive oa(out);
         oa << patch;
     }
@@ -246,8 +314,8 @@ bool PlushPatternGenerator::load_patches() {
     
     for (int i = 0; i < num_patches; i++) {
         boost::archive::text_iarchive ia(in);
-        FilteredTriMesh patch(m_mesh, ia);
-        m_mesh->property(merged_patches_handle).push_back(patch);
+        Patch_boundary patch(ia);
+        m_mesh->property(subsets_handle).push_back(patch);
     }
     in.close();
     return true;

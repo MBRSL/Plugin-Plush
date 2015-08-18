@@ -33,7 +33,6 @@ bool PlushPatternGenerator::is_different_texture(TriMesh *mesh, HalfedgeHandle h
 }
 
 bool PlushPatternGenerator::is_different_texture(TriMesh *mesh, EdgeHandle eh) {
-    return false;
     
     if (!mesh->has_face_colors()) {
         return false;
@@ -539,6 +538,35 @@ PlushPatternGenerator::SubMesh_graph PlushPatternGenerator::get_subMeshes_with_b
     }
     
     return subMesh_graph;
+}
+
+// I write this function converting Patch_boundary to FilteredTriMesh
+bool PlushPatternGenerator::convert_patch_boundary_to_FilteredTriMesh(FilteredTriMesh &subMesh, Patch_boundary &patch_boundary) {
+    std::set<FaceHandle> faces;
+    SubMesh_graph &subMesh_graph = m_mesh->property(subMeshes_handle);
+    for (SubMesh_graph::vertex_descriptor v1 = patch_boundary.merged_subMesh_idx.find_first();
+         v1 != patch_boundary.merged_subMesh_idx.npos;
+         v1 = patch_boundary.merged_subMesh_idx.find_next(v1)) {
+        FilteredTriMesh &mesh = boost::get(boost::vertex_owner, subMesh_graph, v1);
+        for (FaceHandle fh : mesh.faces()) {
+            faces.insert(fh);
+        }
+    }
+    
+    std::set<EdgeHandle> boundary_edges;
+    SubMesh_graph::edge_iterator e_it, e_ite;
+    for (boost::tie(e_it, e_ite) = boost::edges(subMesh_graph); e_it != e_ite; e_it++) {
+        auto idx = boost::get(boost::edge_index, subMesh_graph, *e_it);
+        if (patch_boundary.boundary_seam_idx[idx]) {
+            auto seam_segment = boost::get(boost::edge_owner, subMesh_graph, *e_it);
+            for (HalfedgeHandle heh : seam_segment) {
+                boundary_edges.insert(m_mesh->edge_handle(heh));
+            }
+        }
+    }
+    subMesh = FilteredTriMesh(m_mesh, faces, boundary_edges);
+    
+    return true;
 }
 
 /*

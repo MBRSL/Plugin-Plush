@@ -7,6 +7,7 @@
 #include "SuperDeform/Skeleton.hh"
 
 #include "FilteredTriMesh.hh"
+#include "WeightFunctor.hh"
 #include "Common.hh"
 
 #include <Eigen/sparse>
@@ -40,6 +41,14 @@ public:
     boost::property<boost::edge_owner_t, std::vector<HalfedgeHandle>>>
     > SubMesh_graph;
 
+    // Different from SubMesh_graph, it records Patch_boundary.
+    // Patch_boundary is a lighter data structure that only records necessary info of boundary.
+    typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
+    boost::property<boost::vertex_owner_t, Patch_boundary>,
+    boost::property<boost::edge_index_t, std::size_t,
+    boost::property<boost::edge_owner_t, std::vector<HalfedgeHandle>>>
+    > SubMesh_boundary_graph;
+    
     /// Used for log
     ///@{
     static const int LOGERR = 0;
@@ -58,8 +67,11 @@ public:
     static OpenMesh::FPropHandleT<int> face_to_patch_idx_handle;
 
     static OpenMesh::MPropHandleT< std::set<EdgeHandle> > seams_handle;
-    
-    static OpenMesh::MPropHandleT<std::vector<FilteredTriMesh>> merged_patches_handle;
+    /// The basic sub-meshes divided by seams
+    static OpenMesh::MPropHandleT<SubMesh_graph> subMeshes_handle;
+    /// The subsets (merged patches)
+    static OpenMesh::MPropHandleT<std::vector<Patch_boundary>> subsets_handle;
+    static OpenMesh::MPropHandleT< std::vector <std::vector<int> > > merged_patches_idx_handle;
     ///@}
 
 
@@ -180,14 +192,19 @@ public:
     
     /// Merging
     ///@{
-    void construct_subsets(double threshold);
-    FilteredTriMesh merge_patch(FilteredTriMesh &patch1,
-                                FilteredTriMesh &patch2,
-                                int seam_segment_idx,
-                                std::set<EdgeHandle> &seam_segment);
+    void construct_subsets(double threshold, unsigned long maximum_patches_per_level = 50000);
+    
+    void calc_union();
+    void get_union(std::vector<Patch_boundary> *&patches, std::vector< std::vector<int> > &union_lists);
+    
+    Patch_boundary merge_patch(Patch_boundary &patch1,
+                               Patch_boundary &patch2,
+                               int seam_segment_idx,
+                               SubMesh_boundary_graph &subMesh_boundary_graph,
+                               WeightFunctor &weightFunctor);
     void optimize_patches(double threshold, bool step);
     
-    std::vector<FilteredTriMesh> get_merged_patches();
+    std::vector<Patch_boundary>& get_patches();
     
     bool save_patches();
     bool load_patches();
@@ -206,6 +223,7 @@ public:
     bool calcFlattenedGraph();
     std::vector<FilteredTriMesh> getFlattenedSubMeshes();
     bool get_triMesh_from_subMesh(TriMesh *result_triMesh, FilteredTriMesh &subMesh, bool use_flattened_position);
+    bool convert_patch_boundary_to_FilteredTriMesh(FilteredTriMesh &subMesh, Patch_boundary &patch_boundary);
     ///@}
     
     VertexHandle get_original_handle(TriMesh *mesh, const VertexHandle vh) const;

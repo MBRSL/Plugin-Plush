@@ -12,6 +12,41 @@
 #include <boost/serialization/vector.hpp>
 #include <boost/serialization/map.hpp>
 
+/*
+ * This is a simplified representation of patch. It only contains necessary information whether a seam is boundary/merged or not
+ */
+class Patch_boundary {
+public:
+    bool developable = true;
+    double seam_score = 0;
+    size_t n_merged_seams = 0;
+    boost::dynamic_bitset<> boundary_seam_idx;
+    boost::dynamic_bitset<> merged_seam_idx;
+    boost::dynamic_bitset<> merged_subMesh_idx;
+    
+    Patch_boundary() {}
+    Patch_boundary(size_t n_seam_segments, size_t n_subMeshes) :
+    boundary_seam_idx(n_seam_segments),
+    merged_seam_idx(n_seam_segments),
+    merged_subMesh_idx(n_subMeshes) {}
+    Patch_boundary(boost::archive::text_iarchive &ia)
+    {
+       ia >> *this;
+    }
+    
+    friend class boost::serialization::access;
+    template <class Archive>
+    void serialize(Archive & ar, const unsigned int version)
+    {
+        ar & developable;
+        ar & seam_score;
+        ar & n_merged_seams;
+        ar & boundary_seam_idx;
+        ar & merged_seam_idx;
+        ar & merged_subMesh_idx;
+    }
+};
+
 // True means it's contained in this sub-mesh
 struct Predicate {
     boost::dynamic_bitset<> m_vertex_filter;
@@ -133,6 +168,8 @@ public:
     double seam_score = -1;
     
     int n_merged_seams = 0;
+    // A flag used for determine whether it's developable
+    bool developable = true;
 
     /// You shouldn't use this constructor unless you just need to allocate a variable and assigned it later.
     FilteredTriMesh() {}

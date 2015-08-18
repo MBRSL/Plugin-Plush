@@ -49,6 +49,7 @@ signals:
     // LoadSaveInterface
     void load( QString _filename, DataType _dataType, int &_id);
     void addEmptyObject( DataType _type, int& _id );
+    void copyObject(int _oldId, int &_newId);
     void deleteObject( int _id );
     // PickingInterface
     void addPickMode( const std::string& _mode );
@@ -126,6 +127,8 @@ private slots:
     void subset_show_button_clicked();
     void subset_save_button_clicked();
     void subset_load_button_clicked();
+    void subset_calc_union_button_clicked();
+    void subset_show_union_button_clicked();
     
     void calcGeodesicButtonClicked();
     
@@ -152,6 +155,7 @@ private slots:
     void calcFlattenedGraphThread();
     void calcMergeSegmentThread();
     void calcSubsetThread();
+    void calc_union_thread();
     
     void slotKeyEvent( QKeyEvent* _event );
     

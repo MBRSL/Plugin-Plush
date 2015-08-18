@@ -1,5 +1,7 @@
+#ifndef WEIGHT_FUNCTOR_HH
+#define WEIGHT_FUNCTOR_HH
 #include "OpenMesh_Boost_Wrapper.hh"
-#include "PlushPatternGenerator.hh"
+#include "Common.hh"
 
 #include <boost/graph/dijkstra_shortest_paths.hpp>
 
@@ -61,3 +63,4 @@ public:
         currentV = u;
     }
 };
+#endif

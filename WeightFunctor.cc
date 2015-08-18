@@ -1,4 +1,5 @@
 #include "WeightFunctor.hh"
+#include "PlushPatternGenerator.hh"
 
 WeightFunctor::WeightFunctor(TriMesh *mesh,
                              VertexHandle &currentV,
